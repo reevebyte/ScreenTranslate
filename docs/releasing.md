@@ -119,7 +119,7 @@ git push origin v1.2.3
 自身版本互相矛盾。
 
 流水线依次执行锁定环境检查、回归测试、PyInstaller 构建、内置更新源一致性检查、打包后离线自检、
-Inno Setup 6.4.3 安装器构建、便携 ZIP 打包、更新清单生成和 GitHub Release 创建。
+Inno Setup 6.7.1 安装器构建、便携 ZIP 打包、更新清单生成和 GitHub Release 创建。
 构建任务只有仓库只读权限，且 checkout 不保存凭据；只有下载已验证产物并创建 Release 的
 独立任务具有 `contents: write` 权限。Dependabot 每周检查 Python 与 GitHub Actions 更新，
 CI 同时审计基础版及可选 RapidOCR 的锁定依赖。
