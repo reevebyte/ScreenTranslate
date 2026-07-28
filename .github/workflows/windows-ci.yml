@@ -1,0 +1,57 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: "3.11.9"
+          cache: pip
+          cache-dependency-path: |
+            requirements-build.lock
+            requirements-audit.lock
+      - name: Install locked toolchain
+        shell: pwsh
+        run: |
+          python -m pip install pip==26.1.2
+          python -m pip install -r requirements-audit.lock
+          python -m pip check
+      - name: Audit locked dependencies
+        run: |
+          python -m pip_audit -r requirements.lock --disable-pip --no-deps --cache-dir .pip-audit-cache
+          python -m pip_audit -r requirements-rapidocr.lock --disable-pip --no-deps --cache-dir .pip-audit-cache
+      - name: Validate ABI lock
+        run: python release/check_environment.py --strict-lock
+      - name: Run regression tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+      - name: Build onedir executable
+        run: python build.py
+      - name: Run packaged offline self-test
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: windows
+        run: dist/ScreenTranslate/ScreenTranslate.exe --selftest --quiet --offline
+      - name: Upload unsigned CI build
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ScreenTranslate-windows-x64-unsigned
+          path: dist/ScreenTranslate/
+          if-no-files-found: error
+          retention-days: 14

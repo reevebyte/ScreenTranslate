@@ -1,0 +1,18 @@
+PySide6>=6.5.1.1,<6.6
+mss>=9.0,<11
+Pillow>=12.3.0,<13
+requests>=2.33.0,<3
+idna>=3.15,<4
+urllib3>=2.7.0,<3
+typing_extensions>=4.12.2,<5 ; sys_platform == "win32"
+winrt-runtime>=3.2,<4 ; sys_platform == "win32"
+winrt-Windows.Foundation>=3.2,<4 ; sys_platform == "win32"
+winrt-Windows.Foundation.Collections>=3.2,<4 ; sys_platform == "win32"
+winrt-Windows.Globalization>=3.2,<4 ; sys_platform == "win32"
+winrt-Windows.Graphics.Imaging>=3.2,<4 ; sys_platform == "win32"
+winrt-Windows.Media.Ocr>=3.2,<4 ; sys_platform == "win32"
+winrt-Windows.Security.Cryptography>=3.2,<4 ; sys_platform == "win32"
+winrt-Windows.Storage.Streams>=3.2,<4 ; sys_platform == "win32"
+
+# NumPy 只由可选 RapidOCR 使用；请通过 requirements-rapidocr.txt 安装，
+# 避免基础版启动时加载 OpenBLAS 并创建一组常驻工作线程。

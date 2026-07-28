@@ -1,0 +1,17 @@
+# Optional RapidOCR runtime, locked for CPython 3.11 x64 on Windows.
+-r requirements.lock
+
+colorama==0.4.6 ; sys_platform == "win32"
+flatbuffers==25.12.19
+numpy==1.26.4
+onnxruntime==1.28.0
+# 4.12+ requires NumPy >=2 and breaks the PySide6 6.5 ABI constraint.
+opencv-python==4.11.0.86
+packaging==25.0
+protobuf==6.33.5
+pyclipper==1.4.0
+PyYAML==6.0.2
+rapidocr-onnxruntime==1.4.4
+Shapely==2.1.2
+six==1.17.0
+tqdm==4.67.1

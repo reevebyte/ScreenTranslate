@@ -1,0 +1,6 @@
+-r requirements.txt
+
+numpy>=1.24,<2
+rapidocr-onnxruntime>=1.4,<1.5
+# 4.12+ requires NumPy >=2 on Python 3.9+, which conflicts with PySide6 6.5.
+opencv-python>=4.5.1.48,<4.12

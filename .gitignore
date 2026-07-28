@@ -1,0 +1,43 @@
+__pycache__/
+*.py[cod]
+.venv/
+.venv-build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pip-audit-cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+build/
+dist/
+*.spec
+
+# Editors and IDEs
+.idea/
+.vscode/
+.vs/
+*.code-workspace
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.swp
+*.swo
+*~
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Signing certificates and locally generated diagnostics must never enter Git.
+*.pfx
+*.p12
+logs/
+errors.log*
