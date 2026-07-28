@@ -254,11 +254,13 @@ ScreenTranslate.exe --selftest
 本项目目前**不使用 Authenticode 代码签名证书**。因此 Windows SmartScreen 可能显示“未知发布者”
 或首次下载警告；请只从本项目官方 GitHub Releases 下载，并在运行前核对 Release 来源。
 
-应用内更新只读取当前仓库的 HTTPS `update-manifest.json`、校验版本与安装包元数据并提示；窗口会
-显示安装包名称、大小和 SHA-256。用户点击后，程序会用系统浏览器打开**同一 owner/repo** 的
-GitHub Release 页面，由用户自行下载；程序不会在后台下载、静默安装或直接运行新的 EXE。
-GitHub 在中国大陆网络中可能访问较慢或暂时不可达，遇到这种情况可稍后重试，或直接在浏览器中
-打开仓库的 Releases 页面。完整发布约定见 `docs/releasing.md`。
+应用内更新只读取当前仓库的 HTTPS `update-manifest.json`，并把安装包来源严格限定为
+**同一 owner/repo、版本标签和文件名**。用户点击“下载并安装”后，程序会流式下载到本地更新
+缓存，自动核对清单中的文件大小和 SHA-256；校验通过后仍会再次询问，只有用户确认才退出旧版
+并启动安装器。程序不会静默安装，也不绕过 Windows 的安全提示；由于当前不使用代码签名证书，
+Windows 可能显示“未知发布者”。更新窗口仍可打开 GitHub Release 页面作为手动下载的备用入口。
+GitHub 在中国大陆网络中可能访问较慢或暂时不可达，遇到这种情况可稍后重试。完整发布约定见
+`docs/releasing.md`。
 
 ## 配置文件
 

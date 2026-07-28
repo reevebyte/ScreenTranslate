@@ -1,19 +1,20 @@
-"""User-facing, browser-only GitHub Release update window."""
+"""User-facing GitHub Release check, verified download, and install window."""
 from __future__ import annotations
 
 import logging
 from datetime import datetime
+from pathlib import Path
 from threading import Event, Lock, Thread
 
-from PySide6.QtCore import QObject, Qt, QUrl, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QApplication,
     QFrame,
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
+    QMessageBox,
+    QProgressBar,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -22,7 +23,13 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..error_logging import report_exception
-from ..updater import UpdateCancelled, UpdateError, UpdateInfo, check_for_update
+from ..updater import (
+    UpdateCancelled,
+    UpdateError,
+    UpdateInfo,
+    check_for_update,
+    download_update,
+)
 from . import glyphs
 from .icon import make_icon
 from .style import BAD, OK_GREEN, TEXT, TEXT_DIM, WARN, build_qss
@@ -59,6 +66,8 @@ def _format_published_at(value: str) -> str:
 
 class _UpdateThread(QObject):
     checked = Signal(object)
+    downloaded = Signal(object)
+    progress = Signal(int, int)
     failed = Signal(str)
     finished = Signal(object)
 
@@ -69,12 +78,14 @@ class _UpdateThread(QObject):
         url: str = "",
         repository_url: str = "",
         channel: str = "stable",
+        info: UpdateInfo | None = None,
     ):
         super().__init__()
         self.mode = mode
         self.url = url
         self.repository_url = repository_url
         self.channel = channel
+        self.info = info
         self.cancel_event = Event()
         self._response_lock = Lock()
         self._response = None
@@ -88,7 +99,7 @@ class _UpdateThread(QObject):
                 raise RuntimeError("update worker has already been started")
             thread = Thread(
                 target=self._run_wrapper,
-                name="ScreenTranslateUpdate-check",
+                name=f"ScreenTranslateUpdate-{self.mode}",
                 daemon=True,
             )
             self._native_thread = thread
@@ -148,23 +159,37 @@ class _UpdateThread(QObject):
 
     def run(self) -> None:
         try:
-            if self.mode != "check":
-                raise UpdateError("更新线程只允许检查版本")
-            info = check_for_update(
-                self.url,
-                repository_url=self.repository_url,
-                channel=self.channel,
-                cancel_event=self.cancel_event,
-                response_observer=self._observe_response,
-            )
-            self._emit_if_active(self.checked, info)
+            if self.mode == "check":
+                info = check_for_update(
+                    self.url,
+                    repository_url=self.repository_url,
+                    channel=self.channel,
+                    cancel_event=self.cancel_event,
+                    response_observer=self._observe_response,
+                )
+                self._emit_if_active(self.checked, info)
+            elif self.mode == "download" and self.info is not None:
+                path = download_update(
+                    self.info,
+                    repository_url=self.repository_url,
+                    cancel_event=self.cancel_event,
+                    progress_callback=lambda done, total: self._emit_if_active(
+                        self.progress, done, total
+                    ),
+                    response_observer=self._observe_response,
+                )
+                self._emit_if_active(self.downloaded, path)
+            else:
+                raise UpdateError("更新线程模式无效")
         except UpdateCancelled:
             return
         except Exception as exc:
             if self._is_cancelled():
                 return
-            report_exception(logging.getLogger("screentrans.errors"), "update.check", exc)
-            message = str(exc) if isinstance(exc, UpdateError) else f"更新检查失败（{type(exc).__name__}）"
+            operation = "update.download" if self.mode == "download" else "update.check"
+            report_exception(logging.getLogger("screentrans.errors"), operation, exc)
+            action = "下载更新" if self.mode == "download" else "更新检查"
+            message = str(exc) if isinstance(exc, UpdateError) else f"{action}失败（{type(exc).__name__}）"
             self._emit_if_active(self.failed, message)
         finally:
             self._observe_response(None)
@@ -173,6 +198,7 @@ class _UpdateThread(QObject):
 class UpdateDialog(QWidget):
     updateAvailable = Signal(object)
     releaseOpened = Signal()
+    installRequested = Signal(object, object)
 
     def __init__(self, cfg):
         super().__init__()
@@ -180,6 +206,8 @@ class UpdateDialog(QWidget):
         self._thread: _UpdateThread | None = None
         self._cancelled_thread: _UpdateThread | None = None
         self._available: UpdateInfo | None = None
+        self._download_path: Path | None = None
+        self._pending_install_prompt = False
         self._silent_check = False
         self._state = "idle"
 
@@ -243,6 +271,13 @@ class UpdateDialog(QWidget):
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         state_text.addWidget(self.status)
+        self.progress = QProgressBar()
+        self.progress.setObjectName("UpdateProgress")
+        self.progress.setRange(0, 1000)
+        self.progress.setValue(0)
+        self.progress.setTextVisible(False)
+        self.progress.setVisible(False)
+        state_text.addWidget(self.progress)
         state_layout.addLayout(state_text, 1)
         layout.addWidget(self.state_card)
 
@@ -270,32 +305,19 @@ class UpdateDialog(QWidget):
         self.artifact_value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         detail_layout.addRow("安装包", self.artifact_value)
 
-        hash_row = QHBoxLayout()
-        hash_row.setContentsMargins(0, 0, 0, 0)
-        hash_row.setSpacing(7)
-        self.sha256_edit = QLineEdit()
-        self.sha256_edit.setReadOnly(True)
-        self.sha256_edit.setPlaceholderText("SHA-256")
-        hash_row.addWidget(self.sha256_edit, 1)
-        self.copy_sha_btn = QPushButton("复制")
-        self.copy_sha_btn.setObjectName("Ghost")
-        self.copy_sha_btn.setIcon(glyphs.icon("copy", 16, "#B7BDC6"))
-        self.copy_sha_btn.setToolTip("复制安装包的 SHA-256")
-        self.copy_sha_btn.setMinimumWidth(64)
-        self.copy_sha_btn.clicked.connect(self._copy_sha256)
-        hash_row.addWidget(self.copy_sha_btn)
-        detail_layout.addRow("SHA-256", hash_row)
+        self.verification_value = QLabel("下载完成后自动校验 SHA-256")
+        self.verification_value.setObjectName("Hint")
+        detail_layout.addRow("完整性", self.verification_value)
         self.details.setVisible(False)
         layout.addWidget(self.details)
         layout.addStretch(1)
 
         actions = QHBoxLayout()
         actions.setSpacing(9)
-        self.source = QLabel(
-            f"GitHub · {repository_url.removeprefix('https://github.com/')}"
-            if repository_url
-            else "本地开发构建"
+        repository_owner = (
+            repository_url.removeprefix("https://github.com/").partition("/")[0]
         )
+        self.source = QLabel(f"GitHub · {repository_owner}" if repository_url else "本地开发构建")
         self.source.setObjectName("Hint")
         self.source.setToolTip(repository_url)
         self.source.setSizePolicy(
@@ -311,12 +333,20 @@ class UpdateDialog(QWidget):
         self.check_btn.setFixedHeight(36)
         self.check_btn.clicked.connect(self.check)
         actions.addWidget(self.check_btn)
-        self.release_btn = QPushButton("打开发布页")
+        self.release_btn = QPushButton("发布说明")
+        self.release_btn.setObjectName("Ghost")
         self.release_btn.setVisible(False)
         self.release_btn.setIcon(glyphs.icon("globe", 16, TEXT))
-        self.release_btn.setFixedSize(128, 36)
+        self.release_btn.setFixedSize(104, 36)
         self.release_btn.clicked.connect(self.open_release)
         actions.addWidget(self.release_btn)
+        self.download_btn = QPushButton("下载并安装")
+        self.download_btn.setObjectName("Primary")
+        self.download_btn.setIcon(glyphs.icon("download", 16, "#0E1013"))
+        self.download_btn.setFixedSize(132, 36)
+        self.download_btn.setVisible(False)
+        self.download_btn.clicked.connect(self.download_or_install)
+        actions.addWidget(self.download_btn)
         layout.addLayout(actions)
 
         if repository_url:
@@ -338,6 +368,9 @@ class UpdateDialog(QWidget):
             "checking": ("retry", self.cfg.get("appearance.accent", "#28C76F")),
             "current": ("check", OK_GREEN),
             "available": ("info", self.cfg.get("appearance.accent", "#28C76F")),
+            "downloading": ("download", self.cfg.get("appearance.accent", "#28C76F")),
+            "ready": ("check", OK_GREEN),
+            "installing": ("info", WARN),
             "error": ("info", BAD),
             "unconfigured": ("info", WARN),
         }
@@ -347,6 +380,15 @@ class UpdateDialog(QWidget):
         self.status_title.setText(title)
         self.status_title.setStyleSheet(f"color: {color};")
         self.status.setText(message)
+
+    @staticmethod
+    def _set_button_role(button: QPushButton, role: str) -> None:
+        if button.objectName() == role:
+            return
+        button.setObjectName(role)
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.update()
 
     def _idle_button_text(self) -> str:
         if self._state == "error":
@@ -362,9 +404,10 @@ class UpdateDialog(QWidget):
             str(self.cfg.get("updates.channel", "stable") or "stable").strip(),
         )
 
-    def _set_busy(self, busy: bool) -> None:
+    def _set_check_busy(self, busy: bool) -> None:
         self.check_btn.setEnabled(not busy)
         self.release_btn.setEnabled(not busy)
+        self.download_btn.setEnabled(not busy)
         self.check_btn.setText("检查中…" if busy else self._idle_button_text())
         icon_color = TEXT_DIM if busy else "#0E1013"
         self.check_btn.setIcon(glyphs.icon("retry", 16, icon_color))
@@ -376,20 +419,23 @@ class UpdateDialog(QWidget):
         self._cancelled_thread = None
         worker.failed.connect(self._failed)
         worker.finished.connect(self._finished)
-        self._set_busy(True)
+        if worker.mode == "check":
+            self._set_check_busy(True)
         worker.start()
 
     def _begin_check(self, *, silent: bool) -> None:
         manifest_url, repository_url, channel = self._source()
         self._silent_check = silent
         self._available = None
+        self._download_path = None
+        self._pending_install_prompt = False
         self.details.setVisible(False)
+        self.progress.setVisible(False)
         self.published_value.clear()
         self.artifact_value.clear()
-        self.sha256_edit.clear()
-        self.copy_sha_btn.setText("复制")
         self.release_btn.setVisible(False)
-        self.release_btn.setText("打开发布页")
+        self.download_btn.setVisible(False)
+        self._set_button_role(self.check_btn, "Primary")
         if not manifest_url or not repository_url:
             if not silent:
                 self._set_state(
@@ -397,7 +443,7 @@ class UpdateDialog(QWidget):
                     "此构建未配置更新",
                     "请使用 GitHub Release 中的正式安装版或便携版。",
                 )
-                self._set_busy(False)
+                self._set_check_busy(False)
             return
         if not silent:
             channel_name = "稳定版" if channel == "stable" else "预览版"
@@ -446,7 +492,7 @@ class UpdateDialog(QWidget):
         self._set_state(
             "available",
             f"发现新版本 {info.version}",
-            f"这是{channel_name}。请前往 GitHub 发布页面查看并手动下载安装。",
+            f"这是{channel_name}。可直接下载，程序会自动校验安装包完整性。",
         )
         published_at = _format_published_at(info.published_at)
         self.published_key.setVisible(bool(published_at))
@@ -455,17 +501,128 @@ class UpdateDialog(QWidget):
         self.artifact_value.setText(
             f"{info.artifact.name}（{_format_size(info.artifact.size)}）"
         )
-        self.sha256_edit.setText(info.artifact.sha256)
-        self.copy_sha_btn.setText("复制")
+        self.verification_value.setText("下载完成后自动校验 SHA-256")
         self.details.setVisible(True)
-        self.release_btn.setText("打开发布页")
         self.release_btn.setVisible(True)
+        self.download_btn.setText("下载并安装")
+        self.download_btn.setIcon(glyphs.icon("download", 16, "#0E1013"))
+        self.download_btn.setVisible(True)
+        self._set_button_role(self.check_btn, "Ghost")
+        self.check_btn.setIcon(glyphs.icon("retry", 16, TEXT))
 
-    def _copy_sha256(self, _checked: bool = False) -> None:
+    def download_or_install(self, _checked: bool = False) -> None:
+        if self._download_path is not None:
+            self._confirm_install()
+            return
+        worker = self._thread
+        if worker is not None and worker.isRunning():
+            if worker.mode == "download":
+                worker.cancel()
+                self._set_state(
+                    "downloading",
+                    "正在取消下载",
+                    "正在停止网络请求并清理未完成的安装包。",
+                )
+                self.download_btn.setText("正在取消…")
+                self.download_btn.setEnabled(False)
+            return
         if self._available is None:
             return
-        QApplication.clipboard().setText(self._available.artifact.sha256)
-        self.copy_sha_btn.setText("已复制")
+
+        _manifest_url, repository_url, _channel = self._source()
+        self._pending_install_prompt = False
+        self.progress.setValue(0)
+        self.progress.setFormat(f"0%  ·  0 B / {_format_size(self._available.artifact.size)}")
+        self.progress.setVisible(True)
+        self._set_state(
+            "downloading",
+            f"正在下载 {self._available.version}",
+            "安装包下载完成后会自动核对大小和 SHA-256。",
+        )
+        self.check_btn.setEnabled(False)
+        self.release_btn.setEnabled(False)
+        self._set_button_role(self.download_btn, "Ghost")
+        self.download_btn.setIcon(glyphs.icon("close", 16, TEXT))
+        self.download_btn.setText("取消下载")
+        self.download_btn.setEnabled(True)
+
+        worker = _UpdateThread(
+            "download",
+            repository_url=repository_url,
+            info=self._available,
+        )
+        worker.progress.connect(self._download_progress)
+        worker.downloaded.connect(self._downloaded)
+        self._start(worker)
+
+    def _download_progress(self, received: int, total: int) -> None:
+        if total <= 0:
+            return
+        received = min(max(0, received), total)
+        value = min(1000, int(received * 1000 / total))
+        self.progress.setValue(value)
+        self.progress.setFormat(
+            f"{int(received * 100 / total)}%  ·  "
+            f"{_format_size(received)} / {_format_size(total)}"
+        )
+        self.status.setText(
+            f"已下载 {_format_size(received)} / {_format_size(total)}"
+            f"（{int(received * 100 / total)}%），完成后自动校验大小和 SHA-256。"
+        )
+
+    def _downloaded(self, path: object) -> None:
+        if not isinstance(path, (str, Path)) or self._available is None:
+            self._set_state("error", "下载失败", "下载线程返回了无效的安装包路径。")
+            return
+        self._download_path = Path(path)
+        self._download_progress(
+            self._available.artifact.size,
+            self._available.artifact.size,
+        )
+        self._set_state(
+            "ready",
+            "安装包已验证",
+            "文件大小和 SHA-256 均与更新清单一致，可以开始安装。",
+        )
+        self.verification_value.setText("大小和 SHA-256 校验已通过")
+        self.download_btn.setText("安装更新")
+        self.download_btn.setIcon(glyphs.icon("check", 16, "#0E1013"))
+        self._set_button_role(self.download_btn, "Primary")
+        self._pending_install_prompt = True
+
+    def _confirm_install(self) -> None:
+        if self._download_path is None or self._available is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "安装更新",
+            "安装包已通过大小和 SHA-256 校验。\n\n"
+            f"ScreenTranslate 将退出并启动 {self._available.version} 安装程序。\n"
+            "由于安装包未使用代码签名，Windows 可能显示“未知发布者”。\n\n"
+            "是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._pending_install_prompt = False
+        self._set_state(
+            "installing",
+            "正在启动安装程序",
+            "当前版本即将退出，请在安装向导中完成更新。",
+        )
+        self.check_btn.setEnabled(False)
+        self.release_btn.setEnabled(False)
+        self.download_btn.setEnabled(False)
+        self.download_btn.setText("正在启动…")
+        self.installRequested.emit(self._download_path, self._available)
+
+    def install_failed(self, message: str) -> None:
+        self._set_state("error", "无法启动安装程序", message)
+        self.check_btn.setEnabled(True)
+        self.release_btn.setEnabled(True)
+        self.download_btn.setEnabled(True)
+        self.download_btn.setText("重试安装")
 
     def open_release(self) -> None:
         if self._available is None:
@@ -481,18 +638,55 @@ class UpdateDialog(QWidget):
             self.status.setText(message)
 
     def _failed(self, message: str) -> None:
-        if not self._silent_check:
+        worker = self._thread
+        if worker is not None and worker.mode == "download":
+            self._download_path = None
+            self._pending_install_prompt = False
+            self.progress.setVisible(False)
+            self._set_state("error", "下载失败", message)
+        elif not self._silent_check:
             self._set_state("error", "检查失败", message)
 
     def _finished(self, worker: _UpdateThread) -> None:
         if self._thread is not worker:
             return
-        self._set_busy(False)
+        mode = worker.mode
+        cancelled = worker.cancel_event.is_set()
         self._thread = None
         self._cancelled_thread = None
         self._silent_check = False
-        self.check_btn.setText(self._idle_button_text())
-        self.check_btn.setIcon(glyphs.icon("retry", 16, "#0E1013"))
+        if mode == "check":
+            self._set_check_busy(False)
+            self.check_btn.setText(self._idle_button_text())
+            icon_color = TEXT if self.check_btn.objectName() == "Ghost" else "#0E1013"
+            self.check_btn.setIcon(glyphs.icon("retry", 16, icon_color))
+            return
+
+        self.check_btn.setEnabled(True)
+        self.release_btn.setEnabled(True)
+        self.download_btn.setEnabled(True)
+        if cancelled and self._download_path is None:
+            self.progress.setVisible(False)
+            self._set_state(
+                "available",
+                "下载已取消",
+                "没有安装任何文件，可以随时重新下载。",
+            )
+            self.download_btn.setText("下载并安装")
+            self.download_btn.setIcon(glyphs.icon("download", 16, "#0E1013"))
+            self._set_button_role(self.download_btn, "Primary")
+            return
+        if self._download_path is None:
+            self.download_btn.setText("重试下载")
+            self.download_btn.setIcon(glyphs.icon("download", 16, "#0E1013"))
+            self._set_button_role(self.download_btn, "Primary")
+            return
+        self.download_btn.setText("安装更新")
+        self.download_btn.setIcon(glyphs.icon("check", 16, "#0E1013"))
+        self._set_button_role(self.download_btn, "Primary")
+        if self._pending_install_prompt:
+            self._pending_install_prompt = False
+            QTimer.singleShot(0, self._confirm_install)
 
     def shutdown(self) -> bool:
         worker = self._thread

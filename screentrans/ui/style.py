@@ -228,6 +228,20 @@ QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
 QLineEdit:read-only {{
     background: #191B20;
 }}
+QProgressBar#UpdateProgress {{
+    min-height: 16px;
+    max-height: 16px;
+    background: {BG_INPUT};
+    border: 1px solid {LINE_HI};
+    border-radius: 4px;
+    color: {TEXT_DIM};
+    font-size: 10px;
+    text-align: center;
+}}
+QProgressBar#UpdateProgress::chunk {{
+    background: @ACCENT@;
+    border-radius: 3px;
+}}
 QComboBox::drop-down {{
     border: none;
     width: 22px;

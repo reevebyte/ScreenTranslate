@@ -1,24 +1,33 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QThread, QUrl
+from PySide6.QtWidgets import QMessageBox
 
 from qt_helpers import MemoryConfig, application
 from screentrans import __version__, updater
 from screentrans.updater import (
+    ARTIFACT_LIMIT,
     ArtifactInfo,
     MANIFEST_LIMIT,
     UpdateError,
     UpdateInfo,
     check_for_update,
+    download_update,
     github_manifest_repository,
+    install_helper_arguments,
     is_newer_version,
     parse_manifest,
+    run_install_helper,
+    verify_downloaded_installer,
 )
 from screentrans.ui.update_dialog import SHUTDOWN_WAIT_MS, UpdateDialog, _UpdateThread
 
@@ -73,6 +82,13 @@ def manifest_for(version: str = "1.1.0", channel: str = "stable") -> dict:
             "sha256": "0" * 64,
         },
     }
+
+
+def update_for_bytes(content: bytes, version: str = "1.1.0") -> UpdateInfo:
+    payload = manifest_for(version)
+    payload["artifact"]["size"] = len(content)
+    payload["artifact"]["sha256"] = hashlib.sha256(content).hexdigest()
+    return parse_manifest(payload, REPOSITORY_URL)
 
 
 class VersionTests(unittest.TestCase):
@@ -188,6 +204,15 @@ class ManifestTests(unittest.TestCase):
             with self.subTest(artifact=artifact), self.assertRaises(UpdateError):
                 parse_manifest(payload, REPOSITORY_URL)
 
+    def test_artifact_name_must_match_product_and_version(self):
+        payload = manifest_for()
+        payload["artifact"]["name"] = "other-setup.exe"
+        payload["artifact"]["url"] = (
+            f"{REPOSITORY_URL}/releases/download/v1.1.0/other-setup.exe"
+        )
+        with self.assertRaisesRegex(UpdateError, "文件名与版本不一致"):
+            parse_manifest(payload, REPOSITORY_URL)
+
     def test_artifact_url_is_pinned_to_repository_tag_and_filename(self):
         artifact_name = manifest_for()["artifact"]["name"]
         for url in (
@@ -202,8 +227,8 @@ class ManifestTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(UpdateError):
                 parse_manifest(payload, REPOSITORY_URL)
 
-    def test_artifact_size_must_be_a_nonnegative_integer(self):
-        for size in (True, -1, 1.5, "123", 1 << 63):
+    def test_artifact_size_must_be_a_bounded_positive_integer(self):
+        for size in (True, -1, 0, 1.5, "123", ARTIFACT_LIMIT + 1):
             payload = manifest_for()
             payload["artifact"]["size"] = size
             with self.subTest(size=size), self.assertRaisesRegex(UpdateError, "大小无效"):
@@ -285,10 +310,311 @@ class ManifestTests(unittest.TestCase):
                 session=FakeSession(response),
             )
 
-    def test_updater_has_no_artifact_download_or_execution_api(self):
-        self.assertFalse(hasattr(updater, "download_update"))
-        self.assertFalse(hasattr(updater, "launch_installer"))
+    def test_updater_exposes_verified_download_without_authenticode_dependency(self):
+        self.assertTrue(hasattr(updater, "download_update"))
+        self.assertTrue(hasattr(updater, "verify_downloaded_installer"))
         self.assertFalse(hasattr(updater, "verify_authenticode"))
+
+
+class DownloadTests(unittest.TestCase):
+    def test_download_streams_to_cache_and_reports_progress(self):
+        content = b"verified installer bytes"
+        info = update_for_bytes(content)
+        response = FakeResponse(
+            content,
+            url=info.artifact.url,
+            headers={"Content-Length": str(len(content))},
+        )
+        session = FakeSession(response)
+        progress = []
+
+        with TemporaryDirectory() as folder, patch(
+            "screentrans.updater._mark_as_internet_download"
+        ) as mark:
+            path = download_update(
+                info,
+                repository_url=REPOSITORY_URL,
+                current_version="1.0.0",
+                download_dir=Path(folder),
+                session=session,
+                progress_callback=lambda done, total: progress.append((done, total)),
+            )
+
+            self.assertEqual(path.read_bytes(), content)
+            self.assertEqual(path.name, info.artifact.name)
+            self.assertEqual(progress[-1], (len(content), len(content)))
+            mark.assert_called_once()
+            marked_path, marked_url = mark.call_args.args
+            self.assertEqual(marked_path.parent, path.parent)
+            self.assertTrue(marked_path.name.endswith(".part"))
+            self.assertEqual(marked_url, info.artifact.url)
+            self.assertTrue(response.closed)
+            self.assertEqual(session.calls[0][0], info.artifact.url)
+            self.assertTrue(session.calls[0][1]["stream"])
+
+    def test_verified_cache_is_reused_without_network(self):
+        content = b"cached installer"
+        info = update_for_bytes(content)
+        with TemporaryDirectory() as folder, patch(
+            "screentrans.updater._mark_as_internet_download"
+        ):
+            first = download_update(
+                info,
+                repository_url=REPOSITORY_URL,
+                current_version="1.0.0",
+                download_dir=Path(folder),
+                session=FakeSession(FakeResponse(content, url=info.artifact.url)),
+            )
+            session = Mock()
+            second = download_update(
+                info,
+                repository_url=REPOSITORY_URL,
+                current_version="1.0.0",
+                download_dir=Path(folder),
+                session=session,
+            )
+
+        self.assertEqual(second, first)
+        session.get.assert_not_called()
+
+    def test_download_prunes_old_versions_and_stale_partial_files(self):
+        content = b"new installer"
+        info = update_for_bytes(content)
+        with TemporaryDirectory() as folder, patch(
+            "screentrans.updater._mark_as_internet_download"
+        ):
+            root = Path(folder)
+            old_version = root / "v1.0.0"
+            old_version.mkdir()
+            (old_version / "old-setup.exe").write_bytes(b"old")
+            current_version = root / f"v{info.version}"
+            current_version.mkdir()
+            stale_partial = current_version / "interrupted.part"
+            stale_partial.write_bytes(b"partial")
+
+            path = download_update(
+                info,
+                repository_url=REPOSITORY_URL,
+                current_version="1.0.0",
+                download_dir=root,
+                session=FakeSession(FakeResponse(content, url=info.artifact.url)),
+            )
+
+            self.assertTrue(path.is_file())
+            self.assertFalse(old_version.exists())
+            self.assertFalse(stale_partial.exists())
+
+    def test_version_cache_reparse_point_is_rejected_before_network(self):
+        content = b"installer"
+        info = update_for_bytes(content)
+        session = Mock()
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            version_dir = root / f"v{info.version}"
+            version_dir.mkdir()
+
+            with patch(
+                "screentrans.updater._is_reparse_point",
+                side_effect=lambda path: Path(path) == version_dir,
+            ), self.assertRaisesRegex(UpdateError, "重解析点"):
+                download_update(
+                    info,
+                    repository_url=REPOSITORY_URL,
+                    current_version="1.0.0",
+                    download_dir=root,
+                    session=session,
+                )
+
+        session.get.assert_not_called()
+
+    def test_size_or_hash_mismatch_leaves_no_installer_or_partial_file(self):
+        content = b"wrong bytes"
+        cases = []
+        size_info = update_for_bytes(content + b"x")
+        cases.append((size_info, FakeResponse(content, url=size_info.artifact.url)))
+        hash_payload = manifest_for()
+        hash_payload["artifact"]["size"] = len(content)
+        hash_payload["artifact"]["sha256"] = "0" * 64
+        hash_info = parse_manifest(hash_payload, REPOSITORY_URL)
+        cases.append((hash_info, FakeResponse(content, url=hash_info.artifact.url)))
+
+        for info, response in cases:
+            with self.subTest(message=info.artifact.sha256), TemporaryDirectory() as folder, patch(
+                "screentrans.updater._mark_as_internet_download"
+            ):
+                with self.assertRaises(UpdateError):
+                    download_update(
+                        info,
+                        repository_url=REPOSITORY_URL,
+                        current_version="1.0.0",
+                        download_dir=Path(folder),
+                        session=FakeSession(response),
+                    )
+                files = [path for path in Path(folder).rglob("*") if path.is_file()]
+                self.assertEqual(files, [])
+
+    def test_declared_size_mismatch_is_rejected_before_writing(self):
+        content = b"installer"
+        info = update_for_bytes(content)
+        response = FakeResponse(
+            content,
+            url=info.artifact.url,
+            headers={"Content-Length": str(len(content) + 1)},
+        )
+        with TemporaryDirectory() as folder, self.assertRaisesRegex(
+            UpdateError, "服务器返回的安装包大小"
+        ):
+            download_update(
+                info,
+                repository_url=REPOSITORY_URL,
+                current_version="1.0.0",
+                download_dir=Path(folder),
+                session=FakeSession(response),
+            )
+
+    def test_download_rejects_redirect_away_from_github(self):
+        content = b"installer"
+        info = update_for_bytes(content)
+        response = FakeResponse(content, url="https://downloads.example.invalid/setup.exe")
+        with TemporaryDirectory() as folder, self.assertRaisesRegex(UpdateError, "非 GitHub"):
+            download_update(
+                info,
+                repository_url=REPOSITORY_URL,
+                current_version="1.0.0",
+                download_dir=Path(folder),
+                session=FakeSession(response),
+            )
+
+    def test_install_helper_waits_rechecks_and_launches_only_trusted_file(self):
+        content = b"installer ready to launch"
+        info = update_for_bytes(content)
+        waited = []
+        launched = []
+        with TemporaryDirectory() as folder, patch(
+            "screentrans.updater._mark_as_internet_download"
+        ):
+            root = Path(folder)
+            path = download_update(
+                info,
+                repository_url=REPOSITORY_URL,
+                current_version="1.0.0",
+                download_dir=root,
+                session=FakeSession(FakeResponse(content, url=info.artifact.url)),
+            )
+            arguments = install_helper_arguments(
+                path,
+                info,
+                repository_url=REPOSITORY_URL,
+                parent_pid=1234,
+                current_version="1.0.0",
+                download_dir=root,
+            )
+            result = run_install_helper(
+                ["ScreenTranslate.exe", *arguments],
+                current_version="1.0.0",
+                download_dir=root,
+                wait_for_exit=waited.append,
+                launcher=launched.append,
+            )
+
+        self.assertEqual(result, path)
+        self.assertEqual(waited, [1234])
+        self.assertEqual(launched, [str(path)])
+
+    def test_install_helper_rejects_tampering_and_outside_paths(self):
+        content = b"original installer"
+        info = update_for_bytes(content)
+        with TemporaryDirectory() as folder, patch(
+            "screentrans.updater._mark_as_internet_download"
+        ):
+            root = Path(folder)
+            path = download_update(
+                info,
+                repository_url=REPOSITORY_URL,
+                current_version="1.0.0",
+                download_dir=root,
+                session=FakeSession(FakeResponse(content, url=info.artifact.url)),
+            )
+            arguments = install_helper_arguments(
+                path,
+                info,
+                repository_url=REPOSITORY_URL,
+                parent_pid=1234,
+                current_version="1.0.0",
+                download_dir=root,
+            )
+            path.write_bytes(b"tampered")
+            launcher = Mock()
+            with self.assertRaises(UpdateError):
+                run_install_helper(
+                    ["ScreenTranslate.exe", *arguments],
+                    current_version="1.0.0",
+                    download_dir=root,
+                    wait_for_exit=lambda _pid: None,
+                    launcher=launcher,
+                )
+            launcher.assert_not_called()
+
+            outside = root.parent / info.artifact.name
+            outside.write_bytes(content)
+            try:
+                with self.assertRaisesRegex(UpdateError, "受信任的更新目录"):
+                    verify_downloaded_installer(
+                        outside,
+                        info,
+                        repository_url=REPOSITORY_URL,
+                        current_version="1.0.0",
+                        download_dir=root,
+                    )
+            finally:
+                outside.unlink()
+
+
+class ProcessWaitTests(unittest.TestCase):
+    @staticmethod
+    def kernel32(*, handle=0, wait_result=0):
+        return SimpleNamespace(
+            OpenProcess=Mock(return_value=handle),
+            WaitForSingleObject=Mock(return_value=wait_result),
+            CloseHandle=Mock(return_value=True),
+        )
+
+    def test_missing_parent_process_is_already_exited(self):
+        kernel32 = self.kernel32()
+        with (
+            patch.object(updater.os, "name", "nt"),
+            patch.object(updater.ctypes, "WinDLL", return_value=kernel32),
+            patch.object(updater.ctypes, "get_last_error", return_value=87),
+        ):
+            updater._wait_for_process_exit(1234)
+
+        kernel32.WaitForSingleObject.assert_not_called()
+        kernel32.CloseHandle.assert_not_called()
+
+    def test_open_process_failure_is_not_treated_as_process_exit(self):
+        kernel32 = self.kernel32()
+        with (
+            patch.object(updater.os, "name", "nt"),
+            patch.object(updater.ctypes, "WinDLL", return_value=kernel32),
+            patch.object(updater.ctypes, "get_last_error", return_value=5),
+            self.assertRaisesRegex(UpdateError, "Windows 错误 5"),
+        ):
+            updater._wait_for_process_exit(1234)
+
+        kernel32.WaitForSingleObject.assert_not_called()
+        kernel32.CloseHandle.assert_not_called()
+
+    def test_wait_timeout_closes_handle_and_stops_install(self):
+        kernel32 = self.kernel32(handle=4321, wait_result=258)
+        with (
+            patch.object(updater.os, "name", "nt"),
+            patch.object(updater.ctypes, "WinDLL", return_value=kernel32),
+            self.assertRaisesRegex(UpdateError, "旧版本未能及时退出"),
+        ):
+            updater._wait_for_process_exit(1234, timeout_seconds=0.01)
+
+        kernel32.WaitForSingleObject.assert_called_once_with(4321, 10)
+        kernel32.CloseHandle.assert_called_once_with(4321)
 
 
 class UpdateDialogTests(unittest.TestCase):
@@ -308,22 +634,23 @@ class UpdateDialogTests(unittest.TestCase):
             }
         )
 
-    def test_available_update_only_offers_github_release_page(self):
+    def test_available_update_offers_verified_download_and_release_notes(self):
         dialog = UpdateDialog(self.config())
         info = parse_manifest(manifest_for(), REPOSITORY_URL)
         dialog._checked(info)
         self.assertTrue(dialog.release_btn.isVisibleTo(dialog))
+        self.assertTrue(dialog.download_btn.isVisibleTo(dialog))
         self.assertTrue(dialog.details.isVisibleTo(dialog))
         self.assertEqual(
             dialog.artifact_value.text(),
             "ScreenTranslate-1.1.0-setup-x64.exe（123 B）",
         )
-        self.assertEqual(dialog.sha256_edit.text(), "0" * 64)
-        self.assertEqual(dialog.release_btn.text(), "打开发布页")
+        self.assertEqual(dialog.verification_value.text(), "下载完成后自动校验 SHA-256")
+        self.assertEqual(dialog.release_btn.text(), "发布说明")
+        self.assertEqual(dialog.download_btn.text(), "下载并安装")
         self.assertEqual(dialog.status_title.text(), "发现新版本 1.1.0")
-        self.assertFalse(hasattr(dialog, "download_btn"))
-        self.assertFalse(hasattr(dialog, "install_btn"))
-        self.assertFalse(hasattr(dialog, "progress"))
+        self.assertFalse(hasattr(dialog, "sha256_edit"))
+        self.assertFalse(hasattr(dialog, "copy_sha_btn"))
         self.assertFalse(hasattr(dialog, "url_edit"))
         dialog.close()
 
@@ -350,7 +677,7 @@ class UpdateDialogTests(unittest.TestCase):
 
     def test_current_version_has_visible_success_feedback(self):
         dialog = UpdateDialog(self.config())
-        worker = Mock()
+        worker = _UpdateThread("check")
         dialog._thread = worker
 
         dialog._checked(None)
@@ -377,7 +704,7 @@ class UpdateDialogTests(unittest.TestCase):
 
     def test_failed_check_has_visible_error_and_retry_action(self):
         dialog = UpdateDialog(self.config())
-        worker = Mock()
+        worker = _UpdateThread("check")
         dialog._thread = worker
 
         dialog._failed("无法连接 GitHub。")
@@ -388,17 +715,54 @@ class UpdateDialogTests(unittest.TestCase):
         self.assertEqual(dialog.check_btn.text(), "重试")
         dialog.close()
 
-    def test_sha256_copy_uses_only_validated_metadata(self):
+    def test_download_action_shows_progress_and_can_be_cancelled(self):
         dialog = UpdateDialog(self.config())
         dialog._checked(parse_manifest(manifest_for(), REPOSITORY_URL))
-        clipboard = Mock()
+
+        with patch.object(_UpdateThread, "start"):
+            dialog.download_or_install()
+
+        self.assertEqual(dialog._thread.mode, "download")
+        self.assertEqual(dialog.status_title.text(), "正在下载 1.1.0")
+        self.assertTrue(dialog.progress.isVisibleTo(dialog))
+        self.assertEqual(dialog.download_btn.text(), "取消下载")
+        self.assertFalse(dialog.check_btn.isEnabled())
+        dialog._download_progress(50, 100)
+        self.assertEqual(dialog.progress.value(), 500)
+        self.assertIn("50%", dialog.progress.format())
+
+        dialog._thread.isRunning = Mock(return_value=True)
+        dialog.download_or_install()
+        self.assertTrue(dialog._thread.cancel_event.is_set())
+        self.assertEqual(dialog.download_btn.text(), "正在取消…")
+        dialog._thread = None
+        dialog.close()
+
+    def test_verified_download_prompts_then_emits_install_request(self):
+        dialog = UpdateDialog(self.config())
+        info = parse_manifest(manifest_for(), REPOSITORY_URL)
+        dialog._checked(info)
+        worker = _UpdateThread("download", info=info)
+        dialog._thread = worker
+        path = Path("C:/verified/ScreenTranslate-1.1.0-setup-x64.exe")
+
+        with patch("screentrans.ui.update_dialog.QTimer.singleShot") as schedule:
+            dialog._downloaded(path)
+            dialog._finished(worker)
+
+        schedule.assert_called_once()
+        self.assertEqual(dialog.status_title.text(), "安装包已验证")
+        self.assertEqual(dialog.verification_value.text(), "大小和 SHA-256 校验已通过")
+        self.assertEqual(dialog.download_btn.text(), "安装更新")
+        requested = []
+        dialog.installRequested.connect(lambda target, update: requested.append((target, update)))
         with patch(
-            "screentrans.ui.update_dialog.QApplication.clipboard",
-            return_value=clipboard,
+            "screentrans.ui.update_dialog.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
         ):
-            dialog._copy_sha256()
-        clipboard.setText.assert_called_once_with("0" * 64)
-        self.assertEqual(dialog.copy_sha_btn.text(), "已复制")
+            dialog._confirm_install()
+        self.assertEqual(requested, [(path, info)])
+        self.assertEqual(dialog.status_title.text(), "正在启动安装程序")
         dialog.close()
 
     def test_open_release_uses_system_browser(self):

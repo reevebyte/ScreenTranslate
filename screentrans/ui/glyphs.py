@@ -176,6 +176,13 @@ def _copy(p, c, w):
     _poly(p, [(15.6, 20.4), (5.2, 20.4), (5.2, 10.0)])
 
 
+def _download(p, c, w):
+    _pen(p, c, w)
+    _line(p, 12, 3.8, 12, 14.4)
+    _poly(p, [(7.8, 10.5), (12, 14.8), (16.2, 10.5)])
+    _poly(p, [(5.2, 17.2), (5.2, 20.2), (18.8, 20.2), (18.8, 17.2)])
+
+
 def _eye(p, c, w):
     _pen(p, c, w)
     path = QPainterPath(QPointF(2.6, 12))
@@ -209,6 +216,7 @@ _GLYPHS = {
     # 齿轮试过了，删掉了：16px 下八个齿糊成一圈毛边，看着像太阳不像齿轮。
     # 「设置」这个意思交给 sliders，小尺寸下清楚得多。
     "copy": _copy,
+    "download": _download,
     "eye": _eye,
     "info": _info,
 }

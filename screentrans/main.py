@@ -4,6 +4,7 @@ from __future__ import annotations
 import ctypes
 import copy
 import logging
+import os
 import sys
 import time
 import weakref
@@ -879,6 +880,7 @@ class App:
             self.updates = UpdateDialog(self.cfg)
             self.updates.setWindowIcon(self.icon)
             self.updates.updateAvailable.connect(self._on_update_available)
+            self.updates.installRequested.connect(self._on_install_requested)
         return self.updates
 
     def open_updates(self) -> None:
@@ -896,8 +898,36 @@ class App:
         self.act_update.setText(f"发现新版本 {info.version}…")
         self.notify(
             f"{APP_TITLE} · 有新版本",
-            f"ScreenTranslate {info.version} 已发布，可从托盘菜单打开 GitHub 发布页面。",
+            f"ScreenTranslate {info.version} 已发布，可从检查更新窗口直接下载并安装。",
         )
+
+    def _on_install_requested(self, path, info) -> None:
+        from .updater import UpdateError, install_helper_arguments
+
+        repository_url = str(self.cfg.get("updates.repository_url", "") or "").strip()
+        try:
+            arguments = install_helper_arguments(
+                path,
+                info,
+                repository_url=repository_url,
+                parent_pid=os.getpid(),
+            )
+            winsys.relaunch(arguments)
+        except Exception as exc:
+            report_exception(
+                logging.getLogger("screentrans.errors"),
+                "update.start_installer_helper",
+                exc,
+            )
+            message = (
+                str(exc)
+                if isinstance(exc, UpdateError)
+                else f"无法启动安装程序（{type(exc).__name__}）"
+            )
+            if self.updates is not None:
+                self.updates.install_failed(message)
+            return
+        self.quit()
 
     def _apply_accent(self):
         """强调色改了就地换掉，不用重启。
@@ -1102,6 +1132,31 @@ def selftest() -> int:
 
 
 def main() -> int:
+    if "--apply-update" in sys.argv[1:]:
+        from .updater import UpdateError, run_install_helper
+
+        try:
+            run_install_helper(sys.argv)
+            return 0
+        except Exception as exc:
+            report_exception(
+                logging.getLogger("screentrans.errors"),
+                "update.install_helper",
+                exc,
+            )
+            message = (
+                str(exc)
+                if isinstance(exc, UpdateError)
+                else f"无法启动安装程序（{type(exc).__name__}）"
+            )
+            ctypes.windll.user32.MessageBoxW(
+                0,
+                message,
+                f"{APP_TITLE} 更新失败",
+                0x10,
+            )
+            return 1
+
     if "--selftest" in sys.argv:
         return selftest()
 
