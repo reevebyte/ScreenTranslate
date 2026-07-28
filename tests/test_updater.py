@@ -415,7 +415,7 @@ class DownloadTests(unittest.TestCase):
 
             with patch(
                 "screentrans.updater._is_reparse_point",
-                side_effect=lambda path: Path(path) == version_dir,
+                side_effect=lambda path: Path(path).name == version_dir.name,
             ), self.assertRaisesRegex(UpdateError, "重解析点"):
                 download_update(
                     info,
