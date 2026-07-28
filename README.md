@@ -7,6 +7,9 @@
 
 语种自动判断，界面上没有任何按钮，只有一个框。
 
+在原文上进行直接翻译，也可以右键或空格显示原文
+<img width="1630" height="931" alt="image" src="https://github.com/user-attachments/assets/37024f2e-2c5b-48c9-afbb-95f6e9eb3317" />
+
 ---
 
 ## 安装
