@@ -161,6 +161,15 @@ QLabel#PageSub {{
     color: {TEXT_DIM};
     font-size: 12px;
 }}
+QLabel#UpdateStateTitle {{
+    color: {TEXT};
+    font-size: 14px;
+    font-weight: 600;
+}}
+QLabel#UpdateStateText {{
+    color: {TEXT_DIM};
+    font-size: 12px;
+}}
 QLabel#SectionTitle {{
     color: {TEXT_DIM};
     font-size: 11px;

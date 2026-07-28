@@ -9,11 +9,13 @@ from PySide6.QtCore import QObject, Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -22,7 +24,8 @@ from .. import __version__
 from ..error_logging import report_exception
 from ..updater import UpdateCancelled, UpdateError, UpdateInfo, check_for_update
 from . import glyphs
-from .style import build_qss
+from .icon import make_icon
+from .style import BAD, OK_GREEN, TEXT, TEXT_DIM, WARN, build_qss
 
 
 SHUTDOWN_WAIT_MS = 2500
@@ -178,41 +181,81 @@ class UpdateDialog(QWidget):
         self._cancelled_thread: _UpdateThread | None = None
         self._available: UpdateInfo | None = None
         self._silent_check = False
+        self._state = "idle"
 
-        self.setWindowTitle("检查更新")
-        self.setMinimumWidth(520)
-        self.setStyleSheet(build_qss(cfg.get("appearance.accent", "#28C76F")))
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 22)
-        layout.setSpacing(12)
-
-        title = QLabel(f"ScreenTranslate {__version__}")
-        title.setObjectName("PageTitle")
-        layout.addWidget(title)
-
+        accent = cfg.get("appearance.accent", "#28C76F")
         repository_url = str(cfg.get("updates.repository_url", "") or "").strip()
         channel = str(cfg.get("updates.channel", "stable") or "stable").strip()
         channel_name = "稳定版" if channel == "stable" else "预览版"
-        source = QLabel(
-            f"{repository_url}\n更新通道：{channel_name}"
-            if repository_url
-            else "当前构建未配置 GitHub 更新源。"
-        )
-        source.setWordWrap(True)
-        source.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(source)
 
-        self.status = QLabel("可以检查 GitHub Release 中是否有新版本。")
+        self.setObjectName("Root")
+        self.setWindowTitle("ScreenTranslate · 检查更新")
+        self.setMinimumWidth(560)
+        self.resize(580, 260)
+        self.setStyleSheet(build_qss(accent))
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 20)
+        layout.setSpacing(16)
+
+        header = QHBoxLayout()
+        header.setSpacing(12)
+        mark = QLabel()
+        mark.setPixmap(make_icon(accent, 38).pixmap(38, 38))
+        mark.setFixedSize(38, 38)
+        header.addWidget(mark)
+
+        heading = QVBoxLayout()
+        heading.setContentsMargins(0, 0, 0, 0)
+        heading.setSpacing(2)
+        title = QLabel("ScreenTranslate")
+        title.setObjectName("PageTitle")
+        heading.addWidget(title)
+        version = QLabel(f"当前版本 {__version__}  ·  {channel_name}")
+        version.setObjectName("PageSub")
+        heading.addWidget(version)
+        header.addLayout(heading, 1)
+        layout.addLayout(header)
+
+        self.state_card = QFrame()
+        self.state_card.setObjectName("Card")
+        self.state_card.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed,
+        )
+        state_layout = QHBoxLayout(self.state_card)
+        state_layout.setContentsMargins(17, 15, 17, 15)
+        state_layout.setSpacing(14)
+
+        self.status_icon = QLabel()
+        self.status_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_icon.setFixedSize(32, 32)
+        state_layout.addWidget(self.status_icon, 0, Qt.AlignmentFlag.AlignTop)
+
+        state_text = QVBoxLayout()
+        state_text.setContentsMargins(0, 0, 0, 0)
+        state_text.setSpacing(4)
+        self.status_title = QLabel()
+        self.status_title.setObjectName("UpdateStateTitle")
+        state_text.addWidget(self.status_title)
+        self.status = QLabel()
+        self.status.setObjectName("UpdateStateText")
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(self.status)
+        state_text.addWidget(self.status)
+        state_layout.addLayout(state_text, 1)
+        layout.addWidget(self.state_card)
 
-        self.details = QWidget()
+        self.details = QFrame()
+        self.details.setObjectName("Card")
+        self.details.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed,
+        )
         detail_layout = QFormLayout(self.details)
-        detail_layout.setContentsMargins(0, 2, 0, 0)
-        detail_layout.setHorizontalSpacing(10)
-        detail_layout.setVerticalSpacing(7)
+        detail_layout.setContentsMargins(17, 14, 17, 14)
+        detail_layout.setHorizontalSpacing(14)
+        detail_layout.setVerticalSpacing(9)
         detail_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
 
         self.published_key = QLabel("发布时间")
@@ -244,17 +287,73 @@ class UpdateDialog(QWidget):
         detail_layout.addRow("SHA-256", hash_row)
         self.details.setVisible(False)
         layout.addWidget(self.details)
+        layout.addStretch(1)
 
         actions = QHBoxLayout()
-        actions.addStretch(1)
+        actions.setSpacing(9)
+        self.source = QLabel(
+            f"GitHub · {repository_url.removeprefix('https://github.com/')}"
+            if repository_url
+            else "本地开发构建"
+        )
+        self.source.setObjectName("Hint")
+        self.source.setToolTip(repository_url)
+        self.source.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.source.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        actions.addWidget(self.source, 1)
         self.check_btn = QPushButton("检查更新")
+        self.check_btn.setObjectName("Primary")
+        self.check_btn.setIcon(glyphs.icon("retry", 16, "#0E1013"))
+        self.check_btn.setFixedWidth(112)
+        self.check_btn.setFixedHeight(36)
         self.check_btn.clicked.connect(self.check)
         actions.addWidget(self.check_btn)
-        self.release_btn = QPushButton("打开发布页面")
+        self.release_btn = QPushButton("打开发布页")
         self.release_btn.setVisible(False)
+        self.release_btn.setIcon(glyphs.icon("globe", 16, TEXT))
+        self.release_btn.setFixedSize(128, 36)
         self.release_btn.clicked.connect(self.open_release)
         actions.addWidget(self.release_btn)
         layout.addLayout(actions)
+
+        if repository_url:
+            self._set_state(
+                "idle",
+                "准备检查更新",
+                f"将从 GitHub Release 获取{channel_name}发布信息。",
+            )
+        else:
+            self._set_state(
+                "unconfigured",
+                "此构建未配置更新",
+                "请使用 GitHub Release 中的正式安装版或便携版。",
+            )
+
+    def _set_state(self, state: str, title: str, message: str) -> None:
+        visuals = {
+            "idle": ("info", TEXT_DIM),
+            "checking": ("retry", self.cfg.get("appearance.accent", "#28C76F")),
+            "current": ("check", OK_GREEN),
+            "available": ("info", self.cfg.get("appearance.accent", "#28C76F")),
+            "error": ("info", BAD),
+            "unconfigured": ("info", WARN),
+        }
+        glyph, color = visuals.get(state, visuals["idle"])
+        self._state = state
+        self.status_icon.setPixmap(glyphs.pixmap(glyph, 26, color))
+        self.status_title.setText(title)
+        self.status_title.setStyleSheet(f"color: {color};")
+        self.status.setText(message)
+
+    def _idle_button_text(self) -> str:
+        if self._state == "error":
+            return "重试"
+        if self._state in ("current", "available"):
+            return "重新检查"
+        return "检查更新"
 
     def _source(self) -> tuple[str, str, str]:
         return (
@@ -266,6 +365,9 @@ class UpdateDialog(QWidget):
     def _set_busy(self, busy: bool) -> None:
         self.check_btn.setEnabled(not busy)
         self.release_btn.setEnabled(not busy)
+        self.check_btn.setText("检查中…" if busy else self._idle_button_text())
+        icon_color = TEXT_DIM if busy else "#0E1013"
+        self.check_btn.setIcon(glyphs.icon("retry", 16, icon_color))
 
     def _start(self, worker: _UpdateThread) -> None:
         if self._thread is not None and self._thread.isRunning():
@@ -287,13 +389,23 @@ class UpdateDialog(QWidget):
         self.sha256_edit.clear()
         self.copy_sha_btn.setText("复制")
         self.release_btn.setVisible(False)
-        self.release_btn.setText("打开发布页面")
+        self.release_btn.setText("打开发布页")
         if not manifest_url or not repository_url:
             if not silent:
-                self.status.setText("当前构建没有可用的 GitHub 更新源。")
+                self._set_state(
+                    "unconfigured",
+                    "此构建未配置更新",
+                    "请使用 GitHub Release 中的正式安装版或便携版。",
+                )
+                self._set_busy(False)
             return
         if not silent:
-            self.status.setText("正在检查更新…")
+            channel_name = "稳定版" if channel == "stable" else "预览版"
+            self._set_state(
+                "checking",
+                "正在检查更新",
+                f"正在读取 GitHub 上的{channel_name}发布信息，请稍候。",
+            )
         worker = _UpdateThread(
             "check",
             url=manifest_url,
@@ -313,17 +425,28 @@ class UpdateDialog(QWidget):
     def _checked(self, info: object) -> None:
         if info is None:
             if not self._silent_check:
-                self.status.setText("当前已经是最新版。")
+                channel = str(self.cfg.get("updates.channel", "stable") or "stable").strip()
+                channel_name = "稳定版" if channel == "stable" else "预览版"
+                self._set_state(
+                    "current",
+                    "已经是最新版",
+                    f"当前安装的 {__version__} 已是{channel_name}的最新版本。",
+                )
             return
         if not isinstance(info, UpdateInfo):
-            self.status.setText("更新服务器返回了无法识别的数据。")
+            self._set_state(
+                "error",
+                "检查失败",
+                "更新服务器返回了无法识别的数据。",
+            )
             return
         self._available = info
         self.updateAvailable.emit(info)
         channel_name = "稳定版" if info.channel == "stable" else "预览版"
-        self.status.setText(
-            f"发现 {info.version}（{channel_name}）。软件不会自动下载或运行安装包，"
-            "请在 GitHub 发布页面查看并手动下载。"
+        self._set_state(
+            "available",
+            f"发现新版本 {info.version}",
+            f"这是{channel_name}。请前往 GitHub 发布页面查看并手动下载安装。",
         )
         published_at = _format_published_at(info.published_at)
         self.published_key.setVisible(bool(published_at))
@@ -335,7 +458,7 @@ class UpdateDialog(QWidget):
         self.sha256_edit.setText(info.artifact.sha256)
         self.copy_sha_btn.setText("复制")
         self.details.setVisible(True)
-        self.release_btn.setText(f"打开 v{info.version} 发布页面")
+        self.release_btn.setText("打开发布页")
         self.release_btn.setVisible(True)
 
     def _copy_sha256(self, _checked: bool = False) -> None:
@@ -359,7 +482,7 @@ class UpdateDialog(QWidget):
 
     def _failed(self, message: str) -> None:
         if not self._silent_check:
-            self.status.setText(message)
+            self._set_state("error", "检查失败", message)
 
     def _finished(self, worker: _UpdateThread) -> None:
         if self._thread is not worker:
@@ -368,6 +491,8 @@ class UpdateDialog(QWidget):
         self._thread = None
         self._cancelled_thread = None
         self._silent_check = False
+        self.check_btn.setText(self._idle_button_text())
+        self.check_btn.setIcon(glyphs.icon("retry", 16, "#0E1013"))
 
     def shutdown(self) -> bool:
         worker = self._thread

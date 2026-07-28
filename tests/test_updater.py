@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 from PySide6.QtCore import QThread, QUrl
 
 from qt_helpers import MemoryConfig, application
-from screentrans import updater
+from screentrans import __version__, updater
 from screentrans.updater import (
     ArtifactInfo,
     MANIFEST_LIMIT,
@@ -319,11 +319,73 @@ class UpdateDialogTests(unittest.TestCase):
             "ScreenTranslate-1.1.0-setup-x64.exe（123 B）",
         )
         self.assertEqual(dialog.sha256_edit.text(), "0" * 64)
-        self.assertEqual(dialog.release_btn.text(), "打开 v1.1.0 发布页面")
+        self.assertEqual(dialog.release_btn.text(), "打开发布页")
+        self.assertEqual(dialog.status_title.text(), "发现新版本 1.1.0")
         self.assertFalse(hasattr(dialog, "download_btn"))
         self.assertFalse(hasattr(dialog, "install_btn"))
         self.assertFalse(hasattr(dialog, "progress"))
         self.assertFalse(hasattr(dialog, "url_edit"))
+        dialog.close()
+
+    def test_dialog_uses_themed_root_and_clear_initial_state(self):
+        dialog = UpdateDialog(self.config())
+        self.assertEqual(dialog.objectName(), "Root")
+        self.assertEqual(dialog.status_title.text(), "准备检查更新")
+        self.assertIn("GitHub Release", dialog.status.text())
+        self.assertEqual(dialog.check_btn.text(), "检查更新")
+        self.assertFalse(dialog.status_icon.pixmap().isNull())
+        dialog.close()
+
+    def test_manual_check_immediately_shows_busy_feedback(self):
+        dialog = UpdateDialog(self.config())
+        with patch.object(_UpdateThread, "start"):
+            dialog.check()
+
+        self.assertEqual(dialog.status_title.text(), "正在检查更新")
+        self.assertEqual(dialog.check_btn.text(), "检查中…")
+        self.assertFalse(dialog.check_btn.isEnabled())
+        dialog.shutdown()
+        dialog._thread = None
+        dialog.close()
+
+    def test_current_version_has_visible_success_feedback(self):
+        dialog = UpdateDialog(self.config())
+        worker = Mock()
+        dialog._thread = worker
+
+        dialog._checked(None)
+        dialog._finished(worker)
+
+        self.assertEqual(dialog.status_title.text(), "已经是最新版")
+        self.assertIn(__version__, dialog.status.text())
+        self.assertEqual(dialog.check_btn.text(), "重新检查")
+        self.assertTrue(dialog.check_btn.isEnabled())
+        dialog.close()
+
+    def test_unconfigured_build_explains_why_checking_is_unavailable(self):
+        config = self.config()
+        config.set("updates.manifest_url", "")
+        config.set("updates.repository_url", "")
+        dialog = UpdateDialog(config)
+
+        dialog.check()
+
+        self.assertEqual(dialog.status_title.text(), "此构建未配置更新")
+        self.assertIn("GitHub Release", dialog.status.text())
+        self.assertTrue(dialog.check_btn.isEnabled())
+        dialog.close()
+
+    def test_failed_check_has_visible_error_and_retry_action(self):
+        dialog = UpdateDialog(self.config())
+        worker = Mock()
+        dialog._thread = worker
+
+        dialog._failed("无法连接 GitHub。")
+        dialog._finished(worker)
+
+        self.assertEqual(dialog.status_title.text(), "检查失败")
+        self.assertEqual(dialog.status.text(), "无法连接 GitHub。")
+        self.assertEqual(dialog.check_btn.text(), "重试")
         dialog.close()
 
     def test_sha256_copy_uses_only_validated_metadata(self):
