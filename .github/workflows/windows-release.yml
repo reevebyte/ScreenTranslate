@@ -33,9 +33,24 @@ jobs:
           python -m pip install -r requirements-audit.lock
           python -m pip check
       - name: Audit locked dependencies
+        shell: pwsh
         run: |
-          python -m pip_audit -r requirements.lock --disable-pip --no-deps --cache-dir .pip-audit-cache
-          python -m pip_audit -r requirements-rapidocr.lock --disable-pip --no-deps --cache-dir .pip-audit-cache
+          foreach ($lockFile in @("requirements.lock", "requirements-rapidocr.lock")) {
+            $passed = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              python -m pip_audit -r $lockFile --disable-pip --no-deps --cache-dir .pip-audit-cache
+              $auditExit = $LASTEXITCODE
+              if ($auditExit -eq 0) {
+                $passed = $true
+                break
+              }
+              if ($attempt -lt 3) {
+                Write-Warning "pip-audit failed for $lockFile (attempt $attempt/3); retrying"
+                Start-Sleep -Seconds (5 * $attempt)
+              }
+            }
+            if (-not $passed) { exit $auditExit }
+          }
       - name: Validate and test
         shell: pwsh
         run: |

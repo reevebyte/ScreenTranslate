@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -7,7 +8,7 @@ from unittest.mock import Mock, patch
 from PIL import Image
 
 from screentrans.layout import Block
-from screentrans.ocr.base import Line, Word
+from screentrans.ocr.base import Line, OcrError, Word
 from screentrans.ocr import rapid_ocr, windows_ocr
 
 
@@ -31,12 +32,16 @@ class OcrConfidenceTests(unittest.TestCase):
             None,
         ))
         image = Image.new("RGB", (20, 20), "white")
+        image_array = object()
 
         with patch.object(rapid_ocr, "_get_engine", return_value=engine), patch.object(
+            rapid_ocr, "_image_array", return_value=image_array
+        ), patch.object(
             rapid_ocr, "_repair_spaces"
         ):
             lines = rapid_ocr.recognize(image)
 
+        engine.assert_called_once_with(image_array)
         self.assertEqual(len(lines), 3)
         self.assertEqual(lines[0].confidence, 0.875)
         self.assertEqual(lines[0].words[0].confidence, 0.875)
@@ -50,6 +55,14 @@ class OcrConfidenceTests(unittest.TestCase):
             with self.subTest(raw=raw):
                 self.assertIsNone(rapid_ocr._engine_confidence(raw))
         self.assertEqual(rapid_ocr._engine_confidence(0), 0.0)
+
+    def test_missing_optional_numpy_has_a_clear_runtime_error(self):
+        image = Image.new("RGB", (1, 1), "white")
+        with patch.dict(sys.modules, {"numpy": None}), self.assertRaisesRegex(
+            OcrError,
+            "缺少 NumPy",
+        ):
+            rapid_ocr._image_array(image)
 
     def test_windows_ocr_keeps_confidence_unknown(self):
         rect = SimpleNamespace(x=1, y=2, width=10, height=6)

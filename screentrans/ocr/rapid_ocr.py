@@ -10,7 +10,6 @@ import math
 import re
 import threading
 
-import numpy as np
 from PIL import Image
 
 from .base import Line, OcrError, Word
@@ -121,9 +120,20 @@ def _get_engine():
         return _engine
 
 
+def _image_array(img: Image.Image):
+    """Import NumPy only when the optional RapidOCR engine is actually used."""
+    try:
+        import numpy as np
+    except ImportError as exc:
+        raise OcrError(
+            "RapidOCR 缺少 NumPy 依赖，请重新安装 requirements-rapidocr.lock"
+        ) from exc
+    return np.array(img.convert("RGB"))
+
+
 def recognize(img: Image.Image) -> list[Line]:
     engine = _get_engine()
-    result, _ = engine(np.array(img.convert("RGB")))
+    result, _ = engine(_image_array(img))
     lines: list[Line] = []
     for item in result or []:
         box, text = item[0], item[1]
