@@ -85,7 +85,7 @@ jobs:
           $downloadUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/$env:SETUP_NAME"
           python release/generate_manifest.py --artifact "dist/$env:SETUP_NAME" --version $env:RELEASE_VERSION --download-url $downloadUrl --channel $env:RELEASE_CHANNEL --output dist/update-manifest.json
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ScreenTranslate-${{ github.ref_name }}-windows-x64
           path: |
