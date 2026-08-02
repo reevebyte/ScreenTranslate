@@ -1,0 +1,38 @@
+#include <windows.h>
+#include "resource.h"
+
+IDI_APP_ICON ICON "app.ico"
+
+STRINGTABLE
+BEGIN
+    IDS_APP_TITLE "ScreenTranslate"
+END
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION SCREENTRANS_VERSION_TUPLE
+ PRODUCTVERSION SCREENTRANS_VERSION_TUPLE
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+ FILEFLAGS 0x0L
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "ScreenTranslate\0"
+            VALUE "FileDescription", "ScreenTranslate native client\0"
+            VALUE "FileVersion", SCREENTRANS_VERSION_STRING
+            VALUE "InternalName", "ScreenTranslate\0"
+            VALUE "LegalCopyright", "Copyright (c) ScreenTranslate contributors\0"
+            VALUE "OriginalFilename", "ScreenTranslate.exe\0"
+            VALUE "ProductName", "ScreenTranslate\0"
+            VALUE "ProductVersion", SCREENTRANS_VERSION_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END

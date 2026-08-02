@@ -9,64 +9,36 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test-and-build:
+  native-build:
     runs-on: windows-latest
-    timeout-minutes: 30
-    env:
-      QT_QPA_PLATFORM: offscreen
-      PYTHONUTF8: "1"
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
-        with:
-          python-version: "3.11.9"
-          cache: pip
-          cache-dependency-path: |
-            requirements-build.lock
-            requirements-audit.lock
-      - name: Install locked toolchain
+      - name: Build native x64 executable
         shell: pwsh
-        run: |
-          python -m pip install pip==26.1.2
-          python -m pip install -r requirements-audit.lock
-          python -m pip check
-      - name: Audit locked dependencies
+        run: >-
+          powershell.exe -NoProfile -ExecutionPolicy Bypass
+          -File .\scripts\build-native.ps1
+          -Configuration Release
+          -Architecture x64
+          -RunSmokeTest
+      - name: Validate native release binary
         shell: pwsh
-        run: |
-          foreach ($lockFile in @("requirements.lock", "requirements-rapidocr.lock")) {
-            $passed = $false
-            for ($attempt = 1; $attempt -le 3; $attempt++) {
-              python -m pip_audit -r $lockFile --disable-pip --no-deps --cache-dir .pip-audit-cache
-              $auditExit = $LASTEXITCODE
-              if ($auditExit -eq 0) {
-                $passed = $true
-                break
-              }
-              if ($attempt -lt 3) {
-                Write-Warning "pip-audit failed for $lockFile (attempt $attempt/3); retrying"
-                Start-Sleep -Seconds (5 * $attempt)
-              }
-            }
-            if (-not $passed) { exit $auditExit }
-          }
-      - name: Validate ABI lock
-        run: python release/check_environment.py --strict-lock
-      - name: Run regression tests
-        run: python -m unittest discover -s tests -p "test_*.py" -v
-      - name: Build onedir executable
-        run: python build.py
-      - name: Run packaged offline self-test
-        shell: pwsh
-        env:
-          QT_QPA_PLATFORM: windows
-        run: dist/ScreenTranslate/ScreenTranslate.exe --selftest --quiet --offline
-      - name: Upload unsigned CI build
+        run: >-
+          powershell.exe -NoProfile -ExecutionPolicy Bypass
+          -File .\release\check_native_binary.ps1
+          -Path .\build\native\Release\ScreenTranslate.exe
+      - name: Upload unsigned native executable
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ScreenTranslate-windows-x64-unsigned
-          path: dist/ScreenTranslate/
+          name: ScreenTranslate-native-windows-x64-unsigned
+          path: build/native/Release/ScreenTranslate.exe
           if-no-files-found: error
           retention-days: 14
