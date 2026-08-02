@@ -804,7 +804,7 @@ void updater_self_test() {
       }
     })json";
     const auto parsed = parse_manifest(manifest, repository);
-    validate_info(parsed, repository);
+    validate_info(parsed, repository, false);
     if (parsed.version != L"1.0.3" || parsed.artifact.size != 123456) {
         throw UpdateError("manifest self-test failed");
     }

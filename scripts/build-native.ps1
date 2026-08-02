@@ -37,6 +37,22 @@ function Invoke-NativeCommand {
     }
 }
 
+function Invoke-GuiSelfTest {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Executable,
+
+        [Parameter(Mandatory)]
+        [string]$Argument
+    )
+
+    $process = Start-Process -FilePath $Executable -ArgumentList $Argument `
+        -WindowStyle Hidden -Wait -PassThru
+    if ($process.ExitCode -ne 0) {
+        throw "Self-test failed with exit code $($process.ExitCode)`: $Argument"
+    }
+}
+
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $sourceDirectory = Join-Path $repositoryRoot 'native'
 
@@ -134,9 +150,9 @@ if (-not (Test-Path -LiteralPath $executable)) {
 
 if ($RunSmokeTest) {
     Write-Host 'Running native startup smoke test...'
-    Invoke-NativeCommand -Executable $executable -Arguments @('--self-test')
+    Invoke-GuiSelfTest -Executable $executable -Argument '--self-test'
     Write-Host 'Running native updater smoke test...'
-    Invoke-NativeCommand -Executable $executable -Arguments @('--update-self-test')
+    Invoke-GuiSelfTest -Executable $executable -Argument '--update-self-test'
 }
 
 Write-Host "Built: $executable"
