@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(ScreenTranslateNative VERSION 1.0.3 LANGUAGES CXX RC)
+project(ScreenTranslateNative VERSION 1.0.4 LANGUAGES CXX RC)
 
 set(SCREENTRANS_UPDATE_REPOSITORY_URL
     "https://github.com/reevebyte/ScreenTranslate"

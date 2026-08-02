@@ -122,7 +122,7 @@ build\native\Release\ScreenTranslate.exe
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\release\check_native_binary.ps1 `
   -Path .\build\native\Release\ScreenTranslate.exe `
-  -ExpectedVersion 1.0.3
+  -ExpectedVersion 1.0.4
 ```
 
 Debug 构建：

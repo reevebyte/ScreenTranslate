@@ -21,6 +21,7 @@ AppSupportURL=https://github.com/reevebyte/ScreenTranslate/issues
 AppUpdatesURL=https://github.com/reevebyte/ScreenTranslate/releases
 AppMutex=Global\ScreenTranslate.SingleInstance.v1
 DefaultDirName={localappdata}\Programs\ScreenTranslate
+DisableDirPage=no
 DefaultGroupName=ScreenTranslate
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
