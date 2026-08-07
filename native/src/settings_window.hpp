@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config.hpp"
+#include "text_translation_session.hpp"
 
 #include <windows.h>
 
@@ -23,6 +24,12 @@ public:
     SettingsWindow& operator=(const SettingsWindow&) = delete;
 
     void show(HWND owner);
+    void show_translation(HWND owner);
+    void show_text_translation(HWND owner);
+    void attach_text_translation(TextTranslationSession& session,
+                                 TextTranslationCallbacks callbacks);
+    void detach_text_translation() noexcept;
+    void refresh_text_translation();
     void self_test(HWND owner);
     [[nodiscard]] bool preprocess_message(MSG& message);
     void set_hotkeys_changed_callback(std::function<bool()> callback) {
@@ -70,6 +77,7 @@ private:
     void create_ocr_page();
     void create_appearance_page();
     void create_other_page();
+    void create_text_translation_page();
     void create_theme_resources();
     void apply_control_theme(HWND control);
     void layout_controls();
@@ -101,13 +109,16 @@ private:
 
     HINSTANCE instance_{};
     ConfigStore& config_;
+    TextTranslationSession* text_session_{};
+    TextTranslationCallbacks text_callbacks_;
     HWND owner_{};
     HWND window_{};
-    std::array<HWND, 5> navigation_{};
+    std::array<HWND, 6> navigation_{};
     HWND status_{};
     HWND side_footer_{};
     HWND capture_hotkey_{};
     HWND toggle_hotkey_{};
+    HWND text_hotkey_{};
     HWND provider_{};
     HWND provider_key_label_{};
     HWND provider_key_{};
@@ -141,6 +152,12 @@ private:
     HWND open_config_{};
     HWND restart_{};
     HWND diagnostic_command_{};
+    HWND text_target_{};
+    HWND text_input_{};
+    HWND text_output_{};
+    HWND text_translate_{};
+    HWND text_clear_{};
+    HWND text_copy_{};
     HFONT font_{};
     HFONT title_font_{};
     HFONT brand_font_{};
@@ -150,7 +167,7 @@ private:
     HBRUSH sidebar_background_{};
     HBRUSH card_background_{};
     HBRUSH input_background_{};
-    std::array<std::vector<HWND>, 5> page_controls_;
+    std::array<std::vector<HWND>, 6> page_controls_;
     std::vector<std::vector<std::wstring>> ocr_language_options_;
     std::string window_error_;
     std::wstring loaded_provider_;
@@ -162,6 +179,7 @@ private:
     bool test_success_{};
     bool test_pending_{};
     bool model_refreshing_{};
+    bool syncing_text_{};
     std::jthread test_thread_;
     std::jthread model_thread_;
     std::uint64_t model_generation_{};

@@ -144,6 +144,7 @@ JsonObject ConfigStore::defaults() {
     auto result = parse_json(R"json({
       "hotkey":"Ctrl+Alt+Q",
       "hotkey_toggle":"Ctrl+Alt+W",
+      "hotkey_text_translate":"Ctrl+Alt+Space",
       "ocr":{
         "engine":"windows",
         "languages":["zh-Hans-CN","en-US"],

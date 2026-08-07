@@ -15,6 +15,14 @@ namespace screentrans {
 
 using winrt::Windows::Data::Json::JsonObject;
 
+namespace {
+
+constexpr std::size_t lane_index(PipelineLane lane) noexcept {
+    return static_cast<std::size_t>(lane);
+}
+
+}  // namespace
+
 PipelineOptions PipelineOptions::from_config(const ConfigStore& config) {
     PipelineOptions result;
     result.ocr_engine = config.string(L"ocr.engine", L"windows");
@@ -28,7 +36,12 @@ PipelineOptions PipelineOptions::from_config(const ConfigStore& config) {
     return result;
 }
 
-PipelineController::PipelineController(HWND dispatcher) : dispatcher_(dispatcher) {
+PipelineController::PipelineController(HWND dispatcher)
+    : PipelineController(dispatcher, true) {}
+
+PipelineController::PipelineController(HWND dispatcher, bool start_workers)
+    : dispatcher_(dispatcher) {
+    if (!start_workers) return;
     workers_.reserve(2);
     for (int index = 0; index < 2; ++index) {
         workers_.emplace_back([this](std::stop_token stop) noexcept {
@@ -59,7 +72,8 @@ PipelineController::~PipelineController() {
 }
 
 std::uint64_t PipelineController::schedule(std::shared_ptr<const PixelBuffer> image,
-                                           PipelineOptions options) {
+                                           PipelineOptions options,
+                                           PipelineLane lane) {
     if (!image || image->empty()) {
         throw AppError("cannot schedule an empty screenshot");
     }
@@ -69,12 +83,18 @@ std::uint64_t PipelineController::schedule(std::shared_ptr<const PixelBuffer> im
         if (shutting_down_) throw AppError("pipeline is shutting down");
         if (failed_workers_ == 2) throw AppError("pipeline workers are unavailable");
         request->id = ++next_request_;
+        request->lane = lane;
         request->image = std::move(image);
         request->options = std::move(options);
-        latest_request_ = request->id;
-        for (auto& [id, active] : active_) active->cancellation.request_stop();
-        for (auto& queued : pending_) queued->cancellation.request_stop();
-        pending_.clear();
+        latest_requests_[lane_index(lane)] = request->id;
+        for (auto& [id, active] : active_) {
+            if (active->lane == lane) active->cancellation.request_stop();
+        }
+        std::erase_if(pending_, [lane](const auto& queued) {
+            if (queued->lane != lane) return false;
+            queued->cancellation.request_stop();
+            return true;
+        });
         pending_.push_back(request);
     }
     condition_.notify_one();
@@ -82,7 +102,8 @@ std::uint64_t PipelineController::schedule(std::shared_ptr<const PixelBuffer> im
 }
 
 std::uint64_t PipelineController::schedule_translation(std::vector<TextBlock> blocks,
-                                                       PipelineOptions options) {
+                                                       PipelineOptions options,
+                                                       PipelineLane lane) {
     if (blocks.empty()) {
         throw AppError("cannot translate an empty block list");
     }
@@ -92,21 +113,43 @@ std::uint64_t PipelineController::schedule_translation(std::vector<TextBlock> bl
         if (shutting_down_) throw AppError("pipeline is shutting down");
         if (failed_workers_ == 2) throw AppError("pipeline workers are unavailable");
         request->id = ++next_request_;
+        request->lane = lane;
         request->blocks = std::move(blocks);
         request->options = std::move(options);
-        latest_request_ = request->id;
-        for (auto& [id, active] : active_) active->cancellation.request_stop();
-        for (auto& queued : pending_) queued->cancellation.request_stop();
-        pending_.clear();
+        latest_requests_[lane_index(lane)] = request->id;
+        for (auto& [id, active] : active_) {
+            if (active->lane == lane) active->cancellation.request_stop();
+        }
+        std::erase_if(pending_, [lane](const auto& queued) {
+            if (queued->lane != lane) return false;
+            queued->cancellation.request_stop();
+            return true;
+        });
         pending_.push_back(request);
     }
     condition_.notify_one();
     return request->id;
 }
 
+void PipelineController::cancel_lane(PipelineLane lane) {
+    std::lock_guard lock(mutex_);
+    ++latest_requests_[lane_index(lane)];
+    for (auto& [id, request] : active_) {
+        if (request->lane == lane) request->cancellation.request_stop();
+    }
+    std::erase_if(pending_, [lane](const auto& request) {
+        if (request->lane != lane) return false;
+        request->cancellation.request_stop();
+        return true;
+    });
+    std::erase_if(completions_, [lane](const auto& completion) {
+        return completion.lane == lane;
+    });
+}
+
 void PipelineController::cancel_all() {
     std::lock_guard lock(mutex_);
-    ++latest_request_;
+    for (auto& latest : latest_requests_) ++latest;
     for (auto& [id, request] : active_) request->cancellation.request_stop();
     for (auto& request : pending_) request->cancellation.request_stop();
     pending_.clear();
@@ -123,9 +166,77 @@ std::vector<PipelineCompletion> PipelineController::take_completions() {
     return output;
 }
 
-std::uint64_t PipelineController::latest_request() const noexcept {
+std::uint64_t PipelineController::latest_request(PipelineLane lane) const noexcept {
     std::lock_guard lock(mutex_);
-    return latest_request_;
+    return latest_requests_[lane_index(lane)];
+}
+
+void PipelineController::self_test() {
+    PipelineController pipeline(nullptr, false);
+    PipelineOptions options;
+    const auto blocks = [](std::wstring text) {
+        TextBlock block;
+        OcrLine line;
+        line.text = std::move(text);
+        line.bounds = RectF{0.0F, 0.0F, 1.0F, 1.0F};
+        block.lines.push_back(std::move(line));
+        std::vector<TextBlock> result;
+        result.push_back(std::move(block));
+        return result;
+    };
+
+    const auto visual = pipeline.schedule_translation(
+        blocks(L"visual"), options, PipelineLane::visual);
+    const auto old_text = pipeline.schedule_translation(
+        blocks(L"old text"), options, PipelineLane::text);
+    const auto current_text = pipeline.schedule_translation(
+        blocks(L"current text"), options, PipelineLane::text);
+    {
+        std::lock_guard lock(pipeline.mutex_);
+        if (pipeline.pending_.size() != 2 ||
+            pipeline.pending_[0]->id != visual ||
+            pipeline.pending_[1]->id != current_text) {
+            throw AppError("pipeline lane self-test did not retain one request per lane");
+        }
+    }
+    if (pipeline.latest_request(PipelineLane::visual) != visual ||
+        pipeline.latest_request(PipelineLane::text) != current_text) {
+        throw AppError("pipeline lane self-test latest request mismatch");
+    }
+
+    pipeline.finish(PipelineCompletion{
+        old_text, PipelineLane::text, PipelineResult{}, {},
+    });
+    if (!pipeline.take_completions().empty()) {
+        throw AppError("pipeline lane self-test accepted a late completion");
+    }
+    pipeline.finish(PipelineCompletion{
+        visual, PipelineLane::visual, PipelineResult{}, {},
+    });
+    pipeline.finish(PipelineCompletion{
+        current_text, PipelineLane::text, PipelineResult{}, {},
+    });
+    pipeline.cancel_lane(PipelineLane::visual);
+    auto completions = pipeline.take_completions();
+    if (completions.size() != 1 || completions[0].lane != PipelineLane::text ||
+        completions[0].request_id != current_text) {
+        throw AppError("pipeline lane self-test cancellation crossed lanes");
+    }
+
+    const auto visual_latest = pipeline.latest_request(PipelineLane::visual);
+    const auto text_latest = pipeline.latest_request(PipelineLane::text);
+    pipeline.cancel_lane(PipelineLane::text);
+    if (pipeline.latest_request(PipelineLane::visual) != visual_latest ||
+        pipeline.latest_request(PipelineLane::text) == text_latest) {
+        throw AppError("pipeline lane self-test generation cancellation mismatch");
+    }
+    pipeline.cancel_all();
+    {
+        std::lock_guard lock(pipeline.mutex_);
+        if (!pipeline.pending_.empty() || !pipeline.completions_.empty()) {
+            throw AppError("pipeline lane self-test cancel all left queued work");
+        }
+    }
 }
 
 void PipelineController::worker_loop(std::stop_token shutdown) {
@@ -143,6 +254,7 @@ void PipelineController::worker_loop(std::stop_token shutdown) {
         }
         PipelineCompletion completion;
         completion.request_id = request->id;
+        completion.lane = request->lane;
         try {
             if (request->cancellation.stop_requested()) {
                 throw AppError("request cancelled");
@@ -250,10 +362,13 @@ PipelineResult PipelineController::translate_blocks(std::vector<TextBlock> block
 void PipelineController::finish(PipelineCompletion completion) {
     {
         std::lock_guard lock(mutex_);
-        if (shutting_down_ || completion.request_id != latest_request_) return;
+        if (shutting_down_ ||
+            completion.request_id != latest_requests_[lane_index(completion.lane)]) {
+            return;
+        }
         completions_.push_back(std::move(completion));
     }
-    PostMessageW(dispatcher_, pipeline_completed_message, 0, 0);
+    if (dispatcher_) PostMessageW(dispatcher_, pipeline_completed_message, 0, 0);
 }
 
 void PipelineController::worker_failed() noexcept {
@@ -261,15 +376,22 @@ void PipelineController::worker_failed() noexcept {
     try {
         std::lock_guard lock(mutex_);
         ++failed_workers_;
-        if (failed_workers_ != 2 || shutting_down_ || latest_request_ == 0) return;
+        if (failed_workers_ != 2 || shutting_down_) return;
+        std::array<bool, 2> affected{};
+        for (const auto& request : pending_) affected[lane_index(request->lane)] = true;
+        for (const auto& [id, request] : active_) affected[lane_index(request->lane)] = true;
         for (auto& request : pending_) request->cancellation.request_stop();
         for (auto& [id, request] : active_) request->cancellation.request_stop();
         pending_.clear();
         active_.clear();
-        completions_.push_back(PipelineCompletion{
-            latest_request_, std::nullopt, L"后台处理线程初始化失败，请重启 ScreenTranslate",
-        });
-        notify = true;
+        for (std::size_t index = 0; index < affected.size(); ++index) {
+            if (!affected[index]) continue;
+            completions_.push_back(PipelineCompletion{
+                latest_requests_[index], static_cast<PipelineLane>(index), std::nullopt,
+                L"后台处理线程初始化失败，请重启 ScreenTranslate",
+            });
+            notify = true;
+        }
     } catch (...) {
         return;
     }

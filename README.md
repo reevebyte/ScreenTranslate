@@ -26,8 +26,9 @@ Release 同时附带 `LICENSE.txt` 和 `THIRD_PARTY_NOTICES.txt`。它们不是�
 | --- | --- |
 | `Ctrl+Alt+Q` | 冻结屏幕并开始框选翻译 |
 | `Ctrl+Alt+W` | 收起或重新显示上一次译文 |
+| `Ctrl+Alt+Space` | 显示或隐藏快速文字翻译框 |
 
-左键单击托盘图标可以开始框选；右键菜单提供设置、检查更新、重启和退出。快捷键可在设置中修改。
+左键单击托盘图标可以开始框选；右键菜单提供文字翻译、设置、检查更新、重启和退出。快捷键可在设置中修改，三个快捷键不能重复。快速文字翻译也可以改成 `Ctrl+Space`，但可能与输入法切换冲突。
 
 本项目目前不使用 Authenticode 证书。Windows SmartScreen 可能显示“未知发布者”或首次下载警告，请只从上面的官方 Releases 页面下载。
 
@@ -39,7 +40,9 @@ Release 同时附带 `LICENSE.txt` 和 `THIRD_PARTY_NOTICES.txt`。它们不是�
 - 12 个翻译后端，包括官方 API、免密网页接口和大模型接口；
 - 结果窗口可移动、缩放、收起、复制、查看原文和重新翻译；
 - 分块 OCR 校对，可只重译修改过的文本块；
-- 后台任务取消、最多两个 worker，并只保留最新一次请求；
+- 托盘菜单提供双栏文字翻译窗口，输入停止 500 毫秒后自动翻译；
+- 聚焦式快速翻译框与常规文字翻译窗口共享当前输入、目标语言和结果；
+- 截图与文字翻译使用隔离的后台请求通道，各通道只保留最新一次请求；
 - 兼容既有 `config.json` 和 DPAPI 密钥格式；
 - 基于 GitHub Releases 的更新检查、下载、SHA-256 校验和安装。
 
@@ -93,6 +96,8 @@ DPAPI 可以降低误传配置文件造成的泄露风险，但同一 Windows �
 
 如果开启“翻译后自动复制”，译文还可能进入 Windows 剪贴板历史或跨设备同步。处理敏感文字时应关闭该选项以及系统剪贴板历史。
 
+文字翻译窗口中的内容只保存在本次程序运行的内存中，不写入配置或历史，也不会自动复制。文字仍会发送给设置中当前选择的网络翻译服务；请勿提交不应交给该服务处理的敏感内容。
+
 ## 构建原生版
 
 需要：
@@ -122,7 +127,7 @@ build\native\Release\ScreenTranslate.exe
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\release\check_native_binary.ps1 `
   -Path .\build\native\Release\ScreenTranslate.exe `
-  -ExpectedVersion 1.0.4
+  -ExpectedVersion 1.1.0
 ```
 
 Debug 构建：

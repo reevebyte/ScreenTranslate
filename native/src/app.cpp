@@ -27,15 +27,18 @@ constexpr UINT initialize_message = WM_APP + 3;
 constexpr UINT_PTR capture_timer = 1;
 constexpr UINT_PTR recapture_timer = 2;
 constexpr UINT_PTR update_timer = 3;
+constexpr UINT_PTR text_translate_timer = 4;
 constexpr UINT silent_update_completed_message = WM_APP + 41;
 constexpr int hotkey_capture = 1;
 constexpr int hotkey_toggle = 2;
+constexpr int hotkey_text_translate = 3;
 constexpr UINT command_capture = 3001;
 constexpr UINT command_restore = 3002;
 constexpr UINT command_settings = 3003;
 constexpr UINT command_updates = 3004;
 constexpr UINT command_restart = 3005;
 constexpr UINT command_exit = 3006;
+constexpr UINT command_text_translate = 3007;
 
 constexpr COLORREF tray_color_background = RGB(32, 32, 32);
 constexpr COLORREF tray_color_border = RGB(58, 58, 58);
@@ -54,6 +57,7 @@ enum class TrayMenuIcon {
     none,
     check,
     capture,
+    text,
     restore,
     settings,
     update,
@@ -160,6 +164,9 @@ void draw_tray_menu_icon(HDC dc, const RECT& bounds, TrayMenuIcon icon,
         break;
     case TrayMenuIcon::capture:
         glyph = static_cast<wchar_t>(0xE7A8);  // Crop
+        break;
+    case TrayMenuIcon::text:
+        glyph = static_cast<wchar_t>(0xE8D2);  // Edit
         break;
     case TrayMenuIcon::restore:
         glyph = static_cast<wchar_t>(0xE890);  // View
@@ -518,6 +525,30 @@ AppHost::AppHost(HINSTANCE instance)
       overlay_(instance), result_(instance) {
     create_message_window();
     pipeline_ = std::make_unique<PipelineController>(window_);
+    text_session_ = std::make_unique<TextTranslationSession>(config_, *pipeline_);
+    quick_window_ = std::make_unique<QuickTranslateWindow>(instance_, config_, *text_session_);
+    TextTranslationCallbacks text_callbacks;
+    text_callbacks.input_changed = [this](std::wstring value) {
+        on_text_input_changed(std::move(value));
+    };
+    text_callbacks.target_changed = [this](std::wstring value) {
+        on_text_target_changed(std::move(value));
+    };
+    text_callbacks.composition_changed = [this](bool composing) {
+        on_text_composition_changed(composing);
+    };
+    text_callbacks.translate_now = [this] { schedule_text_translation(true); };
+    text_callbacks.clear = [this] {
+        KillTimer(window_, text_translate_timer);
+        if (text_session_) text_session_->clear();
+    };
+    text_callbacks.copy = [this] {
+        if (text_session_) copy_to_clipboard(text_session_->output());
+    };
+    text_callbacks.open_settings = [this] { open_translation_settings(); };
+    settings_.attach_text_translation(*text_session_, text_callbacks);
+    quick_window_->set_callbacks(std::move(text_callbacks));
+    text_session_->set_changed_callback([this] { refresh_text_translation_views(); });
     result_.set_copy_callback([this](std::wstring_view text) { copy_to_clipboard(text); });
     result_.set_retry_callback([this] { retry_translation(); });
     result_.set_edit_callback([this] { open_block_editor(); });
@@ -530,7 +561,7 @@ AppHost::AppHost(HINSTANCE instance)
         last_image_.reset();
         last_blocks_.clear();
         last_result_.reset();
-        if (pipeline_) pipeline_->cancel_all();
+        if (pipeline_) pipeline_->cancel_lane(PipelineLane::visual);
     });
     result_.set_recapture_callback([this](const RECT& rect) { request_recapture(rect); });
     settings_.set_hotkeys_changed_callback([this] { return apply_hotkeys(true); });
@@ -539,6 +570,10 @@ AppHost::AppHost(HINSTANCE instance)
         refresh_tray_tooltip();
         refresh_tray_icon();
         updates_.refresh_appearance();
+        if (quick_window_) quick_window_->refresh_appearance();
+        if (text_session_ && text_session_->configuration_changed()) {
+            schedule_text_translation(true);
+        }
     });
     updates_.set_quit_callback([this] { quit(); });
     updates_.set_update_available_callback(
@@ -554,6 +589,11 @@ AppHost::~AppHost() {
     result_.set_closed_callback({});
     result_.close();
     overlay_.close();
+    KillTimer(window_, text_translate_timer);
+    if (text_session_) text_session_->set_changed_callback({});
+    settings_.detach_text_translation();
+    quick_window_.reset();
+    text_session_.reset();
     pipeline_.reset();
     if (silent_update_thread_.joinable()) {
         silent_update_thread_.request_stop();
@@ -563,6 +603,7 @@ AppHost::~AppHost() {
     if (window_) {
         UnregisterHotKey(window_, hotkey_capture);
         UnregisterHotKey(window_, hotkey_toggle);
+        UnregisterHotKey(window_, hotkey_text_translate);
         DestroyWindow(window_);
         window_ = nullptr;
     }
@@ -603,7 +644,9 @@ void AppHost::add_tray_icon() {
     tray.hIcon = icon;
     const auto capture = config_.string(L"hotkey", L"Ctrl+Alt+Q");
     const auto toggle = config_.string(L"hotkey_toggle", L"Ctrl+Alt+W");
-    const auto tip = L"划词截屏翻译\n框选翻译：" + capture + L"\n收起 / 显示：" + toggle;
+    const auto text = config_.string(L"hotkey_text_translate", L"Ctrl+Alt+Space");
+    const auto tip = L"划词截屏翻译\n框选：" + capture + L"\n快速翻译：" + text +
+                     L"\n收起 / 显示：" + toggle;
     wcsncpy_s(tray.szTip, tip.c_str(), _TRUNCATE);
     if (!Shell_NotifyIconW(NIM_ADD, &tray)) {
         DestroyIcon(icon);
@@ -651,7 +694,9 @@ void AppHost::refresh_tray_tooltip() {
     if (!tray_.hWnd) return;
     const auto capture = config_.string(L"hotkey", L"Ctrl+Alt+Q");
     const auto toggle = config_.string(L"hotkey_toggle", L"Ctrl+Alt+W");
-    const auto tip = L"划词截屏翻译\n框选翻译：" + capture + L"\n收起 / 显示：" + toggle;
+    const auto text = config_.string(L"hotkey_text_translate", L"Ctrl+Alt+Space");
+    const auto tip = L"划词截屏翻译\n框选：" + capture + L"\n快速翻译：" + text +
+                     L"\n收起 / 显示：" + toggle;
     tray_.uFlags = NIF_TIP;
     wcsncpy_s(tray_.szTip, tip.c_str(), _TRUNCATE);
     Shell_NotifyIconW(NIM_MODIFY, &tray_);
@@ -688,7 +733,7 @@ void AppHost::show_tray_menu(POINT location) {
     const auto toggle = config_.string(L"hotkey_toggle", L"Ctrl+Alt+W");
     const bool can_restore = last_image_ && !result_.visible();
     std::vector<TrayMenuItem> items;
-    items.reserve(7);
+    items.reserve(9);
     const auto add_item = [&](UINT command, TrayMenuIcon icon, std::wstring label,
                               std::wstring secondary = {}, bool enabled = true) {
         TrayMenuItem item;
@@ -702,6 +747,7 @@ void AppHost::show_tray_menu(POINT location) {
         items.push_back(std::move(item));
     };
     add_item(command_capture, TrayMenuIcon::capture, L"开始框选翻译", capture);
+    add_item(command_text_translate, TrayMenuIcon::text, L"文字翻译…");
     add_item(command_restore, TrayMenuIcon::restore, L"显示上次译文", toggle, can_restore);
     TrayMenuItem separator;
     separator.separator = true;
@@ -753,13 +799,19 @@ void AppHost::show_tray_menu(POINT location) {
 }
 
 bool AppHost::apply_hotkeys(bool announce_changes) {
-    // Release both registrations first so exchanging the two shortcuts is valid.
-    UnregisterHotKey(window_, hotkey_capture);
-    UnregisterHotKey(window_, hotkey_toggle);
+    // Release all registrations first so exchanging shortcuts is valid.
+    const auto unregister_all = [this] {
+        UnregisterHotKey(window_, hotkey_capture);
+        UnregisterHotKey(window_, hotkey_toggle);
+        UnregisterHotKey(window_, hotkey_text_translate);
+    };
+    unregister_all();
     bool success = true;
     std::wstring error;
     const auto capture_spec = config_.string(L"hotkey", L"Ctrl+Alt+Q");
     const auto toggle_spec = config_.string(L"hotkey_toggle", L"Ctrl+Alt+W");
+    const auto text_spec = config_.string(
+        L"hotkey_text_translate", L"Ctrl+Alt+Space");
     const bool capture_registered = register_hotkey(
         window_, hotkey_capture, capture_spec, &error);
     if (!capture_registered) {
@@ -773,11 +825,37 @@ bool AppHost::apply_hotkeys(bool announce_changes) {
         success = false;
         notify(L"划词截屏翻译 · 收起 / 显示快捷键未生效", error);
     }
-    if (success) {
+    error.clear();
+    const bool text_registered = register_hotkey(
+        window_, hotkey_text_translate, text_spec, &error);
+    if (!text_registered) {
+        success = false;
+        notify(L"划词截屏翻译 · 快速翻译快捷键未生效", error);
+    }
+    if (!success) {
+        unregister_all();
+        bool restored = true;
+        const auto restore = [&](int id, const std::wstring& spec) {
+            if (spec.empty()) return;
+            std::wstring restore_error;
+            if (!register_hotkey(window_, id, spec, &restore_error)) restored = false;
+        };
+        restore(hotkey_capture, registered_capture_hotkey_);
+        restore(hotkey_toggle, registered_toggle_hotkey_);
+        restore(hotkey_text_translate, registered_text_hotkey_);
+        if (!restored) {
+            notify(L"划词截屏翻译 · 快捷键恢复失败",
+                   L"原快捷键也被其他程序占用，请在设置中重新选择");
+        }
+        return false;
+    }
+    {
         const auto old_capture = registered_capture_hotkey_;
         const auto old_toggle = registered_toggle_hotkey_;
+        const auto old_text = registered_text_hotkey_;
         registered_capture_hotkey_ = capture_spec;
         registered_toggle_hotkey_ = toggle_spec;
+        registered_text_hotkey_ = text_spec;
         refresh_tray_tooltip();
         if (announce_changes && !old_capture.empty() && old_capture != capture_spec) {
             notify(L"划词截屏翻译", L"框选翻译快捷键已改为 " + capture_spec);
@@ -785,16 +863,20 @@ bool AppHost::apply_hotkeys(bool announce_changes) {
         if (announce_changes && !old_toggle.empty() && old_toggle != toggle_spec) {
             notify(L"划词截屏翻译", L"收起 / 显示快捷键已改为 " + toggle_spec);
         }
+        if (announce_changes && !old_text.empty() && old_text != text_spec) {
+            notify(L"划词截屏翻译", L"快速翻译快捷键已改为 " + text_spec);
+        }
     }
-    return success;
+    return true;
 }
 
 void AppHost::start_capture() {
     if (overlay_.active() || shutting_down_) return;
+    if (quick_window_) quick_window_->hide();
     BlockEditor::close_active();
     KillTimer(window_, recapture_timer);
     pending_recapture_.reset();
-    if (pipeline_) pipeline_->cancel_all();
+    if (pipeline_) pipeline_->cancel_lane(PipelineLane::visual);
     current_request_ = 0;
     block_translation_request_.reset();
     result_.close();
@@ -845,6 +927,10 @@ void AppHost::start_pipeline(std::shared_ptr<const PixelBuffer> image, const REC
 void AppHost::process_pipeline_completions() {
     if (!pipeline_) return;
     for (auto& completion : pipeline_->take_completions()) {
+        if (completion.lane == PipelineLane::text) {
+            if (text_session_) text_session_->handle_completion(std::move(completion));
+            continue;
+        }
         if (block_translation_request_ &&
             completion.request_id == block_translation_request_->request_id) {
             process_block_translation(std::move(completion));
@@ -866,6 +952,55 @@ void AppHost::process_pipeline_completions() {
             result_.set_error(completion.error.empty() ? L"识别或翻译失败" : completion.error);
         }
     }
+}
+
+void AppHost::open_text_translation() {
+    if (shutting_down_) return;
+    try {
+        settings_.show_text_translation(window_);
+    } catch (const std::exception& error) {
+        notify(L"划词截屏翻译", L"无法打开文字翻译：" + utf8_to_wide(error.what()));
+    }
+}
+
+void AppHost::toggle_quick_translation() {
+    if (!quick_window_ || shutting_down_ || overlay_.active()) return;
+    try {
+        quick_window_->toggle(window_);
+    } catch (const std::exception& error) {
+        notify(L"划词截屏翻译", L"无法打开快速翻译：" + utf8_to_wide(error.what()));
+    }
+}
+
+void AppHost::on_text_input_changed(std::wstring value) {
+    if (!text_session_ || !text_session_->set_input(std::move(value))) return;
+    schedule_text_translation(false);
+}
+
+void AppHost::on_text_target_changed(std::wstring value) {
+    if (!text_session_ || !text_session_->set_target(std::move(value))) return;
+    schedule_text_translation(true);
+}
+
+void AppHost::on_text_composition_changed(bool composing) {
+    text_composing_ = composing;
+    KillTimer(window_, text_translate_timer);
+    if (!composing) schedule_text_translation(false);
+}
+
+void AppHost::schedule_text_translation(bool immediate) {
+    KillTimer(window_, text_translate_timer);
+    if (!text_session_ || text_composing_ || !text_session_->can_submit()) return;
+    if (immediate) {
+        text_session_->submit();
+    } else {
+        SetTimer(window_, text_translate_timer, 500, nullptr);
+    }
+}
+
+void AppHost::refresh_text_translation_views() {
+    settings_.refresh_text_translation();
+    if (quick_window_) quick_window_->refresh();
 }
 
 void AppHost::toggle_result() {
@@ -903,7 +1038,7 @@ void AppHost::copy_to_clipboard(std::wstring_view text) {
 void AppHost::retry_translation() {
     if (!last_image_) return;
     BlockEditor::close_active();
-    if (pipeline_) pipeline_->cancel_all();
+    if (pipeline_) pipeline_->cancel_lane(PipelineLane::visual);
     block_translation_request_.reset();
     result_.show_retry_loading(result_appearance());
     current_request_ = 0;
@@ -999,7 +1134,7 @@ bool AppHost::schedule_block_translations(std::vector<std::size_t> indices,
     } catch (const std::exception& error) {
         auto replaced = std::move(block_translation_request_);
         block_translation_request_.reset();
-        pipeline_->cancel_all();
+        pipeline_->cancel_lane(PipelineLane::visual);
         if (replaced && replaced->editor) {
             for (const auto index : replaced->indices) {
                 replaced->editor->set_error(
@@ -1090,7 +1225,7 @@ void AppHost::refresh_cached_result() {
 
 void AppHost::request_recapture(const RECT& rect) {
     BlockEditor::close_active();
-    if (pipeline_) pipeline_->cancel_all();
+    if (pipeline_) pipeline_->cancel_lane(PipelineLane::visual);
     current_request_ = 0;
     block_translation_request_.reset();
     pending_recapture_ = rect;
@@ -1130,6 +1265,14 @@ void AppHost::open_settings() {
         refresh_tray_tooltip();
     } catch (const std::exception& error) {
         notify(L"划词截屏翻译", L"无法打开设置：" + utf8_to_wide(error.what()));
+    }
+}
+
+void AppHost::open_translation_settings() {
+    try {
+        settings_.show_translation(window_);
+    } catch (const std::exception& error) {
+        notify(L"划词截屏翻译", L"无法打开翻译设置：" + utf8_to_wide(error.what()));
     }
 }
 
@@ -1265,6 +1408,7 @@ LRESULT AppHost::handle_message(UINT message, WPARAM wparam, LPARAM lparam) {
     case WM_HOTKEY:
         if (wparam == hotkey_capture) start_capture();
         else if (wparam == hotkey_toggle) toggle_result();
+        else if (wparam == hotkey_text_translate) toggle_quick_translation();
         return 0;
     case tray_message: {
         const UINT event = LOWORD(lparam);
@@ -1292,6 +1436,7 @@ LRESULT AppHost::handle_message(UINT message, WPARAM wparam, LPARAM lparam) {
     case WM_COMMAND:
         switch (LOWORD(wparam)) {
         case command_capture: start_capture(); return 0;
+        case command_text_translate: open_text_translation(); return 0;
         case command_restore:
             if (last_image_ && !result_.visible()) result_.restore();
             return 0;
@@ -1312,6 +1457,11 @@ LRESULT AppHost::handle_message(UINT message, WPARAM wparam, LPARAM lparam) {
         if (wparam == update_timer) {
             KillTimer(window_, update_timer); start_silent_update_check(); return 0;
         }
+        if (wparam == text_translate_timer) {
+            KillTimer(window_, text_translate_timer);
+            schedule_text_translation(true);
+            return 0;
+        }
         break;
     case pipeline_completed_message: process_pipeline_completions(); return 0;
     case silent_update_completed_message: {
@@ -1328,6 +1478,7 @@ LRESULT AppHost::handle_message(UINT message, WPARAM wparam, LPARAM lparam) {
         remove_tray_icon();
         UnregisterHotKey(window_, hotkey_capture);
         UnregisterHotKey(window_, hotkey_toggle);
+        UnregisterHotKey(window_, hotkey_text_translate);
         PostQuitMessage(0);
         return 0;
     case WM_NCDESTROY:
@@ -1346,6 +1497,8 @@ int AppHost::run(bool self_test, bool update_self_test) {
         start_silent_update_check();
     }
     if (self_test) {
+        PipelineController::self_test();
+        if (text_session_) text_session_->self_test();
         tray_menu_layout_self_test();
         HICON tinted_icon = load_accent_icon(instance_, RGB(236, 76, 92));
         const bool tint_ok = icon_contains_red_accent(tinted_icon);
@@ -1354,6 +1507,7 @@ int AppHost::run(bool self_test, bool update_self_test) {
         BlockEditor::self_test(instance_, window_);
         settings_.self_test(window_);
         updates_.self_test(window_);
+        if (quick_window_) quick_window_->self_test(window_);
         if (!PostMessageW(window_, WM_CLOSE, 0, 0)) {
             throw_last_error("queue self-test shutdown");
         }
@@ -1363,7 +1517,8 @@ int AppHost::run(bool self_test, bool update_self_test) {
     while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
         if (BlockEditor::preprocess_active_message(message) ||
             settings_.preprocess_message(message) ||
-            updates_.preprocess_message(message)) {
+            updates_.preprocess_message(message) ||
+            (quick_window_ && quick_window_->preprocess_message(message))) {
             continue;
         }
         TranslateMessage(&message);

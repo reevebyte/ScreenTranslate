@@ -1,6 +1,7 @@
 #include "settings_window.hpp"
 
 #include "hotkey.hpp"
+#include "language.hpp"
 #include "rapidocr_plugin.hpp"
 #include "resource.h"
 #include "translator.hpp"
@@ -30,7 +31,7 @@ namespace {
 
 constexpr wchar_t class_name[] = L"ScreenTranslate.Native.SettingsWindow.v1";
 constexpr int id_nav_first = 7001;
-constexpr int id_nav_last = id_nav_first + 4;
+constexpr int id_nav_last = id_nav_first + 5;
 constexpr int id_provider = 7010;
 constexpr int id_ocr_engine = 7011;
 constexpr int id_close_mode = 7012;
@@ -39,6 +40,12 @@ constexpr int id_open_config = 7014;
 constexpr int id_restart = 7015;
 constexpr int id_accent = 7016;
 constexpr int id_refresh_models = 7017;
+constexpr int id_text_target = 7018;
+constexpr int id_text_input = 7019;
+constexpr int id_text_output = 7020;
+constexpr int id_text_translate = 7021;
+constexpr int id_text_clear = 7022;
+constexpr int id_text_copy = 7023;
 constexpr UINT_PTR combo_subclass_id = 1;
 constexpr UINT_PTR hotkey_subclass_id = 2;
 constexpr UINT_PTR edit_subclass_id = 3;
@@ -68,25 +75,38 @@ constexpr int logical_edit_corner_radius = 8;
 constexpr int logical_field_text_offset_y = 0;
 constexpr int logical_combo_edit_offset_y = 4;
 
-constexpr std::array<std::wstring_view, 5> page_names{
-    L"快捷键", L"翻译", L"文字识别", L"显示", L"其他",
+constexpr std::array<std::wstring_view, 6> page_names{
+    L"快捷键", L"翻译", L"文字识别", L"显示", L"其他", L"文字翻译",
 };
-constexpr std::array<std::wstring_view, 5> page_subtitles{
+constexpr std::array<std::wstring_view, 6> page_subtitles{
     L"点一下输入框，然后直接按下想要的组合键。",
     L"识别到的文字送到哪个接口去翻。改完记得点一下「测试连接」。",
     L"先把屏幕上的字读出来，才谈得上翻译。",
     L"译文覆盖在原文上之后的样子和行为。",
     L"开机自启、配置文件和故障排查。",
+    L"输入或粘贴文字，停止输入 500 毫秒后自动翻译。",
 };
 
+// Keep the existing settings page indices stable while presenting text
+// translation next to the keyboard shortcut that opens it.
+constexpr std::array<int, 6> navigation_page_order{0, 5, 1, 2, 3, 4};
+
 // These code points are shared by Segoe Fluent Icons and Segoe MDL2 Assets.
-constexpr std::array<wchar_t, 5> navigation_glyphs{
+constexpr std::array<wchar_t, 6> navigation_glyphs{
     0xE765,  // Keyboard
+    0xE8C1,  // Message
     0xE8AB,  // Switch
     0xE7C3,  // Page
     0xE7F4,  // Monitor
     0xE713,  // Settings
 };
+
+std::size_t navigation_index_for_page(int page) noexcept {
+    const auto found = std::find(navigation_page_order.begin(),
+                                 navigation_page_order.end(), page);
+    return found == navigation_page_order.end()
+        ? 0U : static_cast<std::size_t>(std::distance(navigation_page_order.begin(), found));
+}
 
 constexpr std::array<std::pair<std::wstring_view, COLORREF>, 8> accent_swatches{{
     {L"#28C76F", RGB(40, 199, 111)},
@@ -109,6 +129,9 @@ public:
     ~ScopedRedrawPause() {
         if (active_ && IsWindow(window_)) {
             SendMessageW(window_, WM_SETREDRAW, TRUE, 0);
+            RedrawWindow(window_, nullptr, nullptr,
+                         RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN |
+                             RDW_FRAME | RDW_UPDATENOW);
         }
     }
 
@@ -430,6 +453,60 @@ void select_combo_text(HWND combo, std::wstring_view value) {
     select_combo(combo, found == CB_ERR ? 0 : static_cast<int>(found));
 }
 
+void populate_text_targets(HWND combo) {
+    SendMessageW(combo, CB_RESETCONTENT, 0, 0);
+    SendMessageW(combo, CB_ADDSTRING, 0,
+                 reinterpret_cast<LPARAM>(L"自动选择"));
+    for (const auto target : text_translation_targets()) {
+        const auto label = target_display_name(target);
+        SendMessageW(combo, CB_ADDSTRING, 0,
+                     reinterpret_cast<LPARAM>(label.c_str()));
+    }
+    select_combo(combo, 0);
+}
+
+int text_target_index(std::wstring_view target) {
+    if (target.empty()) return 0;
+    const auto& targets = text_translation_targets();
+    const auto found = std::find(targets.begin(), targets.end(), target);
+    return found == targets.end()
+        ? 0 : static_cast<int>(std::distance(targets.begin(), found)) + 1;
+}
+
+std::wstring text_target_at(HWND combo) {
+    const int selected = selected_index(combo);
+    if (selected <= 0) return {};
+    const auto& targets = text_translation_targets();
+    const auto index = static_cast<std::size_t>(selected - 1);
+    return index < targets.size() ? std::wstring(targets[index]) : std::wstring{};
+}
+
+std::wstring text_target_selector(const TextTranslationSession& session) {
+    if (!session.target().empty()) return target_display_name(session.target());
+    if (session.input().find_first_not_of(L" \t\r\n") == std::wstring::npos) {
+        return L"自动选择";
+    }
+    return L"自动 · " + target_display_name(session.effective_target());
+}
+
+std::wstring text_translation_status(const TextTranslationSession& session) {
+    switch (session.state()) {
+    case TextTranslationState::idle:
+        return L"等待输入";
+    case TextTranslationState::waiting:
+        return L"将在停止输入 500 毫秒后翻译";
+    case TextTranslationState::translating:
+        return L"正在翻译为" + target_display_name(session.effective_target()) + L"…";
+    case TextTranslationState::ready:
+        return L"已翻译为" + target_display_name(session.effective_target());
+    case TextTranslationState::error:
+        return session.error().empty() ? L"文字翻译失败" : session.error();
+    case TextTranslationState::too_long:
+        return L"最多支持 5000 个字符，请删减后重试";
+    }
+    return {};
+}
+
 int CALLBACK collect_font_family(const LOGFONTW* font, const TEXTMETRICW*,
                                  DWORD, LPARAM data) {
     if (!font || font->lfFaceName[0] == L'@') return 1;
@@ -546,6 +623,11 @@ std::wstring ocr_language_name(std::wstring_view tag) {
     return std::wstring(tag);
 }
 
+bool same_hotkey(const HotkeySpec& left, const HotkeySpec& right) noexcept {
+    return left.modifiers == right.modifiers &&
+           left.virtual_key == right.virtual_key;
+}
+
 }  // namespace
 
 SettingsWindow::SettingsWindow(HINSTANCE instance, ConfigStore& config)
@@ -573,6 +655,11 @@ SettingsWindow::~SettingsWindow() {
 bool SettingsWindow::preprocess_message(MSG& message) {
     const HWND dialog = window_;
     if (!dialog || !IsWindow(dialog) || !IsWindowVisible(dialog)) return false;
+    if (current_page_ == 5 && message.message == WM_KEYDOWN &&
+        message.wParam == VK_RETURN && (GetKeyState(VK_CONTROL) & 0x8000)) {
+        if (text_callbacks_.translate_now) text_callbacks_.translate_now();
+        return true;
+    }
     return IsDialogMessageW(dialog, &message) != FALSE;
 }
 
@@ -593,10 +680,66 @@ void SettingsWindow::show(HWND owner) {
     SetForegroundWindow(window);
 }
 
+void SettingsWindow::show_translation(HWND owner) {
+    show(owner);
+    if (!window_) return;
+    show_page(1);
+    layout_controls();
+    InvalidateRect(window_, nullptr, TRUE);
+}
+
+void SettingsWindow::attach_text_translation(
+        TextTranslationSession& session, TextTranslationCallbacks callbacks) {
+    text_session_ = &session;
+    text_callbacks_ = std::move(callbacks);
+    refresh_text_translation();
+}
+
+void SettingsWindow::detach_text_translation() noexcept {
+    text_callbacks_ = {};
+    text_session_ = nullptr;
+}
+
+void SettingsWindow::show_text_translation(HWND owner) {
+    show(owner);
+    if (!window_) return;
+    show_page(5);
+    refresh_text_translation();
+    if (text_input_) SetFocus(text_input_);
+}
+
+void SettingsWindow::refresh_text_translation() {
+    if (!window_ || !text_session_ || !text_input_ || !text_output_ ||
+        !text_target_) {
+        return;
+    }
+    syncing_text_ = true;
+    if (text_of(text_input_) != text_session_->input()) {
+        SetWindowTextW(text_input_, text_session_->input().c_str());
+    }
+    if (text_of(text_output_) != text_session_->output()) {
+        SetWindowTextW(text_output_, text_session_->output().c_str());
+    }
+    const int expected_target = text_target_index(text_session_->target());
+    if (selected_index(text_target_) != expected_target) {
+        select_combo(text_target_, expected_target);
+    }
+    syncing_text_ = false;
+    EnableWindow(text_copy_, !text_session_->output().empty());
+    EnableWindow(text_clear_, !text_session_->input().empty() ||
+                              !text_session_->output().empty());
+    EnableWindow(text_translate_, text_session_->can_submit());
+    InvalidateRect(text_target_, nullptr, FALSE);
+    if (current_page_ == 5) InvalidateRect(window_, nullptr, FALSE);
+}
+
 void SettingsWindow::self_test(HWND owner) {
     if (window_) throw AppError("settings self-test window already exists");
     create_window(owner);
-    if (!window_ || !capture_hotkey_ || !provider_ || !ocr_engine_ || !navigation_[0]) {
+    if (!window_ || !capture_hotkey_ || !toggle_hotkey_ || !text_hotkey_ ||
+        !provider_ || !ocr_engine_ || !navigation_[0] || !navigation_[1] ||
+        !text_session_ || !text_target_ || !text_input_ || !text_output_ ||
+        !text_translate_ || !text_clear_ || !text_copy_) {
         throw AppError("settings self-test did not create required controls");
     }
     constexpr LONG_PTR required_extended_style = WS_EX_APPWINDOW | WS_EX_COMPOSITED;
@@ -641,6 +784,24 @@ void SettingsWindow::self_test(HWND owner) {
         text_of(page_controls_[0][2]) != L"收起 / 显示") {
         throw AppError("settings self-test hotkey label differs from Python reference");
     }
+    if (page_controls_[0].size() < 7 ||
+        text_of(page_controls_[0][4]) != L"快速文字翻译" ||
+        text_of(text_hotkey_) != L"Ctrl+Alt+Space") {
+        throw AppError("settings self-test quick translation hotkey is missing");
+    }
+    std::wstring hotkey_error;
+    const auto capture_spec = parse_hotkey(L"Ctrl+Alt+Q", &hotkey_error);
+    const auto toggle_spec = parse_hotkey(L"Ctrl+Alt+W", &hotkey_error);
+    const auto text_spec = parse_hotkey(L"Ctrl+Alt+Space", &hotkey_error);
+    const auto equivalent_text_spec = parse_hotkey(L"control+alt+space", &hotkey_error);
+    const auto input_method_spec = parse_hotkey(L"Ctrl+Space", &hotkey_error);
+    if (!capture_spec || !toggle_spec || !text_spec || !equivalent_text_spec ||
+        !input_method_spec || same_hotkey(*capture_spec, *toggle_spec) ||
+        same_hotkey(*capture_spec, *text_spec) ||
+        same_hotkey(*toggle_spec, *text_spec) ||
+        !same_hotkey(*text_spec, *equivalent_text_spec)) {
+        throw AppError("settings self-test hotkey duplicate detection mismatch");
+    }
     RECT hotkey_rect{};
     GetWindowRect(capture_hotkey_, &hotkey_rect);
     const int hotkey_width = hotkey_rect.right - hotkey_rect.left;
@@ -671,6 +832,27 @@ void SettingsWindow::self_test(HWND owner) {
     if (hotkey_region) DeleteObject(hotkey_region);
     if (!rounded_region) {
         throw AppError("settings self-test edit field did not receive rounded corners");
+    }
+    show_page(5);
+    if (text_of(navigation_[1]) != L"文字翻译" ||
+        SendMessageW(text_target_, CB_GETCOUNT, 0, 0) != 10) {
+        throw AppError("settings self-test text translation page is incomplete");
+    }
+    COMBOBOXINFO text_target_info{sizeof(text_target_info)};
+    RECT text_target_list{};
+    if (!GetComboBoxInfo(text_target_, &text_target_info) ||
+        !text_target_info.hwndList ||
+        !GetWindowRect(text_target_info.hwndList, &text_target_list) ||
+        text_target_list.bottom - text_target_list.top < px(200, dpi_)) {
+        throw AppError("settings self-test text target menu is clipped");
+    }
+    RECT text_input_rect{};
+    RECT text_output_rect{};
+    if (!GetWindowRect(text_input_, &text_input_rect) ||
+        !GetWindowRect(text_output_, &text_output_rect) ||
+        text_input_rect.right - text_input_rect.left < px(480, dpi_) ||
+        text_output_rect.bottom - text_output_rect.top < px(120, dpi_)) {
+        throw AppError("settings self-test text translation layout is invalid");
     }
     show_page(1);
     SendMessageW(provider_, CB_SETCURSEL, 9, 0);
@@ -749,6 +931,16 @@ void SettingsWindow::self_test(HWND owner) {
     if (selection_start != selection_end ||
         selection_end != selection_test_model.size()) {
         throw AppError("settings self-test default model remained selected");
+    }
+    SendMessageW(provider_, CB_SETCURSEL, 10, 0);
+    refresh_provider_fields(true);
+    SendMessageW(provider_, CB_SETCURSEL, 5, 0);
+    refresh_provider_fields(true);
+    if ((GetWindowLongPtrW(provider_key_, GWL_STYLE) & WS_VISIBLE) != 0 ||
+        (GetWindowLongPtrW(provider_model_, GWL_STYLE) & WS_VISIBLE) != 0 ||
+        (GetWindowLongPtrW(provider_endpoint_, GWL_STYLE) & WS_VISIBLE) != 0 ||
+        (GetWindowLongPtrW(model_refresh_, GWL_STYLE) & WS_VISIBLE) != 0) {
+        throw AppError("settings self-test retained AI fields for a free provider");
     }
     show_page(2);
     if ((GetWindowLongPtrW(ocr_upscale_, GWL_STYLE) & WS_VISIBLE) != 0) {
@@ -979,6 +1171,18 @@ LRESULT CALLBACK SettingsWindow::edit_proc(HWND control, UINT message,
         update_region();
         return result;
     }
+    case WM_IME_STARTCOMPOSITION:
+        if (self && control == self->text_input_ &&
+            self->text_callbacks_.composition_changed) {
+            self->text_callbacks_.composition_changed(true);
+        }
+        break;
+    case WM_IME_ENDCOMPOSITION:
+        if (self && control == self->text_input_ &&
+            self->text_callbacks_.composition_changed) {
+            self->text_callbacks_.composition_changed(false);
+        }
+        break;
     case WM_SETFOCUS:
     case WM_KILLFOCUS: {
         const LRESULT result = DefSubclassProc(control, message, wparam, lparam);
@@ -1105,7 +1309,7 @@ LRESULT CALLBACK SettingsWindow::hotkey_proc(HWND control, UINT message,
         if (is_modifier_key(key)) return 0;
         if (!self) return 0;
         if (key == VK_ESCAPE) {
-            SetFocus(self->navigation_[static_cast<std::size_t>(self->current_page_)]);
+            SetFocus(self->navigation_[navigation_index_for_page(self->current_page_)]);
             return 0;
         }
         const auto name = hotkey_key_name(key);
@@ -1132,7 +1336,7 @@ LRESULT CALLBACK SettingsWindow::hotkey_proc(HWND control, UINT message,
         append(name);
         SetWindowTextW(control, value.c_str());
         self->save_values(false);
-        SetFocus(self->navigation_[static_cast<std::size_t>(self->current_page_)]);
+        SetFocus(self->navigation_[navigation_index_for_page(self->current_page_)]);
         return 0;
     }
     case WM_CHAR:
@@ -1173,10 +1377,9 @@ void SettingsWindow::draw_combo(HWND control, HDC dc) {
     text_rect.left += px(9, dpi_);
     text_rect.right -= px(32, dpi_);
     OffsetRect(&text_rect, 0, px(logical_field_text_offset_y, dpi_));
-    wchar_t value[1024]{};
-    const int value_length = GetWindowTextW(control, value, static_cast<int>(std::size(value)));
-    draw_text(dc, std::wstring_view(value, static_cast<std::size_t>(std::max(0, value_length))),
-              text_rect, font_,
+    const std::wstring value = control == text_target_ && text_session_
+        ? text_target_selector(*text_session_) : text_of(control);
+    draw_text(dc, value, text_rect, font_,
               enabled ? color_text : color_text_faint,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
@@ -1216,8 +1419,9 @@ void SettingsWindow::create_controls() {
     for (auto& controls : page_controls_) controls.clear();
     navigation_.fill(nullptr);
     for (std::size_t index = 0; index < navigation_.size(); ++index) {
+        const int page = navigation_page_order[index];
         navigation_[index] = add_control(
-            -1, 0, L"BUTTON", page_names[index].data(),
+            -1, 0, L"BUTTON", page_names[static_cast<std::size_t>(page)].data(),
             BS_OWNERDRAW | BS_NOTIFY | WS_TABSTOP, id_nav_first + static_cast<int>(index));
     }
     status_ = add_control(-1, 0, L"STATIC", L"", SS_LEFT, 0);
@@ -1230,7 +1434,9 @@ void SettingsWindow::create_controls() {
     create_ocr_page();
     create_appearance_page();
     create_other_page();
+    create_text_translation_page();
     load_values();
+    refresh_text_translation();
     show_page(0);
     layout_controls();
 }
@@ -1244,9 +1450,15 @@ void SettingsWindow::create_hotkey_page() {
     toggle_hotkey_ = add_control(0, 0, L"EDIT", L"",
                                  ES_AUTOHSCROLL | ES_CENTER | ES_READONLY |
                                  WS_BORDER | WS_TABSTOP);
+    add_label(0, L"快速文字翻译");
+    text_hotkey_ = add_control(0, 0, L"EDIT", L"",
+                               ES_AUTOHSCROLL | ES_CENTER | ES_READONLY |
+                               WS_BORDER | WS_TABSTOP);
     SetWindowSubclass(capture_hotkey_, &SettingsWindow::hotkey_proc,
                       hotkey_subclass_id, reinterpret_cast<DWORD_PTR>(this));
     SetWindowSubclass(toggle_hotkey_, &SettingsWindow::hotkey_proc,
+                      hotkey_subclass_id, reinterpret_cast<DWORD_PTR>(this));
+    SetWindowSubclass(text_hotkey_, &SettingsWindow::hotkey_proc,
                       hotkey_subclass_id, reinterpret_cast<DWORD_PTR>(this));
     add_label(0, L"拖动鼠标    画出要翻译的区域，松手立刻识别并翻译\r\nEsc / 右键    取消这次框选");
 }
@@ -1402,11 +1614,52 @@ void SettingsWindow::create_other_page() {
         ES_READONLY | ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP);
 }
 
+void SettingsWindow::create_text_translation_page() {
+    text_target_ = add_control(
+        5, 0, L"COMBOBOX", L"",
+        CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS |
+            WS_VSCROLL | WS_TABSTOP,
+        id_text_target);
+    populate_text_targets(text_target_);
+    SendMessageW(text_target_, CB_SETITEMHEIGHT, static_cast<WPARAM>(-1),
+                 px(32, dpi_));
+    SendMessageW(text_target_, CB_SETITEMHEIGHT, 0, px(32, dpi_));
+    SendMessageW(text_target_, CB_SETMINVISIBLE, 8, 0);
+
+    text_translate_ = add_control(5, 0, L"BUTTON", L"立即翻译",
+                                  BS_OWNERDRAW | WS_TABSTOP,
+                                  id_text_translate);
+    text_clear_ = add_control(5, 0, L"BUTTON", L"清空",
+                              BS_OWNERDRAW | WS_TABSTOP, id_text_clear);
+    text_copy_ = add_control(5, 0, L"BUTTON", L"复制译文",
+                             BS_OWNERDRAW | WS_TABSTOP, id_text_copy);
+    text_input_ = add_control(
+        5, 0, L"EDIT", L"",
+        ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | ES_NOHIDESEL |
+            WS_TABSTOP,
+        id_text_input);
+    text_output_ = add_control(
+        5, 0, L"EDIT", L"",
+        ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | ES_NOHIDESEL |
+            WS_TABSTOP,
+        id_text_output);
+    SendMessageW(text_input_, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                 MAKELPARAM(px(12, dpi_), px(12, dpi_)));
+    SendMessageW(text_output_, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                 MAKELPARAM(px(12, dpi_), px(12, dpi_)));
+    SendMessageW(text_input_, EM_SETCUEBANNER, TRUE,
+                 reinterpret_cast<LPARAM>(L"输入或粘贴需要翻译的文字"));
+    SendMessageW(text_output_, EM_SETCUEBANNER, TRUE,
+                 reinterpret_cast<LPARAM>(L"译文会显示在这里"));
+}
+
 void SettingsWindow::load_values() {
     loading_ = true;
     const auto capture_hotkey = config_.string(L"hotkey", L"Ctrl+Alt+Q");
     SetWindowTextW(capture_hotkey_, capture_hotkey.c_str());
     SetWindowTextW(toggle_hotkey_, config_.string(L"hotkey_toggle", L"Ctrl+Alt+W").c_str());
+    SetWindowTextW(text_hotkey_, config_.string(
+        L"hotkey_text_translate", L"Ctrl+Alt+Space").c_str());
     SetWindowTextW(side_footer_, (L"框选  " + capture_hotkey).c_str());
     const auto provider = config_.string(L"translator.provider", L"microsoft");
     std::size_t provider_index = 0;
@@ -1614,17 +1867,31 @@ bool SettingsWindow::save_values(bool) {
     if (loading_) return true;
     const auto old_capture = config_.string(L"hotkey", L"Ctrl+Alt+Q");
     const auto old_toggle = config_.string(L"hotkey_toggle", L"Ctrl+Alt+W");
+    const auto old_text = config_.string(
+        L"hotkey_text_translate", L"Ctrl+Alt+Space");
     const bool old_autostart = config_.boolean(L"autostart", false);
     bool applied_hotkeys = false;
     try {
         const auto capture = trim(text_of(capture_hotkey_));
         const auto toggle = trim(text_of(toggle_hotkey_));
+        const auto text = trim(text_of(text_hotkey_));
         std::wstring error;
-        if (!parse_hotkey(capture, &error)) throw AppError(wide_to_utf8(error));
-        if (!parse_hotkey(toggle, &error)) throw AppError(wide_to_utf8(error));
+        const auto capture_parsed = parse_hotkey(capture, &error);
+        if (!capture_parsed) throw AppError(wide_to_utf8(error));
+        const auto toggle_parsed = parse_hotkey(toggle, &error);
+        if (!toggle_parsed) throw AppError(wide_to_utf8(error));
+        const auto text_parsed = parse_hotkey(text, &error);
+        if (!text_parsed) throw AppError(wide_to_utf8(error));
+        if (same_hotkey(*capture_parsed, *toggle_parsed) ||
+            same_hotkey(*capture_parsed, *text_parsed) ||
+            same_hotkey(*toggle_parsed, *text_parsed)) {
+            throw AppError("三个快捷键不能重复");
+        }
         config_.set_string(L"hotkey", capture);
         config_.set_string(L"hotkey_toggle", toggle);
-        const bool hotkeys_changed = capture != old_capture || toggle != old_toggle;
+        config_.set_string(L"hotkey_text_translate", text);
+        const bool hotkeys_changed = capture != old_capture || toggle != old_toggle ||
+                                     text != old_text;
         save_provider_fields();
         const int provider_index = std::clamp(selected_index(provider_), 0,
                                                static_cast<int>(providers.size() - 1));
@@ -1662,8 +1929,10 @@ bool SettingsWindow::save_values(bool) {
             if (!hotkeys_changed_callback_()) {
                 config_.set_string(L"hotkey", old_capture);
                 config_.set_string(L"hotkey_toggle", old_toggle);
+                config_.set_string(L"hotkey_text_translate", old_text);
                 SetWindowTextW(capture_hotkey_, old_capture.c_str());
                 SetWindowTextW(toggle_hotkey_, old_toggle.c_str());
+                SetWindowTextW(text_hotkey_, old_text.c_str());
                 hotkeys_changed_callback_();
                 throw AppError("快捷键未生效，可能已被其他程序占用；已恢复原设置");
             }
@@ -1678,8 +1947,10 @@ bool SettingsWindow::save_values(bool) {
         if (applied_hotkeys && hotkeys_changed_callback_) {
             config_.set_string(L"hotkey", old_capture);
             config_.set_string(L"hotkey_toggle", old_toggle);
+            config_.set_string(L"hotkey_text_translate", old_text);
             SetWindowTextW(capture_hotkey_, old_capture.c_str());
             SetWindowTextW(toggle_hotkey_, old_toggle.c_str());
+            SetWindowTextW(text_hotkey_, old_text.c_str());
             hotkeys_changed_callback_();
         }
         const auto message = utf8_to_wide(error.what());
@@ -1900,7 +2171,8 @@ void SettingsWindow::show_page(int index) {
     if (!window_) return;
     {
         ScopedRedrawPause redraw_pause(window_);
-        current_page_ = std::clamp(index, 0, 4);
+        current_page_ = std::clamp(
+            index, 0, static_cast<int>(page_controls_.size() - 1));
         for (std::size_t page = 0; page < page_controls_.size(); ++page) {
             for (const auto control : page_controls_[page]) {
                 ShowWindow(control, static_cast<int>(page) == current_page_ ? SW_SHOW : SW_HIDE);
@@ -1909,10 +2181,12 @@ void SettingsWindow::show_page(int index) {
         if (current_page_ == 1) refresh_provider_fields(false);
         if (current_page_ == 2) refresh_ocr_fields();
         if (current_page_ == 3) refresh_close_fields();
+        if (current_page_ == 5) refresh_text_translation();
         layout_controls();
         clear_combo_edit_selection(provider_model_);
-        if (navigation_[static_cast<std::size_t>(current_page_)]) {
-            SetFocus(navigation_[static_cast<std::size_t>(current_page_)]);
+        const auto navigation_index = navigation_index_for_page(current_page_);
+        if (navigation_[navigation_index]) {
+            SetFocus(navigation_[navigation_index]);
         }
         for (const auto button : navigation_) InvalidateRect(button, nullptr, FALSE);
     }
@@ -1995,7 +2269,7 @@ void SettingsWindow::layout_controls() {
 
     if (current_page_ == 0) {
         auto& c = page_controls_[0];
-        if (c.size() >= 5) {
+        if (c.size() >= 7) {
             const auto place_hotkey = [&](HWND label, HWND edit, int top) {
                 const auto label_style = GetWindowLongPtrW(label, GWL_STYLE);
                 SetWindowLongPtrW(label, GWL_STYLE,
@@ -2015,8 +2289,9 @@ void SettingsWindow::layout_controls() {
                            px(34, dpi_) - inset_top - inset_bottom, FALSE);
             };
             place_hotkey(c[0], capture_hotkey_, 103);
-            place_hotkey(c[2], toggle_hotkey_, 190);
-            MoveWindow(c[4], 0, 0, 0, 0, FALSE);
+            place_hotkey(c[2], toggle_hotkey_, 180);
+            place_hotkey(c[4], text_hotkey_, 257);
+            MoveWindow(c[6], 0, 0, 0, 0, FALSE);
         }
     } else if (current_page_ == 1) {
         auto& c = page_controls_[1];
@@ -2141,6 +2416,28 @@ void SettingsWindow::layout_controls() {
                        std::max(1, available_width - inset_x * 2),
                        std::max(1, px(34, dpi_) - inset_top - inset_bottom), FALSE);
         }
+    } else if (current_page_ == 5) {
+        const int toolbar_top = px(90, dpi_);
+        const int target_left = inner_left + px(68, dpi_);
+        MoveWindow(text_target_, target_left, toolbar_top, px(166, dpi_),
+                   px(318, dpi_), FALSE);
+
+        int right = inner_right;
+        MoveWindow(text_translate_, right - px(82, dpi_), toolbar_top,
+                   px(82, dpi_), control_height, FALSE);
+        right -= px(90, dpi_);
+        MoveWindow(text_copy_, right - px(76, dpi_), toolbar_top,
+                   px(76, dpi_), control_height, FALSE);
+        right -= px(84, dpi_);
+        MoveWindow(text_clear_, right - px(54, dpi_), toolbar_top,
+                   px(54, dpi_), control_height, FALSE);
+
+        MoveWindow(text_input_, card_left + px(13, dpi_), px(166, dpi_),
+                   std::max(1, card_right - card_left - px(26, dpi_)),
+                   px(118, dpi_), FALSE);
+        MoveWindow(text_output_, card_left + px(13, dpi_), px(345, dpi_),
+                   std::max(1, card_right - card_left - px(26, dpi_)),
+                   px(143, dpi_), FALSE);
     }
 }
 
@@ -2253,34 +2550,39 @@ void SettingsWindow::paint() {
         }
     };
     if (current_page_ == 0) {
-        card(90, 274);
+        card(90, 341);
         draw_text(dc, L"按下后拉框，松手立刻翻译",
                   RECT{inner_left + px(94, dpi_), px(143, dpi_), inner_right,
                        px(162, dpi_)},
                   small_font_, color_text_dim,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         draw_text(dc, L"同一个键来回切：译文开着就收进托盘，收着就叫回来",
-                  RECT{inner_left + px(94, dpi_), px(230, dpi_), inner_right,
-                       px(249, dpi_)},
+                  RECT{inner_left + px(94, dpi_), px(220, dpi_), inner_right,
+                       px(239, dpi_)},
                   small_font_, color_text_dim,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE);
-        section(L"框选时", 294);
-        card(320, 381);
+        draw_text(dc, L"弹出聚焦式输入框；Esc 或再次按快捷键隐藏",
+                  RECT{inner_left + px(94, dpi_), px(297, dpi_), inner_right,
+                       px(316, dpi_)},
+                  small_font_, color_text_dim,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        section(L"框选时", 361);
+        card(387, 448);
         draw_text(dc, L"拖动鼠标",
-                  RECT{inner_left, px(333, dpi_), inner_left + px(132, dpi_),
-                       px(351, dpi_)},
+                  RECT{inner_left, px(400, dpi_), inner_left + px(132, dpi_),
+                       px(418, dpi_)},
                   small_font_, color_text, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
         draw_text(dc, L"画出要翻译的区域，松手立刻识别并翻译",
-                  RECT{inner_left + px(142, dpi_), px(333, dpi_), inner_right,
-                       px(351, dpi_)},
+                  RECT{inner_left + px(142, dpi_), px(400, dpi_), inner_right,
+                       px(418, dpi_)},
                   small_font_, color_text_dim, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         draw_text(dc, L"Esc / 右键",
-                  RECT{inner_left, px(351, dpi_), inner_left + px(132, dpi_),
-                       px(369, dpi_)},
+                  RECT{inner_left, px(418, dpi_), inner_left + px(132, dpi_),
+                       px(436, dpi_)},
                   small_font_, color_text, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
         draw_text(dc, L"取消这次框选",
-                  RECT{inner_left + px(142, dpi_), px(351, dpi_), inner_right,
-                       px(369, dpi_)},
+                  RECT{inner_left + px(142, dpi_), px(418, dpi_), inner_right,
+                       px(436, dpi_)},
                   small_font_, color_text_dim, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     } else if (current_page_ == 1) {
         const auto& provider = providers[std::clamp(
@@ -2396,7 +2698,7 @@ void SettingsWindow::paint() {
                       DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
             operation_y += operation_step;
         }
-    } else {
+    } else if (current_page_ == 4) {
         card(90, 238);
         separator(156);
         draw_text(dc, L"装完之后每次开机自动到托盘待命，不会弹窗口。",
@@ -2416,6 +2718,56 @@ void SettingsWindow::paint() {
                   RECT{inner_left, px(466, dpi_), inner_right, px(497, dpi_)},
                   small_font_, color_text_dim,
                   DT_LEFT | DT_TOP | DT_WORDBREAK);
+    } else if (current_page_ == 5) {
+        card(82, 132);
+        draw_text(dc, L"目标语言",
+                  RECT{inner_left, px(90, dpi_), inner_left + px(62, dpi_),
+                       px(124, dpi_)},
+                  small_font_, color_text_dim,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+        const RECT input_panel{card_left, px(144, dpi_), card_right,
+                               px(299, dpi_)};
+        const RECT output_panel{card_left, px(311, dpi_), card_right,
+                                px(503, dpi_)};
+        fill_round_rect(dc, input_panel, px(7, dpi_), color_input,
+                        GetFocus() == text_input_ ? accent : color_line);
+        fill_round_rect(dc, output_panel, px(7, dpi_), color_input,
+                        GetFocus() == text_output_ ? accent : color_line);
+        draw_text(dc, L"原文",
+                  RECT{input_panel.left + px(13, dpi_), input_panel.top,
+                       input_panel.left + px(80, dpi_), input_panel.top + px(30, dpi_)},
+                  small_font_, color_text_dim,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        draw_text(dc, L"译文",
+                  RECT{output_panel.left + px(13, dpi_), output_panel.top,
+                       output_panel.left + px(80, dpi_), output_panel.top + px(30, dpi_)},
+                  small_font_, color_text_dim,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+        if (text_session_) {
+            const auto counter = std::to_wstring(text_session_->character_count()) +
+                                 L" / 5000";
+            draw_text(dc, counter,
+                      RECT{input_panel.right - px(120, dpi_), input_panel.top,
+                           input_panel.right - px(13, dpi_), input_panel.top + px(30, dpi_)},
+                      small_font_,
+                      text_session_->state() == TextTranslationState::too_long
+                          ? color_bad : color_text_faint,
+                      DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+            const bool error = text_session_->state() == TextTranslationState::error ||
+                               text_session_->state() == TextTranslationState::too_long;
+            draw_text(dc, text_translation_status(*text_session_),
+                      RECT{card_left + px(2, dpi_), px(513, dpi_),
+                           card_right, px(537, dpi_)},
+                      small_font_, error ? color_bad : color_text_dim,
+                      DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        }
+        draw_text(dc, L"自动选择会把中文译成设置的目标语言，其他语言译成简体中文。",
+                  RECT{card_left + px(2, dpi_), px(537, dpi_),
+                       card_right, px(558, dpi_)},
+                  small_font_, color_text_faint,
+                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
 
     const HWND focused = GetFocus();
@@ -2423,7 +2775,10 @@ void SettingsWindow::paint() {
         if (!control || !IsWindowVisible(control)) continue;
         wchar_t type[24]{};
         GetClassNameW(control, type, static_cast<int>(std::size(type)));
-        if (_wcsicmp(type, L"Edit") != 0) continue;
+        if (_wcsicmp(type, L"Edit") != 0 || control == text_input_ ||
+            control == text_output_) {
+            continue;
+        }
         RECT frame{};
         GetWindowRect(control, &frame);
         MapWindowPoints(HWND_DESKTOP, window_, reinterpret_cast<POINT*>(&frame), 2);
@@ -2508,7 +2863,8 @@ LRESULT SettingsWindow::draw_item(const DRAWITEMSTRUCT& item) {
 
     if (item.CtlType != ODT_BUTTON) return FALSE;
     if (item.CtlID >= id_nav_first && item.CtlID <= id_nav_last) {
-        const int page = static_cast<int>(item.CtlID) - id_nav_first;
+        const int navigation_index = static_cast<int>(item.CtlID) - id_nav_first;
+        const int page = navigation_page_order[static_cast<std::size_t>(navigation_index)];
         const bool active = page == current_page_;
         const COLORREF fill = pressed ? RGB(35, 39, 47)
                               : active ? RGB(35, 39, 47)
@@ -2521,7 +2877,7 @@ LRESULT SettingsWindow::draw_item(const DRAWITEMSTRUCT& item) {
         const int icon_top = rect.top + (rect.bottom - rect.top - icon_size) / 2;
         RECT icon_rect{rect.left + px(13, dpi_), icon_top,
                        rect.left + px(13, dpi_) + icon_size, icon_top + icon_size};
-        draw_settings_nav_icon(dc, page, icon_rect, icon_color, icon_font_);
+        draw_settings_nav_icon(dc, navigation_index, icon_rect, icon_color, icon_font_);
         RECT text_rect{rect.left + px(43, dpi_), rect.top, rect.right - px(8, dpi_), rect.bottom};
         draw_text(dc, page_names[static_cast<std::size_t>(page)], text_rect, font_, text_color,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -2607,6 +2963,9 @@ LRESULT SettingsWindow::draw_item(const DRAWITEMSTRUCT& item) {
 
 void SettingsWindow::close() {
     if (!save_values()) return;
+    if (text_callbacks_.composition_changed) {
+        text_callbacks_.composition_changed(false);
+    }
     cancel_model_refresh();
     if (test_thread_.joinable()) test_thread_.request_stop();
     finished_ = true;
@@ -2703,7 +3062,33 @@ LRESULT SettingsWindow::handle_message(UINT message, WPARAM wparam, LPARAM lpara
         if (id == IDCANCEL) { close(); return 0; }
         if (id >= id_nav_first && id <= id_nav_last && notification == BN_CLICKED) {
             save_values(false);
-            show_page(id - id_nav_first);
+            show_page(navigation_page_order[static_cast<std::size_t>(id - id_nav_first)]);
+            return 0;
+        }
+        if (id == id_text_input && notification == EN_CHANGE) {
+            if (!syncing_text_ && text_callbacks_.input_changed) {
+                text_callbacks_.input_changed(text_of(text_input_));
+            }
+            return 0;
+        }
+        if (id == id_text_target && notification == CBN_SELCHANGE) {
+            if (!syncing_text_ && text_callbacks_.target_changed) {
+                text_callbacks_.target_changed(text_target_at(text_target_));
+            }
+            InvalidateRect(text_target_, nullptr, FALSE);
+            return 0;
+        }
+        if (id == id_text_translate && notification == BN_CLICKED) {
+            if (text_callbacks_.translate_now) text_callbacks_.translate_now();
+            return 0;
+        }
+        if (id == id_text_clear && notification == BN_CLICKED) {
+            if (text_callbacks_.clear) text_callbacks_.clear();
+            if (text_input_) SetFocus(text_input_);
+            return 0;
+        }
+        if (id == id_text_copy && notification == BN_CLICKED) {
+            if (text_callbacks_.copy) text_callbacks_.copy();
             return 0;
         }
         if (id == id_accent && notification == BN_CLICKED) {
@@ -2854,8 +3239,15 @@ LRESULT SettingsWindow::handle_message(UINT message, WPARAM wparam, LPARAM lpara
     case WM_CTLCOLORSTATIC: {
         const auto dc = reinterpret_cast<HDC>(wparam);
         const auto control = reinterpret_cast<HWND>(lparam);
+        if (control == text_output_) {
+            SetTextColor(dc, color_text);
+            SetBkColor(dc, color_input);
+            SetBkMode(dc, OPAQUE);
+            return reinterpret_cast<LRESULT>(input_background_);
+        }
         if (control == config_path_ || control == ocr_languages_ ||
-            control == capture_hotkey_ || control == toggle_hotkey_) {
+            control == capture_hotkey_ || control == toggle_hotkey_ ||
+            control == text_hotkey_) {
             SetTextColor(dc, IsWindowEnabled(control) ? color_text_dim : color_text_faint);
             SetBkColor(dc, color_input);
             SetBkMode(dc, OPAQUE);

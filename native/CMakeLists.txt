@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(ScreenTranslateNative VERSION 1.0.4 LANGUAGES CXX RC)
+project(ScreenTranslateNative VERSION 1.1.0 LANGUAGES CXX RC)
 
 set(SCREENTRANS_UPDATE_REPOSITORY_URL
     "https://github.com/reevebyte/ScreenTranslate"
@@ -60,6 +60,10 @@ add_executable(ScreenTranslate WIN32
     src/selection_overlay.hpp
     src/settings_window.cpp
     src/settings_window.hpp
+    src/text_translation_session.cpp
+    src/text_translation_session.hpp
+    src/text_translation_window.cpp
+    src/text_translation_window.hpp
     src/types.hpp
     src/updater.cpp
     src/updater.hpp

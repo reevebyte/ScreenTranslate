@@ -5,6 +5,7 @@
 #include "result_window.hpp"
 #include "selection_overlay.hpp"
 #include "settings_window.hpp"
+#include "text_translation_window.hpp"
 #include "update_window.hpp"
 
 #include <windows.h>
@@ -54,6 +55,13 @@ private:
     void on_selected(const RECT& rect, PixelBuffer image);
     void start_pipeline(std::shared_ptr<const PixelBuffer> image, const RECT& rect);
     void process_pipeline_completions();
+    void open_text_translation();
+    void toggle_quick_translation();
+    void on_text_input_changed(std::wstring value);
+    void on_text_target_changed(std::wstring value);
+    void on_text_composition_changed(bool composing);
+    void schedule_text_translation(bool immediate = false);
+    void refresh_text_translation_views();
     void toggle_result();
     void copy_to_clipboard(std::wstring_view text);
     void retry_translation();
@@ -69,6 +77,7 @@ private:
     void request_recapture(const RECT& rect);
     void recapture_now();
     void open_settings();
+    void open_translation_settings();
     void open_updates();
     void start_silent_update_check();
     std::optional<UpdateInfo> process_silent_update_check();
@@ -89,6 +98,8 @@ private:
     SelectionOverlay overlay_;
     ResultWindow result_;
     std::unique_ptr<PipelineController> pipeline_;
+    std::unique_ptr<TextTranslationSession> text_session_;
+    std::unique_ptr<QuickTranslateWindow> quick_window_;
     struct BlockTranslationRequest {
         std::uint64_t request_id{};
         std::vector<std::size_t> indices;
@@ -106,7 +117,9 @@ private:
     std::optional<UpdateInfo> silent_update_result_;
     std::wstring registered_capture_hotkey_;
     std::wstring registered_toggle_hotkey_;
+    std::wstring registered_text_hotkey_;
     std::wstring available_update_version_;
+    bool text_composing_{};
     bool shutting_down_{};
     bool self_test_mode_{};
     bool update_self_test_mode_{};

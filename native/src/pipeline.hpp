@@ -7,6 +7,7 @@
 #include <windows.h>
 
 #include <condition_variable>
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -21,6 +22,11 @@
 namespace screentrans {
 
 inline constexpr UINT pipeline_completed_message = WM_APP + 40;
+
+enum class PipelineLane : std::size_t {
+    visual = 0,
+    text = 1,
+};
 
 struct PipelineOptions {
     std::wstring ocr_engine;
@@ -41,6 +47,7 @@ struct PipelineResult {
 
 struct PipelineCompletion {
     std::uint64_t request_id{};
+    PipelineLane lane{PipelineLane::visual};
     std::optional<PipelineResult> result;
     std::wstring error;
 };
@@ -54,16 +61,24 @@ public:
     PipelineController& operator=(const PipelineController&) = delete;
 
     std::uint64_t schedule(std::shared_ptr<const PixelBuffer> image,
-                           PipelineOptions options);
+                           PipelineOptions options,
+                           PipelineLane lane = PipelineLane::visual);
     std::uint64_t schedule_translation(std::vector<TextBlock> blocks,
-                                       PipelineOptions options);
+                                       PipelineOptions options,
+                                       PipelineLane lane = PipelineLane::visual);
+    void cancel_lane(PipelineLane lane);
     void cancel_all();
     std::vector<PipelineCompletion> take_completions();
-    [[nodiscard]] std::uint64_t latest_request() const noexcept;
+    [[nodiscard]] std::uint64_t latest_request(
+        PipelineLane lane = PipelineLane::visual) const noexcept;
+    static void self_test();
 
 private:
+    PipelineController(HWND dispatcher, bool start_workers);
+
     struct Request {
         std::uint64_t id{};
+        PipelineLane lane{PipelineLane::visual};
         std::shared_ptr<const PixelBuffer> image;
         std::vector<TextBlock> blocks;
         PipelineOptions options;
@@ -85,7 +100,7 @@ private:
     std::unordered_map<std::uint64_t, std::shared_ptr<Request>> active_;
     std::deque<PipelineCompletion> completions_;
     std::uint64_t next_request_{};
-    std::uint64_t latest_request_{};
+    std::array<std::uint64_t, 2> latest_requests_{};
     int failed_workers_{};
     bool shutting_down_{};
     std::vector<std::jthread> workers_;
