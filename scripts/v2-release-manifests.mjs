@@ -1,14 +1,51 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-
-const directory = resolve(process.argv[2] || 'build/v2-release');
-const manifest = JSON.parse(await readFile(resolve(directory, 'latest.json'), 'utf8'));
-const tag = process.env.RELEASE_TAG;
-if (!tag || `v${manifest.version}` !== tag || !manifest.platforms || !Object.keys(manifest.platforms).length) throw new Error('Invalid v2 update manifest');
-for (const artifact of Object.values(manifest.platforms)) {
-  const url = new URL(artifact.url);
-  if (url.origin !== 'https://github.com' || !url.pathname.startsWith(`/reevebyte/ScreenTranslate/releases/download/${tag}/`) || !artifact.signature) {
-    throw new Error('Update artifacts must be signed assets of this repository and release');
-  }
+import { fileURLToPath } from 'node:url';
+const repository='reevebyte/ScreenTranslate';
+const downloadPrefix=`/${repository}/releases/download/`;
+function githubUrl(value) {
+  const url=new URL(value);
+  if(url.origin!=='https://github.com'||url.username||url.password||url.search||url.hash||!url.pathname.startsWith(downloadPrefix))throw new Error('Update URL must belong to this repository');
+  return url;
 }
-await writeFile(resolve(directory, 'latest-v2.json'), JSON.stringify(manifest, null, 2));
+export function normalizeUpdateManifest(manifest,release,tag) {
+  if(!tag||`v${manifest.version}`!==tag||!manifest.platforms||!Object.keys(manifest.platforms).length)throw new Error('Invalid v2 update manifest');
+  if(release.tag_name!==tag||!Number.isSafeInteger(release.id)||release.id<=0||!Array.isArray(release.assets))throw new Error('Release asset catalog does not match the requested tag');
+  const assets=new Map();
+  for(const asset of release.assets) {
+    if(typeof asset.name!=='string'||!asset.name||/[\\/]/.test(asset.name)||asset.name==='.'||asset.name==='..'||assets.has(asset.name))throw new Error('Invalid or duplicate release asset name');
+    assets.set(asset.name,asset);
+  }
+  const result=structuredClone(manifest);
+  for(const [platform,artifact] of Object.entries(result.platforms)) {
+    const url=githubUrl(artifact.url);
+    const name=decodeURIComponent(url.pathname.split('/').at(-1));
+    const asset=assets.get(name);
+    const signature=assets.get(name+'.sig');
+    if(!asset||!signature||typeof artifact.signature!=='string'||!artifact.signature.trim())throw new Error(`Missing signed release asset for ${platform}`);
+    const catalogUrl=githubUrl(asset.browser_download_url);
+    const canonical=new URL(`https://github.com${downloadPrefix}${encodeURIComponent(tag)}/${encodeURIComponent(name)}`);
+    // A draft URL is accepted only when it exactly matches this release's authenticated catalog.
+    if(url.href!==catalogUrl.href&&url.href!==canonical.href)throw new Error(`Update asset belongs to another release: ${platform}`);
+    artifact.url=canonical.href;
+  }
+  return result;
+}
+export async function prepareManifest(directory,tag) {
+  const manifest=JSON.parse(await readFile(resolve(directory,'latest.json'),'utf8'));
+  const release=JSON.parse(await readFile(resolve(directory,'release.json'),'utf8'));
+  if(process.env.RELEASE_ID&&String(release.id)!==process.env.RELEASE_ID)throw new Error('Unexpected release ID');
+  const normalized=normalizeUpdateManifest(manifest,release,tag);
+  for(const [platform,artifact] of Object.entries(normalized.platforms)) {
+    const name=decodeURIComponent(new URL(artifact.url).pathname.split('/').at(-1));
+    const signature=(await readFile(resolve(directory,name+'.sig'),'utf8')).trim();
+    if(signature!==artifact.signature.trim())throw new Error(`Signature differs from the uploaded sidecar: ${platform}`);
+  }
+  // Publish stable post-release URLs while preserving every original signature and platform field.
+  const text=JSON.stringify(normalized,null,2);
+  await writeFile(resolve(directory,'latest-v2.json'),text);
+  await writeFile(resolve(directory,'latest.json'),text);
+  console.log(`Prepared ${tag} update metadata for ${Object.keys(normalized.platforms).join(', ')}`);
+  return normalized;
+}
+if(process.argv[1]&&fileURLToPath(import.meta.url)===resolve(process.argv[1]))await prepareManifest(resolve(process.argv[2]||'build/v2-release'),process.env.RELEASE_TAG);

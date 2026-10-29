@@ -9,6 +9,11 @@ on:
         description: 'Existing v2 tag to build (for example v2.0.0)'
         required: true
         type: string
+      finish_only:
+        description: 'Only finish update metadata using the existing uploaded installers'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -44,9 +49,13 @@ jobs:
         env:
           UPDATE_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           UPDATE_PUBLIC_KEY: ${{ vars.SCREENTRANS_UPDATE_PUBLIC_KEY }}
+          FINISH_ONLY: ${{ inputs.finish_only }}
         run: |
           if [[ -z "$UPDATE_PUBLIC_KEY" ]]; then UPDATE_PUBLIC_KEY="$(cat apps/desktop/src-tauri/updater.pub)"; fi
-          if [[ -n "$UPDATE_PRIVATE_KEY" && -n "$UPDATE_PUBLIC_KEY" ]]; then
+          if [[ "$FINISH_ONLY" == 'true' ]]; then
+            test -n "$UPDATE_PUBLIC_KEY" || { echo 'Finishing signed metadata requires the public key'; exit 1; }
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          elif [[ -n "$UPDATE_PRIVATE_KEY" && -n "$UPDATE_PUBLIC_KEY" ]]; then
             echo 'enabled=true' >> "$GITHUB_OUTPUT"
           elif [[ -n "$UPDATE_PRIVATE_KEY" ]]; then
             echo 'A signing private key requires the matching public key'
@@ -90,6 +99,7 @@ jobs:
           RELEASE_SCRIPT
 
   build:
+    if: ${{ inputs.finish_only != true }}
     needs: prepare
     strategy:
       fail-fast: false
@@ -161,7 +171,7 @@ jobs:
           includeUpdaterJson: ${{ needs.prepare.outputs.signed_updates == 'true' }}
           updaterJsonPreferNsis: true
   manifests:
-    if: needs.prepare.outputs.signed_updates == 'true'
+    if: ${{ always() && !cancelled() && needs.prepare.result == 'success' && needs.prepare.outputs.signed_updates == 'true' && (needs.build.result == 'success' || (inputs.finish_only == true && needs.build.result == 'skipped')) }}
     needs: [prepare, build]
     runs-on: ubuntu-24.04
     steps:
@@ -172,13 +182,26 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
+      - name: Check out the metadata driver from the workflow revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-driver
+          sparse-checkout: /scripts/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Use the corrected metadata driver for an existing tag
+        run: cp .release-driver/scripts/v2-release-manifests.mjs scripts/v2-release-manifests.mjs
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Validate and write signed update metadata
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
         run: |
-          gh release download "$RELEASE_TAG" --pattern latest.json --dir build/v2-release
+          mkdir -p build/v2-release
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" > build/v2-release/release.json
+          gh release download "$RELEASE_TAG" --pattern latest.json --pattern '*.sig' --dir build/v2-release
           node scripts/v2-release-manifests.mjs build/v2-release
-          gh release upload "$RELEASE_TAG" build/v2-release/latest-v2.json LICENSE docs/v2-third-party-notices.txt --clobber
+          gh release upload "$RELEASE_TAG" build/v2-release/latest.json build/v2-release/latest-v2.json LICENSE docs/v2-third-party-notices.txt --clobber

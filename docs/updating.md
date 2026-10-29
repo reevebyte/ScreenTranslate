@@ -38,3 +38,9 @@ Windows 标题栏的下载按钮不会增加 WebView；点击先下载，再次�
 发布准备通过认证后的 release 列表定位草稿，并直接使用创建响应中的 release ID，不再在创建草稿后依赖按标签查询接口。已公开的 Release 继续受到保护，流程不会修改它。Windows runner 在检出前禁用换行转换，类型校验本身也将 CRLF 视为 LF；实际类型变化仍会报错。
 
 发布整理脚本支持 `--target` 与 `--target=...`，Windows 独立 EXE 和清理范围跟随 `target/<平台>/release`。重试已有标签时，仅从当前工作流提交取构建驱动脚本，应用代码仍来自指定标签；不移动标签，也不更改已发布版本。
+
+## 四个平台已构建成功，仅更新清单失败
+
+提交并推送修复后，从 main 新运行发布工作流：tag 填 v2.0.2，并勾选“Only finish update metadata using the existing uploaded installers”。此模式跳过四个平台编译，复用草稿中已上传的安装包，只生成更新清单。
+
+GitHub 草稿附件可能使用 untagged 临时地址。清单整理会读取认证后的附件目录，只接受同一 Release 的准确附件地址，核对每项 signature 与上传的同名 .sig 文件一致，再把下载地址规范为发布后的 v2.0.2 地址，并上传 latest.json 与 latest-v2.json。签名内容不变；跨仓库、其他草稿、缺失签名或签名不一致继续报错。最后任务变绿后才发布草稿。

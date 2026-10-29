@@ -31,3 +31,11 @@ test('refuses published releases and API permission failures without creating an
 test('finds the draft on a later release-list page',()=>fixture(async dir=>{
  const result=await run(dir,[Array.from({length:100},(_,i)=>({id:i+1,tag_name:'v1.'+i,draft:false})),[{id:427,tag_name:'v2.0.2',draft:true}]]);assert.equal(result.status,0,result.stderr);assert.equal(result.calls.length,2);
 }));
+
+test('metadata-only retry skips builds but still runs the guarded metadata job',()=>{
+ assert.match(workflow,/finish_only:[\s\S]*?type: boolean/);
+ assert.match(workflow,/build:\r?\n    if: \$\{\{ inputs\.finish_only != true \}\}/);
+ assert.match(workflow,/manifests:[\s\S]*?always\(\)[\s\S]*?needs\.build\.result == 'skipped'/);
+ assert.match(workflow,/Check out the metadata driver from the workflow revision/);
+ assert.match(workflow,/--pattern latest\.json --pattern '\*\.sig'/);
+});
