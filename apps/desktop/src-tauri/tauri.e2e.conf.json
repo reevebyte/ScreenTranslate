@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ScreenTranslate E2E",
+  "identifier": "io.github.reevebyte.screentranslate.e2e",
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": ["desktop", { "identifier": "e2e-driver", "windows": ["main", "quick", "result", "result-tools", "selection-*"], "permissions": ["wdio:default", "core:window:allow-set-cursor-position", "core:window:allow-set-position", "core:window:allow-set-size"] }]
+    }
+  },
+  "bundle": { "active": false }
+}

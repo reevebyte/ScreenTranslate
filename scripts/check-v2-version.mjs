@@ -1,0 +1,11 @@
+import { readFile } from 'node:fs/promises';
+const cargo = await readFile(new URL('../Cargo.toml', import.meta.url), 'utf8');
+const version = cargo.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+const packageJson = JSON.parse(await readFile(new URL('../apps/desktop/package.json', import.meta.url), 'utf8'));
+const tauri = JSON.parse(await readFile(new URL('../apps/desktop/src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
+if (!version || packageJson.version !== version || tauri.version !== version) throw new Error('v2 versions differ between Cargo, package.json and Tauri configuration');
+if (process.env.RELEASE_TAG && process.env.RELEASE_TAG !== `v${version}`) throw new Error('Release tag does not match the v2 source version');
+const publicKey = (await readFile(new URL('../apps/desktop/src-tauri/updater.pub', import.meta.url), 'utf8')).trim();
+if (!publicKey || tauri.plugins.updater.pubkey !== publicKey) throw new Error('Embedded update key differs from Tauri configuration');
+if (process.env.SCREENTRANS_UPDATE_PUBLIC_KEY && process.env.SCREENTRANS_UPDATE_PUBLIC_KEY.trim() !== publicKey) throw new Error('Release public key differs from the committed update identity');
+console.log(`ScreenTranslate ${version}`);

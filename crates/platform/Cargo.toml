@@ -1,0 +1,40 @@
+[package]
+name = "screentrans-platform"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+screentrans-core = { path = "../core" }
+async-trait.workspace = true
+image.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+xcap = "0.9.8"
+base64 = "0.22"
+md5 = "0.7"
+tempfile = "3"
+url = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = ["Foundation", "Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams", "Win32_Foundation", "Win32_System_Com", "Win32_System_WinRT", "Win32_Security_Cryptography", "Win32_System_Memory"] }
+keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6", default-features = false, features = ["sync-secret-service"] }
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "screenshot", "global_shortcuts"] }
+futures-util = "0.3"
+
+[build-dependencies]
+cc = "1"
+
+[dev-dependencies]
+wiremock = "0.6"

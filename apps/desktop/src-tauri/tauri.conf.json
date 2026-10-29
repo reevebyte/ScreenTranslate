@@ -1,0 +1,75 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ScreenTranslate 2",
+  "version": "2.0.2",
+  "identifier": "io.github.reevebyte.screentranslate.v2",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist",
+    "removeUnusedCommands": true
+  },
+  "app": {
+    "windows": [],
+    "macOSPrivateApi": true,
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: frame: http://frame.localhost https://frame.localhost; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "useLocalToolsDir": true,
+    "resources": {
+      "../../../LICENSE": "LICENSE.txt",
+      "../../../docs/v2-third-party-notices.txt": "THIRD_PARTY_NOTICES.txt"
+    },
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Utility",
+    "shortDescription": "轻量、专注的跨平台截图翻译工具",
+    "license": "MIT",
+    "homepage": "https://github.com/reevebyte/ScreenTranslate",
+    "macOS": {
+      "minimumSystemVersion": "14.0"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "SimpChinese",
+          "English"
+        ],
+        "displayLanguageSelector": true,
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "compression": "lzma"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libayatana-appindicator3-1"
+        ]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZBMjVCNUU1M0E0M0VENzgKUldSNDdVTTY1YlVsYW90bnp3V213U1dDUkpzK1Q2YjI3U0VZMTh3eW9VbE9RTk83Y2sweW44b0MK",
+      "endpoints": [
+        "https://github.com/reevebyte/ScreenTranslate/releases/latest/download/latest-v2.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

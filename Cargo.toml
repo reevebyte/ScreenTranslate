@@ -1,0 +1,26 @@
+[workspace]
+members = ["crates/core", "crates/platform", "apps/desktop/src-tauri"]
+resolver = "2"
+
+[workspace.package]
+version = "2.0.2"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+repository = "https://github.com/reevebyte/ScreenTranslate"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util", "fs"] }
+tokio-util = "0.7"
+async-trait = "0.1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+tracing = "0.1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+strip = true

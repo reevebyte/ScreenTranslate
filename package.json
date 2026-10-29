@@ -1,0 +1,15 @@
+{
+  "name": "screentranslate-workspace",
+  "private": true,
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "dev": "pnpm --filter @screentranslate/desktop dev",
+    "desktop": "pnpm --filter @screentranslate/desktop tauri dev",
+    "build": "pnpm --filter @screentranslate/desktop build",
+    "check": "pnpm --filter @screentranslate/desktop check",
+    "test": "pnpm --filter @screentranslate/desktop test",
+    "types": "cargo run -p screentrans-core --bin export-types",
+    "notices": "node scripts/generate-v2-notices.mjs",
+    "types:check": "cargo run -p screentrans-core --bin export-types -- --check"
+  }
+}

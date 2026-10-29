@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 2,
+  "onboardingComplete": false,
+  "autoUpdate": true,
+  "provider": "google_free",
+  "providers": {
+    "google_free": {
+      "baseUrl": "",
+      "model": "",
+      "region": "",
+      "freePlan": true
+    },
+    "openai": {
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "",
+      "region": "",
+      "freePlan": true
+    },
+    "microsoft": {
+      "baseUrl": "https://api.cognitive.microsofttranslator.com",
+      "model": "",
+      "region": "",
+      "freePlan": true
+    },
+    "deepl": {
+      "baseUrl": "https://api-free.deepl.com/v2",
+      "model": "",
+      "region": "",
+      "freePlan": true
+    },
+    "google": {
+      "baseUrl": "https://translation.googleapis.com/language/translate/v2",
+      "model": "",
+      "region": "",
+      "freePlan": true
+    },
+    "anthropic": {
+      "baseUrl": "https://api.anthropic.com/v1",
+      "model": "",
+      "region": "",
+      "freePlan": true
+    },
+    "nvidia": {
+      "baseUrl": "https://integrate.api.nvidia.com/v1",
+      "model": "",
+      "region": "",
+      "freePlan": true
+    },
+    "bing_free": {
+      "baseUrl": "",
+      "model": "",
+      "region": "",
+      "freePlan": true
+    },
+    "microsoft_free": {
+      "baseUrl": "",
+      "model": "",
+      "region": "",
+      "freePlan": true
+    },
+    "tencent_free": {
+      "baseUrl": "",
+      "model": "",
+      "region": "",
+      "freePlan": true
+    },
+    "yandex_free": {
+      "baseUrl": "",
+      "model": "",
+      "region": "",
+      "freePlan": true
+    },
+    "iciba_free": {
+      "baseUrl": "",
+      "model": "",
+      "region": "",
+      "freePlan": true
+    }
+  },
+  "source": "auto",
+  "target": "auto",
+  "chineseTarget": "en",
+  "autoTranslate": true,
+  "autostart": false,
+  "waylandShortcuts": false,
+  "ocr": {
+    "defaultsVersion": 1,
+    "engine": "youdao",
+    "languages": [
+      "zh-Hans-CN",
+      "en-US"
+    ],
+    "azureEndpoint": "",
+    "upscale": true,
+    "custom": {
+      "protocol": "openai",
+      "endpoint": "",
+      "model": ""
+    }
+  },
+  "hotkeys": {
+    "capture": "Ctrl+Alt+Q",
+    "toggle": "Ctrl+Alt+W",
+    "quick": "Ctrl+Alt+Space"
+  },
+  "appearance": {
+    "theme": "system",
+    "accent": "#18181b",
+    "fontScale": 1.0,
+    "autoCopy": false,
+    "closeToTray": true
+  }
+}

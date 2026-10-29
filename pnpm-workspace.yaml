@@ -1,0 +1,13 @@
+packages:
+  - apps/desktop
+allowBuilds:
+  edgedriver: false
+  esbuild: true
+  geckodriver: false
+minimumReleaseAgeExclude:
+  - '@wdio/native-core@1.3.1'
+  - '@wdio/native-spy@1.4.1'
+  - '@wdio/native-types@2.6.1'
+  - '@wdio/native-utils@2.8.1'
+  - '@wdio/tauri-plugin@1.5.1'
+  - '@wdio/tauri-service@1.5.1'

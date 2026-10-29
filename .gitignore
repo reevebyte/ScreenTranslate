@@ -41,3 +41,21 @@ $RECYCLE.BIN/
 *.p12
 logs/
 errors.log*
+
+# ScreenTranslate 2 / Rust / frontend
+target/
+node_modules/
+.svelte-kit/
+.vite/
+coverage/
+playwright-report/
+test-results/
+apps/desktop/src-tauri/gen/
+*.key
+*.key.pub
+.env
+.env.*
+!.env.example
+
+# Local update signing identity (never publish)
+.local/

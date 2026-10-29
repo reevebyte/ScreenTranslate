@@ -1,0 +1,47 @@
+{
+  "name": "@screentranslate/desktop",
+  "version": "2.0.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "tauri": "node ../../scripts/tauri-v2.mjs",
+    "test:e2e": "node ../../scripts/run-v2-e2e.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.0",
+    "bits-ui": "^2.20.2",
+    "clsx": "^2.1.1",
+    "paneforge": "^1.0.2",
+    "phosphor-svelte": "^3.1.1",
+    "svelte-sonner": "^1.2.1",
+    "tailwind-merge": "^3.5.0",
+    "tailwind-variants": "^3.2.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tailwindcss/vite": "^4.3.0",
+    "@tauri-apps/cli": "^2.12.4",
+    "@testing-library/svelte": "^5.4.2",
+    "@types/node": "^22.19.0",
+    "@wdio/cli": "^9.0.0",
+    "@wdio/globals": "^9.31.3",
+    "@wdio/local-runner": "^9.0.0",
+    "@wdio/mocha-framework": "^9.0.0",
+    "@wdio/spec-reporter": "^9.0.0",
+    "@wdio/tauri-plugin": "^1.5.1",
+    "@wdio/tauri-service": "^1.5.1",
+    "jsdom": "^28.1.0",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.4.0",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "webdriverio": "^9.0.0"
+  }
+}

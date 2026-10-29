@@ -1,0 +1,2 @@
+import { config as base } from './wdio.conf.mjs';
+export const config={...base,specs:['./tests/e2e/resize-frames.mjs'],before:async()=>{await base.before();if(process.env.SCREENTRANS_RESIZE_THEME)await browser.tauri.execute(async({core},theme)=>{const {config}=await core.invoke('bootstrap');config.appearance.theme=theme;config.appearance.fontScale=1.5;await core.invoke('save_config',{config});},process.env.SCREENTRANS_RESIZE_THEME);},mochaOpts:{...base.mochaOpts,timeout:120000}};

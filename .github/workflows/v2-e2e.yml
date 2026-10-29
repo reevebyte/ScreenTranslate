@@ -1,0 +1,45 @@
+name: ScreenTranslate desktop E2E
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-14, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '14.0'
+      WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.7.0'
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential pkg-config libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libdbus-1-dev libxcb1-dev libxcb-randr0-dev libxrandr-dev libpipewire-0.3-dev libclang-dev libgbm-dev xvfb tesseract-ocr tesseract-ocr-eng
+      - run: pnpm install --frozen-lockfile
+      - name: Windows and macOS desktop tests
+        if: runner.os != 'Linux'
+        run: pnpm --filter @screentranslate/desktop test:e2e
+      - name: Linux desktop tests
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm --filter @screentranslate/desktop test:e2e
