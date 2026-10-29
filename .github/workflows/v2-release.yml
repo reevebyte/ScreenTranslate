@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing v2 tag to build (for example v2.0.0)'
+        description: 'Existing release tag, including v (for example v2.0.3)'
         required: true
         type: string
       finish_only:
@@ -33,6 +33,18 @@ jobs:
       release_id: ${{ steps.release.outputs.id }}
       signed_updates: ${{ steps.signing.outputs.enabled }}
     steps:
+      - name: Validate the requested release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v2\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo '::error::Enter an existing v2 release tag, such as v2.0.2.'
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --silent || {
+            echo "::error::Cannot find release tag $RELEASE_TAG. Check the tag field before retrying."
+            exit 1
+          }
       - name: Preserve source line endings on Windows
         if: runner.os == 'Windows'
         run: git config --global core.autocrlf false
@@ -44,6 +56,8 @@ jobs:
         with:
           node-version: '22'
       - run: node scripts/check-v2-version.mjs
+        env:
+          SCREENTRANS_UPDATE_PUBLIC_KEY: ${{ vars.SCREENTRANS_UPDATE_PUBLIC_KEY }}
       - id: signing
         name: Select signed updater or ordinary release
         env:
@@ -67,6 +81,7 @@ jobs:
         name: Prepare reviewable draft
         env:
           GH_TOKEN: ${{ github.token }}
+          FINISH_ONLY: ${{ inputs.finish_only }}
         run: |
           node --input-type=module <<'RELEASE_SCRIPT'
           import { readFile, writeFile, appendFile } from 'node:fs/promises';
@@ -89,6 +104,7 @@ jobs:
             if (releases.length < 100) break;
           }
           if (release && !release.draft) throw new Error('Refusing to change a published release');
+          if (!release && process.env.FINISH_ONLY === 'true') throw new Error('Metadata-only mode requires an existing draft with uploaded installers');
           if (!release) release = await request('/releases', 'POST', {
             tag_name: tag, name: `ScreenTranslate ${tag}`, draft: true, prerelease: tag.includes('-'),
             body: await readFile('docs/v2-release-notes.md', 'utf8'),
@@ -169,7 +185,8 @@ jobs:
           releaseId: ${{ needs.prepare.outputs.release_id }}
           tagName: ${{ env.RELEASE_TAG }}
           args: --target ${{ matrix.target }} ${{ needs.prepare.outputs.signed_updates == 'true' && '--config src-tauri/tauri.release.conf.json' || '' }}
-          includeUpdaterJson: ${{ needs.prepare.outputs.signed_updates == 'true' }}
+          # The final job is the sole writer of updater metadata; matrix jobs only upload binaries/signatures.
+          includeUpdaterJson: false
           updaterJsonPreferNsis: true
   manifests:
     if: ${{ always() && !cancelled() && needs.prepare.result == 'success' && needs.prepare.outputs.signed_updates == 'true' && (needs.build.result == 'success' || (inputs.finish_only == true && needs.build.result == 'skipped')) }}
@@ -203,6 +220,9 @@ jobs:
         run: |
           mkdir -p build/v2-release
           gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" > build/v2-release/release.json
-          gh release download "$RELEASE_TAG" --pattern latest.json --pattern '*.sig' --dir build/v2-release
-          node scripts/v2-release-manifests.mjs build/v2-release
+          gh release download "$RELEASE_TAG" --pattern '*.sig' --dir build/v2-release
+          node scripts/v2-release-manifests.mjs build/v2-release --from-assets
           gh release upload "$RELEASE_TAG" build/v2-release/latest.json build/v2-release/latest-v2.json LICENSE docs/v2-third-party-notices.txt --clobber
+          gh release download "$RELEASE_TAG" --pattern latest.json --pattern latest-v2.json --dir build/v2-release/verify
+          cmp build/v2-release/latest.json build/v2-release/verify/latest.json
+          cmp build/v2-release/latest-v2.json build/v2-release/verify/latest-v2.json

@@ -1,4 +1,4 @@
-ScreenTranslate 2 — third-party notices
+ScreenTranslate — third-party notices
 
 Generated from the locked Rust default-feature dependency graph and production frontend dependency graph. Includes build dependencies and a superset of platform dependencies. Optional E2E drivers are excluded. Each dependency retains its own license. System libraries and separately installed OCR language data have their own distribution terms.
 

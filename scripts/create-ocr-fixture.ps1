@@ -9,7 +9,7 @@ $font = [System.Drawing.Font]::new('Segoe UI', 30)
 try {
     $graphics.Clear([System.Drawing.Color]::White)
     $graphics.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-    $lines = @('ScreenTranslate 2', 'Read the world. Stay in the moment.', 'Local OCR. Simple translation.')
+    $lines = @('ScreenTranslate', 'Read the world. Stay in the moment.', 'Local OCR. Simple translation.')
     for ($index = 0; $index -lt $lines.Length; $index++) {
         $graphics.DrawString($lines[$index], $font, [System.Drawing.Brushes]::Black, 35, (35 + $index * 78))
     }

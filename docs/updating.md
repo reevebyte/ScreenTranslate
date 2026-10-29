@@ -43,6 +43,10 @@ Windows 标题栏的下载按钮不会增加 WebView；点击先下载，再次�
 
 提交并推送修复后，从 main 新运行发布工作流：tag 填 v2.0.2，并勾选“Only finish update metadata using the existing uploaded installers”。此模式跳过四个平台编译，复用草稿中已上传的安装包，只生成更新清单。
 
-GitHub 草稿附件可能使用 untagged 临时地址。清单整理会读取认证后的附件目录，只接受同一 Release 的准确附件地址，核对每项 signature 与上传的同名 .sig 文件一致，再把下载地址规范为发布后的 v2.0.2 地址，并上传 latest.json 与 latest-v2.json。签名内容不变；跨仓库、其他草稿、缺失签名或签名不一致继续报错。最后任务变绿后才发布草稿。
+四个平台只上传安装包和签名，不再各自改写 latest.json。最后一个任务从认证后的 Release 附件目录与下载的 .sig 文件统一生成清单，必须包含 Windows x64、Linux x64、macOS Intel 和 Apple Silicon；存在 MSI、DEB、RPM 时也保留对应条目。缺少任一主要平台或签名会明确报错，不会上传不完整清单。
 
-Tauri 上传步骤同时传入 releaseId 与 tagName，避免上游把草稿附件写成 releases/latest/download 地址。补清单模式兼容此前生成的此类地址：不请求或跟随 latest 链接，只按文件名核对指定 Release 的附件目录与同名签名，再固定到该版本的下载地址。
+补清单模式不读取旧 latest.json，因此草稿临时地址、latest/download 地址、旧清单损坏或并发合并遗漏都不会影响重建。新清单中的地址固定到指定版本；签名内容直接保留上传的 .sig 原文。上传 latest.json、latest-v2.json、许可证及第三方说明后，流程重新下载两份清单并逐字节比对。最后任务变绿后才发布草稿。
+
+标签在 checkout 前通过 GitHub API 检查，填错会直接提示。补清单模式要求已有草稿，不会创建空草稿；已发布版本不可改写，版本号或公钥配置不一致也会停止。Tauri 上传步骤同时传入 releaseId 与 tagName，并关闭矩阵任务自己的更新清单写入。
+
+发布回归测试包含工作流原始收尾 Shell 的离线演练，使用 2.0.2 草稿记录的真实附件目录及合成签名，覆盖生成、上传、回读比对、缺平台拒绝和回读内容损坏拒绝。它验证命令和文件处理，不代表已访问真实签名内容或完成远端发布。

@@ -28,7 +28,7 @@ function visitNpm(tree) {
   }
 }
 npm.forEach(visitNpm);
-const sections = ['ScreenTranslate 2 — third-party notices\n\nGenerated from the locked Rust default-feature dependency graph and production frontend dependency graph. Includes build dependencies and a superset of platform dependencies. Optional E2E drivers are excluded. Each dependency retains its own license. System libraries and separately installed OCR language data have their own distribution terms.\n'];
+const sections = ['ScreenTranslate — third-party notices\n\nGenerated from the locked Rust default-feature dependency graph and production frontend dependency graph. Includes build dependencies and a superset of platform dependencies. Optional E2E drivers are excluded. Each dependency retains its own license. System libraries and separately installed OCR language data have their own distribution terms.\n'];
 sections.push('\nVendored UI components: shadcn-svelte (Nova)\nhttps://github.com/huntabyte/shadcn-svelte\n\n' + await readFile(join(root, 'apps/desktop/src/lib/components/ui/SHADCN-LICENSE.md'), 'utf8'));
 sections.push('\nBundled provider artwork: @lobehub/icons-static-svg 1.101.0\nhttps://github.com/lobehub/lobe-icons\n\n' + await readFile(join(root, 'apps/desktop/src/lib/assets/providers/LOBE-LICENSE'), 'utf8'));
 for (const pkg of packages.sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`))) {

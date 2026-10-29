@@ -12,10 +12,10 @@ async function fixture(fn){
  try {await mkdir(join(dir,'docs'));await writeFile(join(dir,'docs/v2-release-notes.md'),'Fixture release notes\nSecond line');await fn(dir);}
  finally {const location=relative(await realpath(base),await realpath(dir));assert.ok(location&&!location.startsWith('..')&&!isAbsolute(location));await rm(dir,{recursive:true,force:true});}
 }
-async function run(dir,pages,{post={id:99,tag_name:'v2.0.2',draft:true},status=200}={}){
+async function run(dir,pages,{post={id:99,tag_name:'v2.0.2',draft:true},status=200,finishOnly=false}={}){
  const stub=`const _calls=[];globalThis.fetch=async(url,options)=>{_calls.push({url,...options});await(await import('node:fs/promises')).writeFile('calls.json',JSON.stringify(_calls));return {ok:${status}>=200&&${status}<300,status:${status},json:async()=>options.method==='POST'?${JSON.stringify(post)}:${JSON.stringify(pages)}[Number(new URL(url).searchParams.get('page'))-1]??[]};};`;
  await writeFile(join(dir,'run.mjs'),stub+'\n'+code);
- const result=spawnSync(process.execPath,[join(dir,'run.mjs')],{cwd:dir,encoding:'utf8',env:{...process.env,GITHUB_REPOSITORY:'reevebyte/ScreenTranslate',RELEASE_TAG:'v2.0.2',GH_TOKEN:'synthetic-token',GITHUB_OUTPUT:join(dir,'output.txt')}});
+ const result=spawnSync(process.execPath,[join(dir,'run.mjs')],{cwd:dir,encoding:'utf8',env:{...process.env,GITHUB_REPOSITORY:'reevebyte/ScreenTranslate',RELEASE_TAG:'v2.0.2',GH_TOKEN:'synthetic-token',FINISH_ONLY:String(finishOnly),GITHUB_OUTPUT:join(dir,'output.txt')}});
  return {...result,calls:JSON.parse(await readFile(join(dir,'calls.json'),'utf8'))};
 }
 test('reuses an existing unpublished draft without the by-tag endpoint',()=>fixture(async dir=>{
@@ -32,12 +32,19 @@ test('finds the draft on a later release-list page',()=>fixture(async dir=>{
  const result=await run(dir,[Array.from({length:100},(_,i)=>({id:i+1,tag_name:'v1.'+i,draft:false})),[{id:427,tag_name:'v2.0.2',draft:true}]]);assert.equal(result.status,0,result.stderr);assert.equal(result.calls.length,2);
 }));
 
+test('metadata-only mode requires an existing draft and never creates an empty replacement',()=>fixture(async dir=>{
+ let result=await run(dir,[[]],{finishOnly:true});assert.notEqual(result.status,0);assert.match(result.stderr,/requires an existing draft/);assert.deepEqual(result.calls.map(c=>c.method),['GET']);
+ result=await run(dir,[[{id:427,tag_name:'v2.0.2',draft:true}]],{finishOnly:true});assert.equal(result.status,0,result.stderr);assert.equal(result.calls.length,1);
+}));
+
 test('metadata-only retry skips builds but still runs the guarded metadata job',()=>{
  assert.match(workflow,/finish_only:[\s\S]*?type: boolean/);
  assert.match(workflow,/build:\r?\n    if: \$\{\{ inputs\.finish_only != true \}\}/);
  assert.match(workflow,/manifests:[\s\S]*?always\(\)[\s\S]*?needs\.build\.result == 'skipped'/);
  assert.match(workflow,/Check out the metadata driver from the workflow revision/);
- assert.match(workflow,/--pattern latest\.json --pattern '\*\.sig'/);
+ assert.match(workflow,/node scripts\/v2-release-manifests\.mjs build\/v2-release --from-assets/);
+ assert.match(workflow,/includeUpdaterJson: false/);
+ assert.match(workflow,/cmp build\/v2-release\/latest-v2\.json build\/v2-release\/verify\/latest-v2\.json/);
 });
 
 test('Tauri receives the explicit release tag so updater URLs never fall back to latest',()=>{

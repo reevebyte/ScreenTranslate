@@ -11,4 +11,4 @@ function run(args) {
 run(['--filter', '@screentranslate/desktop', 'tauri', 'build', '--debug', '--no-bundle', '--features', 'e2e', '--config', 'src-tauri/tauri.e2e.conf.json']);
 // The embedded driver keeps native window state within one invocation. Each
 // suite gets a fresh driver and fixture server so stale endpoints cannot leak.
-for (const config of ['wdio.conf.mjs','wdio.services.conf.mjs','wdio.layout.conf.mjs','wdio.resize.conf.mjs','wdio.update.conf.mjs']) run(['--filter', '@screentranslate/desktop', 'exec', 'wdio', 'run', config]);
+for (const config of ['wdio.first-run.conf.mjs','wdio.conf.mjs','wdio.services.conf.mjs','wdio.layout.conf.mjs','wdio.resize.conf.mjs','wdio.update.conf.mjs']) run(['--filter', '@screentranslate/desktop', 'exec', 'wdio', 'run', config]);
