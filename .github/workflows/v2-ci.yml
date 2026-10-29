@@ -60,7 +60,7 @@ jobs:
       - run: pnpm types:check
       - run: pnpm check
       - run: pnpm test
-      - run: node --test scripts/clean-v2-builds.test.mjs scripts/v2-release-manifests.test.mjs scripts/prepare-v2-release.test.mjs
+      - run: node --test scripts/clean-v2-builds.test.mjs scripts/v2-release-manifests.test.mjs scripts/prepare-v2-release.test.mjs scripts/tauri-build-output.test.mjs
       - run: pnpm build
       - run: node scripts/measure-v2.mjs
       - name: Build desktop binary

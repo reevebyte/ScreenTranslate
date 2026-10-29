@@ -36,3 +36,5 @@ Windows 标题栏的下载按钮不会增加 WebView；点击先下载，再次�
 如果旧标签的发布流程已经失败，先提交并推送工作流修复到 main。进入 Actions → ScreenTranslate draft release → Run workflow，选择 main，并在 tag 中填写已有标签（例如 v2.0.2）。这会使用 main 上修复后的流程构建该标签源码，并复用同标签草稿。不要只在旧失败任务点击 Re-run，否则仍会执行原来的流程；也无需删除或强制移动已有标签。
 
 发布准备通过认证后的 release 列表定位草稿，并直接使用创建响应中的 release ID，不再在创建草稿后依赖按标签查询接口。已公开的 Release 继续受到保护，流程不会修改它。Windows runner 在检出前禁用换行转换，类型校验本身也将 CRLF 视为 LF；实际类型变化仍会报错。
+
+发布整理脚本支持 `--target` 与 `--target=...`，Windows 独立 EXE 和清理范围跟随 `target/<平台>/release`。重试已有标签时，仅从当前工作流提交取构建驱动脚本，应用代码仍来自指定标签；不移动标签，也不更改已发布版本。

@@ -117,6 +117,20 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
+      - name: Check out the release driver from the workflow revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-driver
+          sparse-checkout: /scripts/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Use the corrected driver when rebuilding an existing tag
+        shell: bash
+        run: |
+          for file in tauri-v2.mjs tauri-build-output.mjs clean-v2-builds.mjs check-v2-version.mjs; do
+            cp ".release-driver/scripts/$file" "scripts/$file"
+          done
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
