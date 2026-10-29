@@ -3,9 +3,10 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const repository='reevebyte/ScreenTranslate';
 const downloadPrefix=`/${repository}/releases/download/`;
+const latestDownloadPrefix=`/${repository}/releases/latest/download/`;
 function githubUrl(value) {
   const url=new URL(value);
-  if(url.origin!=='https://github.com'||url.username||url.password||url.search||url.hash||!url.pathname.startsWith(downloadPrefix))throw new Error('Update URL must belong to this repository');
+  if(url.origin!=='https://github.com'||url.username||url.password||url.search||url.hash||(!url.pathname.startsWith(downloadPrefix)&&!url.pathname.startsWith(latestDownloadPrefix)))throw new Error('Update URL must belong to this repository');
   return url;
 }
 export function normalizeUpdateManifest(manifest,release,tag) {
@@ -25,8 +26,10 @@ export function normalizeUpdateManifest(manifest,release,tag) {
     if(!asset||!signature||typeof artifact.signature!=='string'||!artifact.signature.trim())throw new Error(`Missing signed release asset for ${platform}`);
     const catalogUrl=githubUrl(asset.browser_download_url);
     const canonical=new URL(`https://github.com${downloadPrefix}${encodeURIComponent(tag)}/${encodeURIComponent(name)}`);
-    // A draft URL is accepted only when it exactly matches this release's authenticated catalog.
-    if(url.href!==catalogUrl.href&&url.href!==canonical.href)throw new Error(`Update asset belongs to another release: ${platform}`);
+    const latest=new URL(`https://github.com${latestDownloadPrefix}${encodeURIComponent(name)}`);
+    // tauri-action uses latest/download when given releaseId without tagName.
+    // Bind that alias to this release's catalog and signed sidecar, never follow it.
+    if(url.href!==catalogUrl.href&&url.href!==canonical.href&&url.href!==latest.href)throw new Error(`Update asset belongs to another release: ${platform}`);
     artifact.url=canonical.href;
   }
   return result;

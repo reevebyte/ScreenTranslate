@@ -167,6 +167,7 @@ jobs:
         with:
           projectPath: apps/desktop
           releaseId: ${{ needs.prepare.outputs.release_id }}
+          tagName: ${{ env.RELEASE_TAG }}
           args: --target ${{ matrix.target }} ${{ needs.prepare.outputs.signed_updates == 'true' && '--config src-tauri/tauri.release.conf.json' || '' }}
           includeUpdaterJson: ${{ needs.prepare.outputs.signed_updates == 'true' }}
           updaterJsonPreferNsis: true

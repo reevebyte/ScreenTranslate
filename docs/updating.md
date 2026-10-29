@@ -44,3 +44,5 @@ Windows 标题栏的下载按钮不会增加 WebView；点击先下载，再次�
 提交并推送修复后，从 main 新运行发布工作流：tag 填 v2.0.2，并勾选“Only finish update metadata using the existing uploaded installers”。此模式跳过四个平台编译，复用草稿中已上传的安装包，只生成更新清单。
 
 GitHub 草稿附件可能使用 untagged 临时地址。清单整理会读取认证后的附件目录，只接受同一 Release 的准确附件地址，核对每项 signature 与上传的同名 .sig 文件一致，再把下载地址规范为发布后的 v2.0.2 地址，并上传 latest.json 与 latest-v2.json。签名内容不变；跨仓库、其他草稿、缺失签名或签名不一致继续报错。最后任务变绿后才发布草稿。
+
+Tauri 上传步骤同时传入 releaseId 与 tagName，避免上游把草稿附件写成 releases/latest/download 地址。补清单模式兼容此前生成的此类地址：不请求或跟随 latest 链接，只按文件名核对指定 Release 的附件目录与同名签名，再固定到该版本的下载地址。

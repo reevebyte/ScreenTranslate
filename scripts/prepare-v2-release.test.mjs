@@ -39,3 +39,10 @@ test('metadata-only retry skips builds but still runs the guarded metadata job',
  assert.match(workflow,/Check out the metadata driver from the workflow revision/);
  assert.match(workflow,/--pattern latest\.json --pattern '\*\.sig'/);
 });
+
+test('Tauri receives the explicit release tag so updater URLs never fall back to latest',()=>{
+ const action=workflow.match(/- uses: tauri-apps\/tauri-action@v0[\s\S]*?(?=\r?\n  manifests:)/)?.[0];
+ assert.ok(action,'Missing Tauri release action');
+ assert.match(action,/releaseId: \$\{\{ needs\.prepare\.outputs\.release_id \}\}/);
+ assert.match(action,/tagName: \$\{\{ env\.RELEASE_TAG \}\}/);
+});
