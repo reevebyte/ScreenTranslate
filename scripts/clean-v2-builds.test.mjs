@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, stat, rm, symlink } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { cleanBuilds } from './clean-v2-builds.mjs';
+
+// A fresh checkout does not contain the ignored build directory.
+await mkdir(resolve('build'), { recursive: true });
 test('cleanup keeps the current version and source and rejects a junction outside the workspace', async () => {
   const base = await mkdtemp(resolve('build/alpha8-cleanup-check-'));
   const root = join(base, 'workspace');

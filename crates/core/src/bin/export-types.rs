@@ -39,7 +39,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/desktop/src/lib/generated.ts");
     if std::env::args().any(|v| v == "--check") {
-        if std::fs::read_to_string(&path)? != text {
+        if !same_generated_types(&std::fs::read_to_string(&path)?, &text) {
             return Err("Generated TypeScript types are out of date; run pnpm types".into());
         }
     } else {
@@ -50,4 +50,27 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         std::fs::write(defaults, serde_json::to_string_pretty(&Config::default())?)?;
     }
     Ok(())
+}
+
+// Git for Windows may check out CRLF; line endings do not change the IPC schema.
+fn same_generated_types(actual: &str, expected: &str) -> bool {
+    actual.replace("\r\n", "\n") == expected
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn accepts_windows_line_endings_but_rejects_changed_types() {
+        let expected = "export type Example = { value: string };\n";
+        assert!(same_generated_types(expected, expected));
+        assert!(same_generated_types(
+            &expected.replace('\n', "\r\n"),
+            expected
+        ));
+        assert!(!same_generated_types(
+            "export type Example = { value: number };\r\n",
+            expected
+        ));
+    }
 }

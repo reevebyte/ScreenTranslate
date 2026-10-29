@@ -28,6 +28,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
+      - name: Preserve source line endings on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
@@ -57,7 +60,7 @@ jobs:
       - run: pnpm types:check
       - run: pnpm check
       - run: pnpm test
-      - run: node --test scripts/clean-v2-builds.test.mjs scripts/v2-release-manifests.test.mjs
+      - run: node --test scripts/clean-v2-builds.test.mjs scripts/v2-release-manifests.test.mjs scripts/prepare-v2-release.test.mjs
       - run: pnpm build
       - run: node scripts/measure-v2.mjs
       - name: Build desktop binary

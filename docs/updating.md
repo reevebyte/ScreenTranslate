@@ -30,3 +30,9 @@ ScreenTranslate 使用官方 Tauri updater 与 GitHub Releases，沿用 Cuvilo �
 当前已验证本机签名下载、篡改拒绝、权限与安装条件。尚未上传 Secrets、推送标签或运行远端 Release；真实安装升级要在发布下一版本后验收。参考 [Tauri updater 官方文档](https://v2.tauri.app/plugin/updater/)。
 
 Windows 标题栏的下载按钮不会增加 WebView；点击先下载，再次点击就绪按钮确认重启。托盘版本行在当前版本时显示为灰色，新版本可用时显示“↑ v版本 · 更新”，点击表示同意完整下载和安装流程；未保存配置或任务忙碌时禁用。
+
+## 修复工作流后重试已有标签
+
+如果旧标签的发布流程已经失败，先提交并推送工作流修复到 main。进入 Actions → ScreenTranslate draft release → Run workflow，选择 main，并在 tag 中填写已有标签（例如 v2.0.2）。这会使用 main 上修复后的流程构建该标签源码，并复用同标签草稿。不要只在旧失败任务点击 Re-run，否则仍会执行原来的流程；也无需删除或强制移动已有标签。
+
+发布准备通过认证后的 release 列表定位草稿，并直接使用创建响应中的 release ID，不再在创建草稿后依赖按标签查询接口。已公开的 Release 继续受到保护，流程不会修改它。Windows runner 在检出前禁用换行转换，类型校验本身也将 CRLF 视为 LF；实际类型变化仍会报错。

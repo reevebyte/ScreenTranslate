@@ -28,6 +28,9 @@ jobs:
       release_id: ${{ steps.release.outputs.id }}
       signed_updates: ${{ steps.signing.outputs.enabled }}
     steps:
+      - name: Preserve source line endings on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ env.RELEASE_TAG }}
@@ -56,15 +59,36 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > release.json 2>/dev/null; then
-            test "$(jq -r .draft release.json)" = true || { echo 'Refusing to change a published release'; exit 1; }
-          else
-            args=(--draft --title "ScreenTranslate $RELEASE_TAG" --notes-file docs/v2-release-notes.md)
-            if [[ "$RELEASE_TAG" == *-* ]]; then args+=(--prerelease); fi
-            gh release create "$RELEASE_TAG" "${args[@]}"
-            gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" > release.json
-          fi
-          echo "id=$(jq -r .id release.json)" >> "$GITHUB_OUTPUT"
+          node --input-type=module <<'RELEASE_SCRIPT'
+          import { readFile, writeFile, appendFile } from 'node:fs/promises';
+          const { GITHUB_REPOSITORY: repository, RELEASE_TAG: tag, GH_TOKEN: token, GITHUB_OUTPUT: output } = process.env;
+          if (!repository || !token || !output || !/^v2\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag ?? '')) throw new Error('Invalid release environment');
+          const headers = { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'ScreenTranslate-release', 'Content-Type': 'application/json' };
+          async function request(path, method = 'GET', body) {
+            const response = await fetch(`https://api.github.com/repos/${repository}${path}`, { method, headers, ...(body ? { body: JSON.stringify(body) } : {}) });
+            if (!response.ok) throw new Error(`Release API ${method} failed: HTTP ${response.status}`);
+            return response.json();
+          }
+          // The by-tag endpoint does not reliably return unpublished drafts.
+          // List authenticated releases, and retain the POST response when creating one.
+          let release;
+          for (let page = 1; ; page++) {
+            const releases = await request(`/releases?per_page=100&page=${page}`);
+            const matches = releases.filter(item => item.tag_name === tag);
+            if (matches.length > 1) throw new Error('Duplicate release drafts require review');
+            if (matches.length) { release = matches[0]; break; }
+            if (releases.length < 100) break;
+          }
+          if (release && !release.draft) throw new Error('Refusing to change a published release');
+          if (!release) release = await request('/releases', 'POST', {
+            tag_name: tag, name: `ScreenTranslate ${tag}`, draft: true, prerelease: tag.includes('-'),
+            body: await readFile('docs/v2-release-notes.md', 'utf8'),
+          });
+          if (!Number.isSafeInteger(release.id) || release.id <= 0) throw new Error('Missing release ID');
+          await writeFile('release.json', JSON.stringify(release));
+          await appendFile(output, `id=${release.id}\n`);
+          RELEASE_SCRIPT
+
   build:
     needs: prepare
     strategy:
@@ -86,6 +110,9 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       SCREENTRANS_UPDATE_PUBLIC_KEY: ${{ vars.SCREENTRANS_UPDATE_PUBLIC_KEY }}
     steps:
+      - name: Preserve source line endings on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ env.RELEASE_TAG }}
@@ -124,6 +151,9 @@ jobs:
     needs: [prepare, build]
     runs-on: ubuntu-24.04
     steps:
+      - name: Preserve source line endings on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ env.RELEASE_TAG }}

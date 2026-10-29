@@ -1,0 +1,33 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promises';
+import { dirname, join, relative, isAbsolute } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+const root=fileURLToPath(new URL('../',import.meta.url));
+const workflow=await readFile(join(root,'.github/workflows/v2-release.yml'),'utf8');
+const code=workflow.match(/node --input-type=module <<'RELEASE_SCRIPT'\r?\n([\s\S]*?)\r?\n          RELEASE_SCRIPT/)[1].split(/\r?\n/).map(line=>line.slice(10)).join('\n');
+async function fixture(fn){
+ const base=join(root,'build');await mkdir(base,{recursive:true});const dir=await mkdtemp(join(base,'release-script-check-'));
+ try {await mkdir(join(dir,'docs'));await writeFile(join(dir,'docs/v2-release-notes.md'),'Fixture release notes\nSecond line');await fn(dir);}
+ finally {const location=relative(await realpath(base),await realpath(dir));assert.ok(location&&!location.startsWith('..')&&!isAbsolute(location));await rm(dir,{recursive:true,force:true});}
+}
+async function run(dir,pages,{post={id:99,tag_name:'v2.0.2',draft:true},status=200}={}){
+ const stub=`const _calls=[];globalThis.fetch=async(url,options)=>{_calls.push({url,...options});await(await import('node:fs/promises')).writeFile('calls.json',JSON.stringify(_calls));return {ok:${status}>=200&&${status}<300,status:${status},json:async()=>options.method==='POST'?${JSON.stringify(post)}:${JSON.stringify(pages)}[Number(new URL(url).searchParams.get('page'))-1]??[]};};`;
+ await writeFile(join(dir,'run.mjs'),stub+'\n'+code);
+ const result=spawnSync(process.execPath,[join(dir,'run.mjs')],{cwd:dir,encoding:'utf8',env:{...process.env,GITHUB_REPOSITORY:'reevebyte/ScreenTranslate',RELEASE_TAG:'v2.0.2',GH_TOKEN:'synthetic-token',GITHUB_OUTPUT:join(dir,'output.txt')}});
+ return {...result,calls:JSON.parse(await readFile(join(dir,'calls.json'),'utf8'))};
+}
+test('reuses an existing unpublished draft without the by-tag endpoint',()=>fixture(async dir=>{
+ const result=await run(dir,[[{id:427,tag_name:'v2.0.2',draft:true}]]);assert.equal(result.status,0,result.stderr);assert.equal(result.calls.length,1);assert.equal(await readFile(join(dir,'output.txt'),'utf8'),'id=427\n');
+}));
+test('uses the creation response directly and preserves release-note newlines',()=>fixture(async dir=>{
+ const result=await run(dir,[[]]);assert.equal(result.status,0,result.stderr);assert.deepEqual(result.calls.map(c=>c.method),['GET','POST']);assert.equal(JSON.parse(result.calls[1].body).body,'Fixture release notes\nSecond line');assert.equal(await readFile(join(dir,'output.txt'),'utf8'),'id=99\n');
+}));
+test('refuses published releases and API permission failures without creating another draft',()=>fixture(async dir=>{
+ let result=await run(dir,[[{id:10,tag_name:'v2.0.2',draft:false}]]);assert.notEqual(result.status,0);assert.equal(result.calls.length,1);assert.match(result.stderr,/Refusing to change a published release/);
+ result=await run(dir,[[]],{status:403});assert.notEqual(result.status,0);assert.equal(result.calls.length,1);assert.match(result.stderr,/HTTP 403/);
+}));
+test('finds the draft on a later release-list page',()=>fixture(async dir=>{
+ const result=await run(dir,[Array.from({length:100},(_,i)=>({id:i+1,tag_name:'v1.'+i,draft:false})),[{id:427,tag_name:'v2.0.2',draft:true}]]);assert.equal(result.status,0,result.stderr);assert.equal(result.calls.length,2);
+}));
