@@ -41,6 +41,21 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('floating screenshot recovery', () => {
+  it('leaves Space activation on toolbar buttons to the focused control', async () => {
+    app.data!.visual.output = 'translation';
+    app.data!.visual.job.stage = 'complete';
+    const view = renderResult();
+    await waitFor(() => expect(events.get('result-display-changed')?.size).toBe(2));
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+    await fireEvent(view.getByRole('button', { name: '复制全部译文' }), event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(call.mock.calls.filter(([command]) => command === 'set_result_display')).toHaveLength(0);
+  });
+  it('does not send display updates when releasing a space used by an editor', async () => {
+    render(ResultView, { floating: true });
+    await fireEvent.keyUp(window, { key: ' ' });
+    expect(call.mock.calls.filter(([command]) => command === 'set_result_display')).toHaveLength(0);
+  });
   it('keeps all selection anchors and restores tools only after the native image drag finishes', async () => {
     let release!:()=>void;
     startDragging.mockImplementationOnce(()=>new Promise<void>(resolve=>release=resolve));

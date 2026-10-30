@@ -2,20 +2,31 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
 import { previewBootstrap } from '$lib/preview';
 
-const { call, focusInput } = vi.hoisted(() => ({ call: vi.fn(), focusInput: { current: null as (() => void) | null } }));
+const { call, listen, focusInput } = vi.hoisted(() => ({ call: vi.fn(), listen: vi.fn(), focusInput: { current: null as (() => void) | null } }));
 vi.mock('$lib/api', () => ({ desktop: true, call, loadBootstrap: vi.fn() }));
-vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async (_name: string, callback: () => void) => { focusInput.current = callback; return vi.fn(); }) }));
+vi.mock('@tauri-apps/api/event', () => ({ listen }));
 vi.mock('svelte-sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 import { app } from '$lib/store.svelte';
 import QuickView from './QuickView.svelte';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  listen.mockImplementation(async (_name: string, callback: () => void) => { focusInput.current = callback; return vi.fn(); });
   app.data = previewBootstrap();
   app.input = 'Selected source';
   app.data.text.output = '译文';
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+it('unregisters a native listener that resolves after the tool was removed', async () => {
+  let complete!: (stop: () => void) => void;
+  listen.mockReturnValueOnce(new Promise<() => void>(resolve => complete = resolve));
+  const stop = vi.fn();
+  const view = render(QuickView);
+  view.unmount();
+  complete(stop);
+  await waitFor(() => expect(stop).toHaveBeenCalledTimes(1));
+});
 
 it('leaves Ctrl+C in the input to the browser instead of copying the translation', async () => {
   const view = render(QuickView);

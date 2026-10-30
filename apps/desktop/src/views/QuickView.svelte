@@ -34,13 +34,15 @@
     textarea?.setSelectionRange(0, 0);
     void tick().then(() => { if (textarea && document.activeElement === textarea) { textarea.setSelectionRange(0, 0); textarea.scrollTop = 0; } });
     let stop: (() => void) | undefined;
+    let disposed = false;
     if (desktop) {
       void listen('focus-input', () => {
+        if (disposed) return;
         activePane = 'source';
-        void tick().then(() => { textarea?.focus(); textarea?.select(); });
-      }).then(fn => (stop = fn));
+        void tick().then(() => { if (!disposed) { textarea?.focus(); textarea?.select(); } });
+      }).then(fn => { if (disposed) fn(); else stop = fn; }).catch(() => {});
     }
-    return () => stop?.();
+    return () => { disposed = true; stop?.(); };
   });
 
   let copyTimer: ReturnType<typeof setTimeout> | undefined;

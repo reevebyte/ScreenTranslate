@@ -33,15 +33,6 @@ impl HttpTranslator {
         if !options.base_url.is_empty() {
             validate_api_url(&options.base_url)?;
         }
-        if matches!(
-            provider,
-            ProviderId::Openai | ProviderId::Nvidia | ProviderId::Anthropic
-        ) && options.model.trim().is_empty()
-        {
-            return Err(
-                AppError::new(ErrorCode::Configuration, "请先填写模型名称").action("providers")
-            );
-        }
         let client = Client::builder()
             .timeout(Duration::from_secs(60))
             .connect_timeout(Duration::from_secs(12))
@@ -91,6 +82,15 @@ impl TranslatorBackend for HttpTranslator {
     ) -> Result<Vec<TranslatedItem>> {
         if stop.is_cancelled() {
             return Err(AppError::cancelled());
+        }
+        if matches!(
+            self.provider,
+            ProviderId::Openai | ProviderId::Nvidia | ProviderId::Anthropic
+        ) && self.options.model.trim().is_empty()
+        {
+            return Err(
+                AppError::new(ErrorCode::Configuration, "请先填写模型名称").action("providers")
+            );
         }
         if request.items.is_empty() {
             return Ok(Vec::new());
@@ -233,6 +233,44 @@ mod tests {
                 id: "a".into(),
                 text: "hello".into(),
             }],
+        }
+    }
+
+    #[tokio::test]
+    async fn discovers_models_before_selection_but_requires_one_for_translation() {
+        for provider in [ProviderId::Openai, ProviderId::Nvidia] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/models"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"data":[{"id":"fixture-model"}]})),
+                )
+                .expect(1)
+                .mount(&server)
+                .await;
+            let backend = HttpTranslator::new(
+                provider,
+                ProviderConfig {
+                    base_url: server.uri(),
+                    ..provider_defaults(provider)
+                },
+                "fixture".into(),
+            )
+            .unwrap();
+            assert_eq!(
+                backend.list_models(CancellationToken::new()).await.unwrap(),
+                vec!["fixture-model"]
+            );
+            assert_eq!(
+                backend
+                    .translate(request(), CancellationToken::new())
+                    .await
+                    .unwrap_err()
+                    .code,
+                ErrorCode::Configuration
+            );
+            assert_eq!(server.received_requests().await.unwrap().len(), 1);
         }
     }
 

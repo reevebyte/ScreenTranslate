@@ -1,3 +1,22 @@
+# 2.0.4 验证记录
+
+- 原因：隐藏窗口在后台 60 秒后被定时回收（轮询间隔 15 秒）。回收最后一个窗口会触发 Tauri 的无退出码退出请求，原先未拦截，导致托盘进程一起结束。
+- 修复：阻止无退出码的隐式退出，继续回收隐藏 WebView；显式退出与更新重启仍由带退出码的请求处理。
+- 全局代码审查与边界修复：
+  - `pipeline::retranslate_block` 先校验目标文本块属于当前截图会话，避免旧截图校对请求误取消正在进行的新截图识别。
+  - `windows::begin_capture` 仅在当前截图任务仍为最新票据时回退错误，避免已废弃截图的迟到错误关闭新选区。
+  - `commands::refresh_capabilities` 保留启动时的实际托盘可用状态。
+  - `HttpTranslator::new` 将模型非空校验推迟到实际翻译时执行，允许新接入的兼容 AI 服务先拉取模型列表再选模型。
+  - `layout::normalize_ocr_text` 保留纯文本 OCR 返回的换行符，避免多段文本被压成单行。
+  - `QuickView` 修复组件提前卸载时异步事件监听未注销的问题；`ResultView` 避免空格键抢占工具栏按钮激活或误发状态更新。
+  - 清理未使用的 `render::repair_text_region` 及多处前端死变量与未用导入。
+- Windows 原生回归通过：使用临时配置与真实 Wry WebView，连续两轮等待生产回收计时器清空所有窗口，再分别重开 quick/main；会话保留，最后显式退出成功。父进程核对完整结束标记，避免运行时提前以 0 退出掩盖失败；用时约 151 秒。
+- 原生回归命令：`cargo test -p screentranslate-desktop --lib --features e2e background_tests::reaped_windows_keep_background_runtime_alive -- --ignored --nocapture --test-threads=1`。
+- 修正 Windows lib 单元测试缺少 Common Controls v6 清单的问题；正式程序继续使用 Tauri 自带的完整应用清单。
+- Rust fmt、Clippy（`-D warnings`）、63 项 Rust 测试、前端 svelte-check（0 错误 0 警告）、71 项前端测试、29 项发布与清理脚本测试全部通过；生产前端与体积预算检查通过。
+- Windows NSIS 正式包构建成功：`ScreenTranslate_2.0.4_x64-setup.exe`，3,290,273 bytes（约 3.14 MiB）；文件版本与产品名核对通过，成品仍包含应用清单和 Common Controls 依赖。SHA256 位于本机 `build/release-2.0.4/artifacts.json`。
+- 构建成功后由 `scripts/tauri-v2.mjs` 清理旧版产物，当前安装包、可执行文件与活动编译缓存保留。
+- 本轮原生回归覆盖后台窗口回收和事件循环，不代表实际按键、托盘点击或更新安装已做端到端验收。未改动用户配置、服务密钥，未发布远端版本。
 # 2.0.3 验证记录
 
 - 产品名统一为 ScreenTranslate；版本号独立为 2.0.3，应用 identifier 与更新公钥保持不变。

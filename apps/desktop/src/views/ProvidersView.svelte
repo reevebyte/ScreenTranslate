@@ -25,7 +25,7 @@
   let testRequest = 0, alive = true;
   let credentialField = $state<{flush:()=>Promise<boolean>}>();
   let info = $derived(providerInfo(selected)); let options = $derived(draft.providers[selected]!);
-  let ai = $derived(['openai','nvidia','anthropic'].includes(selected)); let generic = $derived(['openai','nvidia'].includes(selected));
+  let ai = $derived(['openai','nvidia','anthropic'].includes(selected));
   let selectedBrand=$derived(providerBrand(selected,options.baseUrl));
   let entries=$derived(providers.slice().sort((a,b)=>Number(!!a.unofficial)-Number(!!b.unofficial)).map(p=>({id:p.id,name:p.id==='openai'?t("OpenAI 兼容"):p.id==='google_free'?t("Google 网页"):p.id==='microsoft'?'Microsoft':t(p.name),group:p.unofficial?t("免费接口"):t("API 服务"),icon:p.id==='openai'?'openai' as const:providerBrand(p.id,draft.providers[p.id]?.baseUrl),current:draft.provider===p.id})));
   let editing = $state(false); let last = untrack(()=>JSON.stringify(draft));

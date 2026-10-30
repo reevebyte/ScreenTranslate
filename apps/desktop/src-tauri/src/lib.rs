@@ -17,6 +17,8 @@ mod updater;
 use update_caption::set_update_caption;
 #[cfg(not(windows))]
 use update_ui::set_update_caption;
+#[cfg(all(test, windows, feature = "e2e"))]
+mod background_tests;
 mod visual_render;
 mod windows;
 
@@ -216,8 +218,20 @@ pub fn run() {
         .plugin(tauri_plugin_wdio::init())
         .plugin(tauri_plugin_wdio_webdriver::init());
     builder
-        .run(tauri::generate_context!())
-        .expect("ScreenTranslate could not initialize its desktop runtime");
+        .build(tauri::generate_context!())
+        .expect("ScreenTranslate could not initialize its desktop runtime")
+        .run(handle_run_event);
+}
+
+fn handle_run_event(_app: &tauri::AppHandle, event: tauri::RunEvent) {
+    // Reaping the last hidden webview must leave tray and shortcut handlers alive.
+    // Explicit exit/restart requests carry a code and must still be honored.
+    if let tauri::RunEvent::ExitRequested {
+        code: None, api, ..
+    } = event
+    {
+        api.prevent_exit();
+    }
 }
 
 fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {

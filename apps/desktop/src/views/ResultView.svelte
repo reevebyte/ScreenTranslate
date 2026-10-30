@@ -11,7 +11,6 @@
   import { desktop } from '$lib/api';
   import {
     ScanLine,
-    Image,
     Copy,
     RotateCcw,
     PencilLine,
@@ -25,7 +24,7 @@
   } from '$lib/icons';
   import { app, act, copy, recover } from '$lib/store.svelte';
   import { call } from '$lib/api';
-  import { frameUrl, languages , languageOptions } from '$lib/utils';
+  import { frameUrl, languageOptions } from '$lib/utils';
   import { fitOverlayText, sourceFontSize } from '$lib/overlay-layout';
   import Button from '$lib/components/ui/button.svelte';
   import Choice from '$lib/components/ui/choice.svelte';
@@ -365,7 +364,7 @@
 
   function keydown(event: KeyboardEvent) {
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
-    if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"], [role="combobox"], [role="listbox"], [role="dialog"]')) return;
+    if (event.target instanceof Element && event.target.closest('button, input, textarea, select, [contenteditable="true"], [role="button"], [role="combobox"], [role="listbox"], [role="menu"], [role="menuitem"], [role="dialog"]')) return;
     if (selectedId) return;
     if (event.key.toLowerCase() === 'r' && !busy) { event.preventDefault(); void act(call('retry_visual')); return; }
     if (event.key.toLowerCase() === 'e' && session?.blocks[0] && !floating) { event.preventDefault(); edit(session.blocks[0].id); return; }
@@ -399,7 +398,7 @@
 <svelte:window
   onkeydown={keydown}
   onkeyup={event => {
-    if (event.key === ' ') setDisplay(original, comparing, false);
+    if (event.key === ' ' && holdingOriginal) setDisplay(original, comparing, false);
   }}
   onblur={() => { if(holdingOriginal)setDisplay(original,comparing,false); }}
 />

@@ -76,6 +76,13 @@ pub fn normalize_ocr_text(text: &str) -> String {
     let mut previous = None;
     let mut space = false;
     for c in text.chars() {
+        // Text-only OCR providers may put a whole paragraph in one line object.
+        if c == '\n' {
+            result.push('\n');
+            previous = None;
+            space = false;
+            continue;
+        }
         if c.is_whitespace() {
             space = true;
             continue;
@@ -174,5 +181,13 @@ mod tests {
             normalize_ocr_text("Hello   world from OCR"),
             "Hello world from OCR"
         );
+    }
+
+    #[test]
+    fn preserves_paragraph_breaks_from_text_only_ocr() {
+        let blocks = group_lines(vec![line("Hello  world\r\nNext line\n\n中 文", 0.0, 0.0)]);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].text, "Hello world\nNext line\n\n中文");
+        assert_eq!(blocks[0].source_lines.len(), 1);
     }
 }

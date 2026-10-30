@@ -3,12 +3,12 @@
   import ActiveIndicator from '$lib/components/ui/active-indicator.svelte';
   import { Tabs, Dialog } from 'bits-ui';
   import { onDestroy, untrack } from 'svelte';
-  import { Check, Settings2, Keyboard, ScanLine, Palette, ShieldCheck, RefreshCw, ArrowUpRight, LoaderCircle, Import, Monitor, Moon, Sun, Globe, KeyRound, RotateCcw, Languages, PanelTop, Plus, Minus, SlidersHorizontal } from '$lib/icons';
+  import { Check, Settings2, Palette, ShieldCheck, LoaderCircle, Import, Monitor, Moon, Sun, Globe, Languages, PanelTop, Plus, Minus, SlidersHorizontal } from '$lib/icons';
   import { toast } from 'svelte-sonner';
-  import { app, saveConfig, previewConfig, refreshCapabilities, act } from '$lib/store.svelte';
+  import { app, saveConfig, previewConfig } from '$lib/store.svelte';
   import { call, loadBootstrap } from '$lib/api';
   import { createAutosave } from '$lib/autosave';
-  import { languages, errorMessage , languageOptions } from '$lib/utils';
+  import { errorMessage, languageOptions } from '$lib/utils';
   import type { Config, MigrationReport } from '$lib/generated';
   import defaults from '$lib/default-config.json';
   import { actionPalette } from '$lib/appearance';
@@ -22,7 +22,6 @@
   let draft = $state<Config>(structuredClone($state.snapshot(app.data!.config)));
   if (['privacy','migration'].includes(untrack(() => app.settingsTab))) app.settingsTab = 'data';
   let importing = $state(false); let confirmImport = $state(false);
-  let editingText = $state(false);
   let lastScheduled = untrack(() => JSON.stringify(draft));
   const autosave = createAutosave<Config>(config => saveConfig(config, { quiet: true }));
   const tabs = $derived([ ['general', t("通用"), Settings2], ['appearance', t("外观"), Palette], ['data', t("数据"), ShieldCheck], ['about', t("关于"), CircleHelp] ] as const);
@@ -37,7 +36,7 @@
     previewConfig(config);
     autosave.schedule(config);
   }
-  $effect(() => { JSON.stringify(draft); if (!editingText) untrack(queueDraft); });
+  $effect(() => { JSON.stringify(draft); untrack(queueDraft); });
   onDestroy(() => { queueDraft(); void autosave.flush(); });
   function retrySave() { autosave.schedule(structuredClone($state.snapshot(draft))); void autosave.flush(); }
   async function importOld() {

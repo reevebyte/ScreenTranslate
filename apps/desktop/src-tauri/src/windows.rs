@@ -834,7 +834,10 @@ pub fn begin_capture(app: AppHandle, monitor: Option<String>) {
         .await;
         if let Err(error) = result
             && error.code != ErrorCode::Cancelled
+            && app.state::<AppState>().jobs.is_current("capture", &ticket)
         {
+            // A late OS/portal error from an abandoned capture must not tear
+            // down selection windows that belong to its replacement.
             cancel_capture(&app, true);
             let _ = show_main(&app);
             let _ = app.emit("app-error", error);

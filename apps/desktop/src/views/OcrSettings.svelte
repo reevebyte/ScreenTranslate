@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '$lib/i18n.svelte';
   import { onDestroy, untrack } from 'svelte';
-  import { Check, Globe, Monitor, ScanLine, RefreshCw, ArrowUpRight, ChevronDown } from '$lib/icons';
+  import { Globe, Monitor, RefreshCw, ArrowUpRight, ChevronDown } from '$lib/icons';
   import { app, previewConfig, saveConfig, refreshCapabilities, act } from '$lib/store.svelte';
   import { call } from '$lib/api';
   import { createAutosave } from '$lib/autosave';
@@ -24,10 +24,10 @@
   $effect(() => { JSON.stringify(draft); if (!editingText) untrack(queue); });
   onDestroy(() => { queue(); void autosave.flush(); });
   const engines = $derived([
-    ['youdao',t("有道 OCR"),Globe,'#d74738'],
-    ['system',app.data?.capabilities.platform === 'macos' ? 'Apple Vision' : app.data?.capabilities.platform === 'linux' ? 'Tesseract' : 'Windows OCR',Monitor,'#60758f'],
-    ['azure','Azure Vision',ScanLine,'#187fc7'],
-    ['custom',t("自定义 OCR"),ScanLine,'#8a6451'],
+    ['youdao',t("有道 OCR")],
+    ['system',app.data?.capabilities.platform === 'macos' ? 'Apple Vision' : app.data?.capabilities.platform === 'linux' ? 'Tesseract' : 'Windows OCR'],
+    ['azure','Azure Vision'],
+    ['custom',t("自定义 OCR")],
   ] as const);
   let entries = $derived(engines.map(([id,name])=>({id,name,icon:(id==='system'?(app.data?.capabilities.platform==='macos'?'apple':app.data?.capabilities.platform==='linux'?'custom':'windows'):id==='custom'?'custom':id==='azure'?'azure':'youdao') as ProviderBrand,group:id==='system'?t("本机"):id==='custom'?t("自定义"):t("云端"),current:draft.ocr.engine===id})));
   async function select(id:string){if(credentialField && !(await credentialField.flush()))return;selected=id as Config['ocr']['engine'];}

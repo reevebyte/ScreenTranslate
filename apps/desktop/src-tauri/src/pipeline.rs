@@ -1,12 +1,12 @@
 use crate::{
-    state::{AppState, lock},
+    state::{AppState, Sessions, lock},
     windows,
 };
 use screentrans_core::{
     AppError, ErrorCode, FrameMetadata, JobStage, JobStatus, Result, TranslationItem,
     TranslationRequest,
     config::{Config, OcrEngine},
-    jobs::JobTicket,
+    jobs::{JobRegistry, JobTicket},
     language, layout,
     ports::{OcrBackend, TranslatorBackend},
     translators::HttpTranslator,
@@ -358,28 +358,39 @@ async fn run_visual(
     Ok(())
 }
 
+fn begin_block_edit(
+    sessions: &mut Sessions,
+    jobs: &JobRegistry,
+    id: &str,
+    text: &str,
+    target: &str,
+) -> Result<(u32, String, JobTicket, u32)> {
+    // A correction can arrive after a new capture has replaced its blocks.
+    // Validate before cancelling that capture's current OCR/translation job.
+    let block = sessions
+        .visual
+        .blocks
+        .iter_mut()
+        .find(|block| block.id == id)
+        .ok_or_else(|| AppError::new(ErrorCode::InvalidInput, "文本块已更新，请重新选择"))?;
+    let visual_revision = sessions.visual.revision;
+    let lane = format!("block:{visual_revision}:{id}");
+    let ticket = jobs.begin(&lane);
+    jobs.cancel("visual");
+    block.revision += 1;
+    block.text = text.into();
+    block.target_language = target.into();
+    block.translation.clear();
+    let revision = block.revision;
+    sessions.visual.job.stage = JobStage::Translating;
+    sessions.visual.job.error = None;
+    Ok((visual_revision, lane, ticket, revision))
+}
+
 pub fn retranslate_block(app: AppHandle, id: String, text: String, target: String) -> Result<()> {
     let state = app.state::<AppState>();
-    let visual_revision = lock(&state.sessions).visual.revision;
-    let lane = format!("block:{visual_revision}:{id}");
-    let ticket = state.jobs.begin(&lane);
-    let revision = {
-        let mut sessions = lock(&state.sessions);
-        state.jobs.cancel("visual");
-        sessions.visual.job.stage = JobStage::Translating;
-        sessions.visual.job.error = None;
-        let block = sessions
-            .visual
-            .blocks
-            .iter_mut()
-            .find(|block| block.id == id)
-            .ok_or_else(|| AppError::new(ErrorCode::InvalidInput, "文本块已更新，请重新选择"))?;
-        block.revision += 1;
-        block.text = text.clone();
-        block.target_language = target.clone();
-        block.translation.clear();
-        block.revision
-    };
+    let (visual_revision, lane, ticket, revision) =
+        begin_block_edit(&mut lock(&state.sessions), &state.jobs, &id, &text, &target)?;
     state.publish_visual(&app);
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
@@ -463,4 +474,56 @@ pub fn retranslate_block(app: AppHandle, id: String, text: String, target: Strin
         state.publish_visual(&app);
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use screentrans_core::{OcrLine, Rect};
+
+    #[test]
+    fn stale_block_correction_does_not_cancel_a_new_capture() {
+        let jobs = JobRegistry::default();
+        let active = jobs.begin("visual");
+        let mut sessions = Sessions::default();
+        sessions.visual.revision = 2;
+        sessions.visual.job.stage = JobStage::Recognizing;
+
+        assert!(begin_block_edit(&mut sessions, &jobs, "block-0", "old capture", "en").is_err());
+        assert!(jobs.is_current("visual", &active));
+        assert_eq!(sessions.visual.job.stage, JobStage::Recognizing);
+        assert!(sessions.visual.blocks.is_empty());
+    }
+
+    #[test]
+    fn valid_correction_belongs_to_the_locked_capture_revision() {
+        let jobs = JobRegistry::default();
+        let active = jobs.begin("visual");
+        let text = jobs.begin("text");
+        let mut sessions = Sessions::default();
+        sessions.visual.revision = 7;
+        sessions.visual.blocks = layout::group_lines(vec![OcrLine {
+            text: "before".into(),
+            bounds: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 20.0,
+            },
+            confidence: None,
+        }]);
+        let old_revision = sessions.visual.blocks[0].revision;
+        let (visual_revision, lane, ticket, revision) =
+            begin_block_edit(&mut sessions, &jobs, "block-0", "corrected", "en").unwrap();
+
+        assert_eq!(visual_revision, 7);
+        assert_eq!(lane, "block:7:block-0");
+        assert_eq!(revision, old_revision + 1);
+        assert_eq!(sessions.visual.blocks[0].text, "corrected");
+        assert_eq!(sessions.visual.blocks[0].target_language, "en");
+        assert_eq!(sessions.visual.job.stage, JobStage::Translating);
+        assert!(!jobs.is_current("visual", &active));
+        assert!(jobs.is_current("text", &text));
+        assert!(jobs.is_current(&lane, &ticket));
+    }
 }

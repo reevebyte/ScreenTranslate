@@ -104,10 +104,14 @@ pub async fn refresh_capabilities(app: AppHandle) -> Result<PlatformCapabilities
         .await
         .map_err(|_| AppError::new(ErrorCode::Internal, "系统能力检查失败"))?;
     let state = app.state::<AppState>();
-    if capabilities.wayland {
-        capabilities.global_shortcuts = lock(&state.capabilities).global_shortcuts;
+    {
+        let mut current = lock(&state.capabilities);
+        capabilities.tray = current.tray;
+        if capabilities.wayland {
+            capabilities.global_shortcuts = current.global_shortcuts;
+        }
+        *current = capabilities.clone();
     }
-    *lock(&state.capabilities) = capabilities.clone();
     Ok(capabilities)
 }
 
