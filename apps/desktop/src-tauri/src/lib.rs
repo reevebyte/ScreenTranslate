@@ -258,7 +258,9 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     });
     let menu = Menu::with_items(
         app,
-        &[&capture, &quick, &toggle, &main, &separator, &version, &quit],
+        &[
+            &capture, &quick, &toggle, &main, &separator, &version, &quit,
+        ],
     )?;
     let mut tray = TrayIconBuilder::with_id("main-tray")
         .tooltip("ScreenTranslate · 截图即翻译")

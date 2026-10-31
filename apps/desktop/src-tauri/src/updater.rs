@@ -142,11 +142,25 @@ fn system_proxy() -> Option<tauri::Url> {
     if let Some(proxy) = registry_proxy() {
         return Some(proxy);
     }
-    ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"]
-        .into_iter()
-        .find_map(|key| std::env::var(key).ok().and_then(|val| parse_proxy_server(&val)))
+    [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ]
+    .into_iter()
+    .find_map(|key| {
+        std::env::var(key)
+            .ok()
+            .and_then(|val| parse_proxy_server(&val))
+    })
 }
-fn proxy_candidates(primary: Option<tauri::Url>, fallback: Option<tauri::Url>) -> Vec<Option<tauri::Url>> {
+fn proxy_candidates(
+    primary: Option<tauri::Url>,
+    fallback: Option<tauri::Url>,
+) -> Vec<Option<tauri::Url>> {
     let mut candidates = Vec::with_capacity(2);
     candidates.push(primary);
     if !candidates.contains(&fallback) {
@@ -210,7 +224,10 @@ pub async fn check_update(app: AppHandle, window: WebviewWindow) -> Result<serde
         }
     }
     if last_error.is_some() && checked.is_none() {
-        return Err(AppError::new(ErrorCode::Network, "无法检查更新，请稍后重试"));
+        return Err(AppError::new(
+            ErrorCode::Network,
+            "无法检查更新，请稍后重试",
+        ));
     }
     let mut update = checked.flatten();
     if let Some(update) = update.as_mut() {
@@ -267,10 +284,9 @@ pub async fn download_update(app: AppHandle, window: WebviewWindow, version: Str
             }
         }
     }
-    Err(last_error
-        .as_ref()
-        .map(download_error)
-        .unwrap_or_else(|| AppError::new(ErrorCode::Network, "更新下载失败，请检查网络或代理后重试")))
+    Err(last_error.as_ref().map(download_error).unwrap_or_else(|| {
+        AppError::new(ErrorCode::Network, "更新下载失败，请检查网络或代理后重试")
+    }))
 }
 #[tauri::command]
 pub async fn install_update(app: AppHandle, window: WebviewWindow, version: String) -> Result<()> {
