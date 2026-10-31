@@ -17,6 +17,7 @@
   import ServicesView from './views/ServicesView.svelte';
   import ShortcutsView from './views/ShortcutsView.svelte';
   import SettingsView from './views/SettingsView.svelte';
+  import UpdateDialog from '$lib/components/UpdateDialog.svelte';
   const mode = new URLSearchParams(location.search).get('window') || 'main';
   const nav = $derived([
     { route: 'shortcuts' as Route, label: t("快捷操作"), icon: Keyboard },
@@ -110,7 +111,7 @@
       {/if}
     </main>
   </div>
-  {#if updates.confirm}{#await import('$lib/components/UpdateDialog.svelte') then module}<module.default/>{/await}{/if}
+  <UpdateDialog />
   {#if app.commandOpen}{#await import('$lib/components/CommandPalette.svelte') then module}<module.default/>{/await}{/if}
   {#if welcome}{#await import('$lib/components/Onboarding.svelte') then module}<module.default bind:open={welcome}/>{/await}{/if}
 {/if}

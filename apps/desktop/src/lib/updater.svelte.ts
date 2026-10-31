@@ -74,6 +74,9 @@ export async function consumeUpdateRequest() {
     if (source === 'tray') {
       if (updates.stage === 'available' || updates.stage === 'error') await downloadUpdate();
       if (updates.stage === 'ready') await installUpdate();
+    } else if (source === 'caption') {
+      if (updates.stage === 'available' || updates.stage === 'error') await downloadUpdate();
+      else if (updates.stage === 'ready') await installUpdate();
     } else if (updates.stage === 'ready') updates.confirm = true;
     else if (updates.stage === 'available' || updates.stage === 'error') await downloadUpdate();
   } finally { consuming = false; }

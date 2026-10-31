@@ -488,13 +488,24 @@ unsafe fn paint(button: HWND, action: &CaptionAction) {
         let dc = BeginPaint(button, &mut paint);
         let mut rect = RECT::default();
         let _ = GetClientRect(button, &mut rect);
-        paint_dc(
-            dc,
-            rect.right,
-            rect.bottom,
-            GetDpiForWindow(action.owner),
-            action,
-        );
+        let width = rect.right.max(1);
+        let height = rect.bottom.max(1);
+        let mem_dc = CreateCompatibleDC(dc);
+        if !mem_dc.0.is_null() {
+            let mem_bitmap = CreateCompatibleBitmap(dc, width, height);
+            if !mem_bitmap.0.is_null() {
+                let old_bitmap = SelectObject(mem_dc, HGDIOBJ(mem_bitmap.0));
+                paint_dc(mem_dc, width, height, GetDpiForWindow(action.owner), action);
+                let _ = BitBlt(dc, 0, 0, width, height, mem_dc, 0, 0, SRCCOPY);
+                SelectObject(mem_dc, old_bitmap);
+                let _ = DeleteObject(HGDIOBJ(mem_bitmap.0));
+            } else {
+                paint_dc(dc, width, height, GetDpiForWindow(action.owner), action);
+            }
+            let _ = DeleteDC(mem_dc);
+        } else {
+            paint_dc(dc, width, height, GetDpiForWindow(action.owner), action);
+        }
         let _ = EndPaint(button, &paint);
     }
 }
@@ -514,6 +525,10 @@ unsafe extern "system" fn button_proc(
         }
         let action = &*(ptr as *const CaptionAction);
         match message {
+            WM_SETTEXT => {
+                let _ = DefWindowProcW(hwnd, message, w, l);
+                return LRESULT(1);
+            }
             WM_TIMER if w.0 == ANIMATION_TIMER => {
                 action.frame.set(action.frame.get().wrapping_add(1));
                 let _ = InvalidateRect(hwnd, None, false);
@@ -672,15 +687,28 @@ unsafe fn sync(owner: HWND, action: &CaptionAction) {
         if GetWindowRect(owner, &mut outer).is_err() {
             return;
         }
-        let _ = SetWindowPos(
-            button,
-            None,
-            outer.left + rect.left,
-            outer.top + rect.top,
-            rect.right - rect.left,
-            rect.bottom - rect.top,
-            SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
-        );
+        let target_x = outer.left + rect.left;
+        let target_y = outer.top + rect.top;
+        let target_w = rect.right - rect.left;
+        let target_h = rect.bottom - rect.top;
+        let mut current_rect = RECT::default();
+        let _ = GetWindowRect(button, &mut current_rect);
+        let same_pos = IsWindowVisible(button).as_bool()
+            && current_rect.left == target_x
+            && current_rect.top == target_y
+            && (current_rect.right - current_rect.left) == target_w
+            && (current_rect.bottom - current_rect.top) == target_h;
+        if !same_pos {
+            let _ = SetWindowPos(
+                button,
+                None,
+                target_x,
+                target_y,
+                target_w,
+                target_h,
+                SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
+            );
+        }
         if action.mode.get() == CaptionMode::Downloading {
             let mut animate = windows::Win32::Foundation::BOOL(1);
             let _ = SystemParametersInfoW(
@@ -704,7 +732,6 @@ unsafe fn sync(owner: HWND, action: &CaptionAction) {
             action.animating.set(false);
         }
         let _ = InvalidateRect(button, None, false);
-        let _ = UpdateWindow(button);
     }
 }
 unsafe extern "system" fn caption_proc(

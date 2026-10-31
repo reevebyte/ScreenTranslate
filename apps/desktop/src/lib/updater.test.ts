@@ -33,12 +33,12 @@ it('uses cumulative progress and ignores late progress after download',async()=>
  updates.stage='ready';updates.progress=100;listeners.get('update-progress')?.({payload:{downloaded:1,total:100}});expect(updates.progress).toBe(100);stop();expect(listeners.size).toBe(0);
 });
 
-it('downloads on caption click and requests confirmation after the package is ready',async()=>{
+it('downloads and installs on caption click when the package is ready',async()=>{
  updates.version='2.0.3';updates.stage='available';updates.confirm=false;
  call.mockResolvedValueOnce('caption').mockResolvedValueOnce(undefined);await consumeUpdateRequest();
  expect(updates.stage).toBe('ready');expect(updates.confirm).toBe(false);
- call.mockResolvedValueOnce('caption');await consumeUpdateRequest();expect(updates.confirm).toBe(true);
- expect(call).not.toHaveBeenCalledWith('install_update',expect.anything());
+ call.mockResolvedValueOnce('caption').mockResolvedValueOnce(undefined);await consumeUpdateRequest();
+ expect(call).toHaveBeenCalledWith('install_update',{version:'2.0.3'});
 });
 it('updates directly from the tray while retaining the busy-work gate',async()=>{
  updates.version='2.0.3';updates.stage='available';app.configPending=true;
