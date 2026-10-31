@@ -1,8 +1,8 @@
 # ScreenTranslate design system
 
-## Direction: Graphite Workbench / 石墨工作台
+## Direction: Soft Utility / 柔和工具界面
 
-ScreenTranslate is a compact desktop instrument for reading across languages. Use a quiet neutral work surface in graphite, with grey-white emphasis and precise tonal layers, and precise borders. The source, translation and next action take precedence over decoration. Retain the existing application icon.
+ScreenTranslate is a compact desktop instrument for reading across languages. The user approved the centered About preview inspired by FlClash: soft grey-lilac backgrounds, opaque tonal surfaces, large rounded groups, circular icon wells and pill actions. Extend that visual language across the existing Svelte application. Use alignment, spacing and surface contrast for hierarchy, with minimal borders and no ornamental shadows. Retain the existing application icon, provider artwork and compact native window sizes.
 
 ## Principles
 
@@ -20,15 +20,15 @@ ScreenTranslate is a compact desktop instrument for reading across languages. Us
 
 | Token | Light | Dark |
 | --- | --- | --- |
-| background | #f5f5f5 | #121212 |
-| sidebar | #ededed | #181818 |
-| surface | #ffffff | #1a1a1a |
-| muted surface | #f0f0f0 | #242424 |
-| foreground | #242424 | #e5e5e5 |
-| secondary | #5c5c5c | #b5b5b5 |
-| muted text | #737373 | #909090 |
-| border | #dcdcdc | #303030 |
-| brand | #303030 | #bdbdbd |
+| background | #f0eef1 | #1d1c20 |
+| sidebar | #e9e6ec | #211f25 |
+| surface | #fbf9fc | #2a282e |
+| muted surface | #ebe7ef | #35323b |
+| foreground | #202127 | #f0edf3 |
+| secondary | #56515e | #c3bdcc |
+| muted text | #68636f | #b0a9ba |
+| border | #ded9e3 | #45404c |
+| brand | #4b4459 | #d4ccdf |
 | primary action | #303030 | #f0f0f0 |
 | primary foreground | #ffffff | #000000 |
 | danger | #b53232 | #f5a3a0 |
@@ -47,7 +47,7 @@ Brand colour is reserved for identity and primary emphasis. User accent colours 
 ## Components
 
 - Default control height: at least 32px and 2.2857rem. Compact controls at least 28px and 2rem. Textareas and menus grow with the font scale.
-- Radius: controls 8px; grouped surfaces 12px; windows/dialogs 12px; circular indicators only when semantically circular. Do not assign arbitrary radii per page.
+- Radius: fields 16px; grouped surfaces and dialogs 24px; action buttons and tabs use the shared pill radius. Supporting toolbar buttons use the shared compact radius. Circular icon wells identify navigation/actions; do not add them to every input label. Do not assign arbitrary radii per page.
 - Borders are 1px. Shadows belong to floating surfaces, menus and dialogs, not every row or content group.
 - Hover changes surface/colour; pressed uses a short colour response and at most .98 scale, with no change to surrounding layout. Focus-visible uses a consistent 2px ring. Continuous text editors have no persistent border or pane line: editable areas use --editor-surface, reading areas use --reading-surface, and keyboard focus changes the editable surface to --editor-active while retaining the caret; structural Dialog containers do not get an extra ring. Disabled controls remain identifiable and cannot be activated.
 - Reuse shadcn-svelte/Bits UI Button, Select, Switch, Tooltip, Dialog, Command and Resizable. Product-specific status and layout wrappers are acceptable; do not build replacements for primitives.
@@ -89,6 +89,14 @@ After each related window/component group: run `pnpm check`, inspect actual Svel
 ## Reference adaptation: ChatClaw
 
 Reference ChatClaw's concise manufacturer directory, neutral surfaces and restrained control feedback. Keep the existing Svelte/Bits UI implementation. Provider SVG gradients must use instance-scoped IDs, including hidden selector copies. No page-position animation on module changes. Interface text uses local Chinese/English messages; user content and translated text are never localized as UI.
+
+## Reference adaptation: FlClash
+
+Use the user-selected centered About layout: application icon, name, version pill and one update action, followed by one rounded list containing automatic update checks and the three resource links. Do not add slogans, long repository URLs, extra licence badges or a second page title. Keep a stable status slot for update feedback. About scrolls naturally inside the settings panel at minimum height and 150% text.
+
+Settings has three tabs: General, Appearance and About. Keep common language/translation/window controls visible. Put startup, automatic clipboard copying and configuration management in a labeled More settings disclosure; show legacy import only when a legacy configuration exists. Appearance keeps theme previews and font size visible, with accent choices in a disclosure. Preserve every preference, automatic saving, failure recovery and current credentials.
+
+Apply the same tonal grouping, pill selection, rounded fields, circular action wells and restrained pressed/hover feedback to shortcuts, translation, services and dialogs. Screenshot selection geometry and the eight white anchors remain unchanged. Do not copy FlClash code or introduce Flutter or a second component framework.
 
 ## Updates and clipboard feedback
 

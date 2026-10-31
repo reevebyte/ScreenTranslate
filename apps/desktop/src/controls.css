@@ -120,9 +120,8 @@ kbd {
   font-size: var(--text-small);
   color: var(--secondary);
   background: var(--surface-muted);
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-compact);
 }
 
 .button {
@@ -132,9 +131,9 @@ kbd {
   gap: 7px;
   min-height: var(--control-height);
   height: auto;
-  padding: 5px 12px;
+  padding: 6px 16px;
   border: 1px solid transparent;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-pill);
   font-size: var(--text-ui);
   font-weight: 500;
   line-height: 1.45;
@@ -164,7 +163,7 @@ kbd {
 
 .button-outline {
   background: var(--surface);
-  border-color: var(--border);
+  border-color: transparent;
   color: var(--foreground);
 }
 
@@ -187,7 +186,7 @@ kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-pill);
   color: var(--secondary);
   transition: background-color var(--motion-fast), color var(--motion-fast);
 }
@@ -200,10 +199,10 @@ kbd {
 .field {
   width: 100%;
   min-height: var(--control-height);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--radius-control);
-  background: var(--surface);
-  padding: 7px 10px;
+  background: var(--surface-muted);
+  padding: 9px 12px;
   color: var(--foreground);
   font-size: var(--text-ui);
   line-height: 1.45;
@@ -250,7 +249,7 @@ input[type="checkbox"], input[type="range"] {
   align-items: center;
   gap: 5px;
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-pill);
   color: var(--secondary);
   font-size: var(--text-small);
 }
@@ -273,9 +272,9 @@ input[type="checkbox"], input[type="range"] {
   min-height: var(--control-height);
   height: auto;
   gap: 10px;
-  padding: 5px 9px;
+  padding: 7px 12px;
   border: 1px solid transparent;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-pill);
   background: transparent;
   font-size: var(--text-ui);
   white-space: nowrap;
@@ -286,8 +285,9 @@ input[type="checkbox"], input[type="range"] {
 }
 
 .choice-trigger.field {
-  border-color: var(--border);
-  background: var(--surface);
+  border-color: transparent;
+  border-radius: var(--radius-control);
+  background: var(--surface-muted);
 }
 
 .choice-menu {
@@ -295,7 +295,7 @@ input[type="checkbox"], input[type="range"] {
   min-width: max(160px,var(--bits-select-anchor-width,160px));
   max-height: min(350px,var(--bits-select-content-available-height,350px));
   overflow-y: auto;
-  padding: 4px;
+  padding: 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-surface);
   background: var(--surface);
@@ -308,7 +308,7 @@ input[type="checkbox"], input[type="range"] {
   min-height: var(--control-height);
   padding: 6px 28px 6px 9px;
   font-size: var(--text-ui);
-  border-radius: 4px;
+  border-radius: var(--radius-compact);
 }
 
 .choice-menu [data-highlighted] {
@@ -326,8 +326,8 @@ input[type="checkbox"], input[type="range"] {
   position: relative;
   align-items: center;
   flex-shrink: 0;
-  width: 2.5rem;
-  height: 1.428571rem;
+  width: 2.857143rem;
+  height: 1.714286rem;
   border-radius: 999px;
   background: var(--border-strong);
   transition: background-color 100ms;
@@ -339,8 +339,8 @@ input[type="checkbox"], input[type="range"] {
 
 .cn-switch-thumb {
   display: block;
-  width: 1rem;
-  height: 1rem;
+  width: 1.285714rem;
+  height: 1.285714rem;
   border-radius: 50%;
   background: var(--foreground);
   translate: .214286rem 0;
@@ -349,7 +349,7 @@ input[type="checkbox"], input[type="range"] {
 
 .cn-switch-thumb[data-state="checked"] {
   background: var(--primary-foreground);
-  translate: 1.285714rem 0;
+  translate: 1.357143rem 0;
 }
 
 .cn-skeleton {
@@ -428,8 +428,8 @@ input[type="checkbox"], input[type="range"] {
 
 
 .button:active:not(:disabled) { scale:.98; }
-.active-indicator { position:absolute; top:0; left:0; z-index:-1; pointer-events:none; border-radius:var(--radius-control); background:var(--surface-muted); }
-.settings-tab-list > .active-indicator, .service-tab-list > .active-indicator { background:var(--surface); border-radius:calc(var(--radius-control) - 3px); box-shadow:0 1px 3px #0000000d; }
+.active-indicator { position:absolute; top:0; left:0; z-index:-1; pointer-events:none; border-radius:var(--radius-pill); background:var(--accent-bg); }
+.settings-tab-list > .active-indicator, .service-tab-list > .active-indicator { background:var(--surface); border-radius:var(--radius-pill); }
 .choice-menu[data-state="open"], .model-menu[data-state="open"] { animation:menu-arrive var(--motion-fast) var(--ease); }
 .choice-menu { transform-origin:var(--bits-select-content-transform-origin); }
 @keyframes menu-arrive { from { opacity:0; scale:.98; translate:0 -2px; } to { opacity:1; scale:1; translate:0 0; } }
@@ -454,7 +454,7 @@ input[type="checkbox"], input[type="range"] {
 /* Local provider artwork shares one optical size across all selectors. */
 .provider-icon { display:inline-grid; place-items:center; flex-shrink:0; width:var(--provider-icon-size); height:var(--provider-icon-size); color:var(--foreground); line-height:1; vertical-align:middle; }
 .provider-icon > svg,.provider-icon > img { display:block; width:100%; height:100%; object-fit:contain; }
-.provider-icon-featured { --provider-icon-size:var(--provider-icon-featured); }
+.provider-icon-featured { --provider-icon-size:var(--provider-icon-featured); box-sizing:content-box; padding:8px; border-radius:50%; background:var(--surface-muted); }
 .choice-value { display:flex; align-items:center; gap:8px; min-width:0; }
 .choice-value > span:last-child { overflow:hidden; text-overflow:ellipsis; }
 

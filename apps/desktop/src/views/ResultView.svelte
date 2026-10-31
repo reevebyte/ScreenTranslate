@@ -407,6 +407,7 @@
   {#if toolsOnly}<div class="toolbar-window">{@render floatingToolbar()}</div>
   {:else if !frame}
     <div class="capture-empty">
+      <span class="capture-empty-symbol" aria-hidden="true"><ScanLine size={28}/></span>
       <div class="empty-actions">
         <Button onclick={() => act(call('begin_capture', { monitor: null }))}>
           {t("开始截图")}

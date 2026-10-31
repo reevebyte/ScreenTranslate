@@ -7,6 +7,7 @@ describe('theme and custom accent contrast', () => {
       const palette = actionPalette(accent, dark);
       expect(contrastRatio(palette.primary, palette.foreground)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(palette.focus, dark ? '#1a1a1a' : '#ffffff')).toBeGreaterThanOrEqual(3);
+      expect(contrastRatio(palette.focus, dark ? '#2a282e' : '#fbf9fc')).toBeGreaterThanOrEqual(3);
     }
   });
   it('recomputes foreground across theme and accent changes', () => {

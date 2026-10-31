@@ -72,7 +72,7 @@
   <ServiceBrowser {entries} {selected} onselect={select} title={t("翻译服务")}>
     {#snippet header()}{#if info.unofficial}<span class="service-protocol">{t("非官方接口")}</span>{/if}{/snippet}
     {#snippet children()}
-      {#if info.unofficial}<div class="service-free-description"><Globe2 size={20}/><p>{t("无需密钥")}</p><p>{t("识别后的文字发送至")}{t(info.name)}。</p></div>
+      {#if info.unofficial}<div class="service-free-description"><Globe2 size={20}/><div><strong>{t("无需密钥")}</strong><p>{t("识别后的文字发送至")}{t(info.name)}。</p></div></div>
       {:else}<div class="provider-form">
         <label class="field-label" for="provider-secret">API Key{selected==='openai'?t(" · 可选"):''}</label>{#key selected}<SecretField bind:this={credentialField} id="provider-secret" name={selected} label="API Key" {persistent} onchange={()=>credentialVersion++}/>{/key}
         {#if ai}<label class="field-label" for="provider-model">{t("模型")}</label>{#if selected==='anthropic'}<div class="model-picker model-manual"><span class="model-input-brand"><ProviderIcon brand={selectedBrand}/></span><input id="provider-model" class="field" bind:value={options.model} placeholder={t("输入模型 ID")} spellcheck="false"/></div>{:else}<ModelPicker bind:value={options.model} {identity} brand={selectedBrand} load={fetchModels}/>{/if}{/if}

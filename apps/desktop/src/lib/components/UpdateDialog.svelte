@@ -13,6 +13,6 @@
     <p class="update-dialog-version">ScreenTranslate {updates.version}</p>
     {#if updates.notes}<div class="update-release-notes">{updates.notes}</div>{/if}
     {#if updates.error || blockReason}<p class="error-text" role="alert">{updates.error || blockReason}</p>{/if}
-    <div class="dialog-actions"><Dialog.Close class="button outline" disabled={updates.stage==='installing'}>{t('稍后')}</Dialog.Close><Button disabled={updates.stage==='installing' || !!blockReason} onclick={installUpdate}>{t('重启更新')}</Button></div>
+    <div class="dialog-actions"><Dialog.Close class="button button-outline button-size-default" disabled={updates.stage==='installing'}>{t('稍后')}</Dialog.Close><Button disabled={updates.stage==='installing' || !!blockReason} onclick={installUpdate}>{t('重启更新')}</Button></div>
   </Dialog.Content></Dialog.Portal>
 </Dialog.Root>

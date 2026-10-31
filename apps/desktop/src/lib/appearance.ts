@@ -17,7 +17,7 @@ export function actionPalette(accent: string, dark: boolean) {
   const primary = DEFAULT_ACCENTS.has(accent.toLowerCase()) || !/^#[a-f\d]{6}$/i.test(accent)
     ? (dark ? '#f0f0f0' : '#303030') : accent;
   const foreground = contrastRatio(primary, '#ffffff') >= 4.5 ? '#ffffff' : '#000000';
-  const surface = dark ? '#1a1a1a' : '#ffffff';
-  const focus = contrastRatio(primary, surface) >= 3 ? primary : (dark ? '#bdbdbd' : '#242424');
+  const surface = dark ? '#2a282e' : '#fbf9fc';
+  const focus = contrastRatio(primary, surface) >= 3 ? primary : (dark ? '#d4ccdf' : '#202127');
   return { primary, foreground, focus };
 }

@@ -18,6 +18,23 @@ beforeEach(() => {
 });
 afterEach(async () => { cleanup(); await tick(); });
 describe('automatic preferences', () => {
+  it('keeps three categories and saves advanced preferences without exposing an unavailable import', async () => {
+    app.settingsTab = 'data';
+    const view = render(SettingsView);
+    expect(view.getAllByRole('tab').map(node => node.textContent?.trim())).toEqual(['常规', '外观', '关于']);
+    expect(view.queryByText('导入旧版设置')).toBeNull();
+    await fireEvent.click(view.getByText('更多设置'));
+    await fireEvent.click(view.getByLabelText('截图译文自动复制'));
+    view.unmount();
+    await waitFor(() => expect(call).toHaveBeenCalledWith('save_config', { config: expect.objectContaining({ appearance: expect.objectContaining({ autoCopy: true }) }) }));
+  });
+  it('keeps automatic update checks connected to the saved preference in the centered about page', async () => {
+    const view = render(SettingsView);
+    await fireEvent.click(view.getByRole('tab', { name: '关于' }));
+    await fireEvent.click(view.getByLabelText('自动检查更新'));
+    view.unmount();
+    await waitFor(() => expect(call).toHaveBeenCalledWith('save_config', { config: expect.objectContaining({ autoUpdate: false }) }));
+  });
   it('steps the interface font within its limits and saves when leaving the page', async () => {
     const view = render(SettingsView);
     await fireEvent.click(view.getByRole('tab', { name: '外观' }));
