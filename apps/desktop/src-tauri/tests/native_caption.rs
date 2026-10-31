@@ -3,7 +3,7 @@
 mod update_ui {
     pub fn request(_: &tauri::AppHandle, _: &str) {}
     pub fn caption_colors(_: &tauri::AppHandle) -> (u32, u32) {
-        (0xf5f5f5, 0x242424)
+        (0x00f1eef0, 0x00272120)
     }
     pub async fn on_ui<T: Send + 'static>(
         _: &tauri::AppHandle,
@@ -154,8 +154,8 @@ mod caption {
                     close_pressed: Cell::new(false),
                     close_hover: Cell::new(false),
                     version: RefCell::new("2.0.7".into()),
-                    caption: Cell::new(0xf5f5f5),
-                    text: Cell::new(0x242424),
+                    caption: Cell::new(0x00f1eef0),
+                    text: Cell::new(0x00272120),
                     mode: Cell::new(CaptionMode::Restart),
                     progress: Cell::new(Some(100)),
                     frame: Cell::new(0),
@@ -164,8 +164,8 @@ mod caption {
                     dismissed: Box::new(|| {}),
                 };
                 for (name, bg, fg) in [
-                    ("light", 0xf5f5f5_u32, 0x242424_u32),
-                    ("dark", 0x121212_u32, 0xe5e5e5_u32),
+                    ("light", 0x00f1eef0_u32, 0x00272120_u32),
+                    ("dark", 0x00201c1d_u32, 0x00f3edf0_u32),
                 ] {
                     action.caption.set(bg);
                     action.text.set(fg);
@@ -185,7 +185,14 @@ mod caption {
                         bits as *const u8,
                         (width * height * 4) as usize,
                     );
-                    assert_eq!(slice[0], (bg & 0xff) as u8);
+                    assert_eq!(
+                        &slice[0..3],
+                        &[
+                            ((bg >> 16) & 0xff) as u8,
+                            ((bg >> 8) & 0xff) as u8,
+                            (bg & 0xff) as u8,
+                        ]
+                    );
                     if let Ok(dir) = std::env::var("SCREENTRANS_CAPTION_PREVIEW_DIR") {
                         let mut rgba = Vec::with_capacity((width * height * 4) as usize);
                         for px in slice.chunks_exact(4) {

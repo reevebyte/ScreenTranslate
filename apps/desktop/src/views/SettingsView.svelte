@@ -3,7 +3,7 @@
   import ActiveIndicator from '$lib/components/ui/active-indicator.svelte';
   import { Tabs, Dialog } from 'bits-ui';
   import { onDestroy, untrack } from 'svelte';
-  import { Check, Palette, LoaderCircle, Monitor, Moon, Sun, Globe, Languages, PanelTop, Plus, Minus, ChevronDown } from '$lib/icons';
+  import { Check, Palette, LoaderCircle, Monitor, Moon, Sun, Globe, Languages, ArrowRightLeft, PanelTop, Copy, Import, RotateCcw, TextScan, Plus, Minus, ChevronDown } from '$lib/icons';
   import { toast } from 'svelte-sonner';
   import { app, saveConfig, previewConfig } from '$lib/store.svelte';
   import { call, loadBootstrap } from '$lib/api';
@@ -59,30 +59,28 @@
   <Tabs.Root bind:value={app.settingsTab} class="settings-tabs">
     <Tabs.List class="settings-tab-list" aria-label={t("设置分类")}><ActiveIndicator/>{#each tabs as [value,label]}<Tabs.Trigger {value} class="settings-tab">{label}</Tabs.Trigger>{/each}</Tabs.List>
     <Tabs.Content value="general" class="settings-panel">
-      <section class="preference-group"><h3><Globe size={17}/>{t("语言")}</h3><div class="preference-card"><div class="setting-row"><label for="ui-language">{t("界面语言")}</label><Choice id="ui-language" class="field compact-field" label={t("界面语言")} value={uiLocale.current} options={[["zh-CN",t("简体中文")],["en","English"]]} onchange={setLocale}/></div></div></section>
-      <section class="preference-group" aria-labelledby="translation-settings"><h3 id="translation-settings"><Languages size={17}/>{t("翻译")}</h3><div class="preference-card">
-        <div class="setting-row"><label for="auto-translate">{t("输入后自动翻译")}</label><Switch id="auto-translate" bind:checked={draft.autoTranslate}/></div>
-        <div class="setting-row"><label for="chinese-target">{t("中文默认译为")}</label><Choice id="chinese-target" class="field compact-field" label={t("中文默认译为")} value={draft.chineseTarget} options={languageOptions().filter(([code]) => code !== 'auto' && code !== 'zh-Hans')} onchange={value => draft.chineseTarget = value}/></div>
-      </div></section>
-      <section class="preference-group" aria-labelledby="window-settings"><h3 id="window-settings"><PanelTop size={17}/>{t("启动与窗口")}</h3><div class="preference-card">
-        <div class="setting-row"><label for="close-tray">{t("关闭后收起到托盘")}</label><Switch id="close-tray" bind:checked={draft.appearance.closeToTray} disabled={!app.data?.capabilities.tray}/></div>
-      </div></section>
+      <div class="preference-card">
+        <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><Globe size={16}/></span><label for="ui-language">{t("界面语言")}</label></div><Choice id="ui-language" class="field compact-field" label={t("界面语言")} value={uiLocale.current} options={[["zh-CN",t("简体中文")],["en","English"]]} onchange={setLocale}/></div>
+        <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><Languages size={16}/></span><label for="auto-translate">{t("输入后自动翻译")}</label></div><Switch id="auto-translate" bind:checked={draft.autoTranslate}/></div>
+        <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><ArrowRightLeft size={16}/></span><label for="chinese-target">{t("中文默认译为")}</label></div><Choice id="chinese-target" class="field compact-field" label={t("中文默认译为")} value={draft.chineseTarget} options={languageOptions().filter(([code]) => code !== 'auto' && code !== 'zh-Hans')} onchange={value => draft.chineseTarget = value}/></div>
+        <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><PanelTop size={16}/></span><label for="close-tray">{t("关闭后收起到托盘")}</label></div><Switch id="close-tray" bind:checked={draft.appearance.closeToTray} disabled={!app.data?.capabilities.tray}/></div>
+      </div>
       <details class="settings-more"><summary><span>{t("更多设置")}</span><ChevronDown size={17}/></summary>
         <div class="preference-card">
-          <div class="setting-row"><label for="autostart">{t("登录后自动启动")}</label><Switch id="autostart" bind:checked={draft.autostart}/></div>
-          <div class="setting-row"><label for="auto-copy">{t("截图译文自动复制")}</label><Switch id="auto-copy" bind:checked={draft.appearance.autoCopy}/></div>
-          {#if app.data?.legacyAvailable}<div class="setting-row"><span>{t("导入旧版设置")}</span><Button variant="outline" size="sm" disabled={importing} onclick={() => confirmImport = true}>{#if importing}<LoaderCircle class="spin" size={15}/>{/if}{t("导入")}</Button></div>{/if}
-          <div class="setting-row"><span>{t("恢复默认设置")}</span><Button variant="outline" size="sm" title={t("保留已存密钥")} onclick={() => { draft = structuredClone(defaults) as Config; draft.onboardingComplete = true; }}>{t("恢复")}</Button></div>
+          <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><Monitor size={16}/></span><label for="autostart">{t("登录后自动启动")}</label></div><Switch id="autostart" bind:checked={draft.autostart}/></div>
+          <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><Copy size={16}/></span><label for="auto-copy">{t("截图译文自动复制")}</label></div><Switch id="auto-copy" bind:checked={draft.appearance.autoCopy}/></div>
+          {#if app.data?.legacyAvailable}<div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><Import size={16}/></span><span>{t("导入旧版设置")}</span></div><Button variant="outline" size="sm" disabled={importing} onclick={() => confirmImport = true}>{#if importing}<LoaderCircle class="spin" size={15}/>{/if}{t("导入")}</Button></div>{/if}
+          <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><RotateCcw size={16}/></span><span>{t("恢复默认设置")}</span></div><Button variant="outline" size="sm" title={t("保留已存密钥")} onclick={() => { draft = structuredClone(defaults) as Config; draft.onboardingComplete = true; }}>{t("恢复")}</Button></div>
         </div>
       </details>
     </Tabs.Content>
     <Tabs.Content value="appearance" class="settings-panel">
-      <section class="preference-group"><h3><Palette size={17}/>{t("主题")}</h3><div class="appearance-themes">{#each themes as [value,label,Icon]}<button class="appearance-theme" class:selected={draft.appearance.theme === value} aria-pressed={draft.appearance.theme === value} onclick={() => draft.appearance.theme = value}><span class={`theme-window ${value}`} aria-hidden="true"><i></i><span><b></b><b></b></span></span><span class="theme-name"><Icon size={16}/>{label}{#if draft.appearance.theme === value}<Check size={14}/>{/if}</span></button>{/each}</div></section>
-      <section class="preference-group"><h3>{t("界面")}</h3><div class="preference-card">
-        <div class="setting-row"><span id="font-scale-label">{t("界面字号")}</span><div class="font-stepper" aria-labelledby="font-scale-label"><button aria-label={t("减小界面字号")} disabled={draft.appearance.fontScale <= .8} onclick={() => fontStep(-5)}><Minus size={15}/></button><output aria-label={t("界面字号")} aria-live="polite">{Math.round(draft.appearance.fontScale * 100)}%</output><button aria-label={t("增大界面字号")} disabled={draft.appearance.fontScale >= 1.5} onclick={() => fontStep(5)}><Plus size={15}/></button></div></div>
+      <section class="preference-group" aria-label={t("主题")}><div class="appearance-themes">{#each themes as [value,label,Icon]}<button class="appearance-theme" class:selected={draft.appearance.theme === value} aria-pressed={draft.appearance.theme === value} onclick={() => draft.appearance.theme = value}><span class={`theme-window ${value}`} aria-hidden="true"><i></i><span><b></b><b></b></span></span><span class="theme-name"><Icon size={16}/>{label}{#if draft.appearance.theme === value}<Check size={14}/>{/if}</span></button>{/each}</div></section>
+      <section class="preference-group" aria-label={t("界面")}><div class="preference-card">
+        <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><TextScan size={16}/></span><span id="font-scale-label">{t("界面字号")}</span></div><div class="font-stepper" aria-labelledby="font-scale-label"><button aria-label={t("减小界面字号")} disabled={draft.appearance.fontScale <= .8} onclick={() => fontStep(-5)}><Minus size={15}/></button><output aria-label={t("界面字号")} aria-live="polite">{Math.round(draft.appearance.fontScale * 100)}%</output><button aria-label={t("增大界面字号")} disabled={draft.appearance.fontScale >= 1.5} onclick={() => fontStep(5)}><Plus size={15}/></button></div></div>
       </div></section>
       <details class="settings-more"><summary><span>{t("强调色")}</span><ChevronDown size={17}/></summary><div class="preference-card">
-        <div class="setting-row"><span>{t("强调色")}</span><div class="accent-options">{#each accents as [name,color]}<button class="accent-swatch" style:--swatch={color === '#18181b' ? 'var(--brand)' : color} style:--swatch-foreground={actionPalette(color, draft.appearance.theme === 'dark').foreground} class:selected={draft.appearance.accent.toLowerCase() === color} aria-label={name} aria-pressed={draft.appearance.accent.toLowerCase() === color} title={name} onclick={() => draft.appearance.accent = color}>{#if draft.appearance.accent.toLowerCase() === color}<Check size={13}/>{/if}</button>{/each}<label class="accent-custom" title={t("自定义强调色")}><Plus size={15}/><input id="accent-color" aria-label={t("自定义强调色")} type="color" bind:value={draft.appearance.accent}/></label></div></div>
+        <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><Palette size={16}/></span><span>{t("强调色")}</span></div><div class="accent-options">{#each accents as [name,color]}<button class="accent-swatch" style:--swatch={color === '#18181b' ? 'var(--brand)' : color} style:--swatch-foreground={actionPalette(color, draft.appearance.theme === 'dark').foreground} class:selected={draft.appearance.accent.toLowerCase() === color} aria-label={name} aria-pressed={draft.appearance.accent.toLowerCase() === color} title={name} onclick={() => draft.appearance.accent = color}>{#if draft.appearance.accent.toLowerCase() === color}<Check size={13}/>{/if}</button>{/each}<label class="accent-custom" title={t("自定义强调色")}><Plus size={15}/><input id="accent-color" aria-label={t("自定义强调色")} type="color" bind:value={draft.appearance.accent}/></label></div></div>
       </div></details>
     </Tabs.Content>
     <Tabs.Content value="about" class="settings-panel about-panel"><AboutView {onwelcome} bind:autoUpdate={draft.autoUpdate}/></Tabs.Content>

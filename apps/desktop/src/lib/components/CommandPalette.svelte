@@ -32,7 +32,7 @@
             <Command.GroupHeading class="command-heading">{t("常用操作")}</Command.GroupHeading>
             {#each actions as action}
               <Command.Item value={action.label} keywords={action.keywords} onSelect={() => run(action.action)} class="command-item">
-                <action.icon size={17}/><span>{action.label}</span>{#if action.shortcut}<small>{action.shortcut}</small>{/if}
+                <span class="setting-row-icon" aria-hidden="true"><action.icon size={16}/></span><span>{action.label}</span>{#if action.shortcut}<small>{action.shortcut}</small>{/if}
               </Command.Item>
             {/each}
           </Command.Group>

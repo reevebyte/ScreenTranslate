@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '$lib/i18n.svelte';
   import { onDestroy, untrack } from 'svelte';
-  import { Globe, Monitor, RefreshCw, ArrowUpRight, ChevronDown } from '$lib/icons';
+  import { Globe, Monitor, ScanLine, RefreshCw, ArrowUpRight, ChevronDown } from '$lib/icons';
   import { app, previewConfig, saveConfig, refreshCapabilities, act } from '$lib/store.svelte';
   import { call } from '$lib/api';
   import { createAutosave } from '$lib/autosave';
@@ -43,9 +43,9 @@
   {#snippet header()}<span class="service-protocol">{selected==='system'?t("本机识别"):selected==='custom'?t("自定义接口"):selected==='youdao'?t("免密云端识别"):t("官方云端识别")}</span>{/snippet}
   {#snippet children()}
         {#if selected === 'youdao'}
-          <div class="connection-line"><Globe size={17}/><span>{t("选区截图发送至有道")}</span><span class="service-mode">{t("无需密钥")}</span></div>
+          <div class="connection-line"><span class="setting-row-icon" aria-hidden="true"><Globe size={16}/></span><span>{t("选区截图发送至有道")}</span><span class="service-mode">{t("无需密钥")}</span></div>
         {:else if selected === 'system'}
-          <div class="connection-line"><Monitor size={17}/><span>{app.data?.capabilities.localOcr ? t("本机识别，无需上传") : t("需要安装识别语言包")}</span><button class="icon-button" aria-label={t("重新检测 OCR")} title={t("重新检测")} onclick={refreshCapabilities}><RefreshCw size={17}/></button><button class="icon-button" aria-label={t("OCR 安装指引")} title={t("安装指引")} onclick={() => act(call('open_help',{topic:'ocr'}))}><ArrowUpRight size={17}/></button></div>
+          <div class="connection-line"><span class="setting-row-icon" aria-hidden="true"><Monitor size={16}/></span><span>{app.data?.capabilities.localOcr ? t("本机识别，无需上传") : t("需要安装识别语言包")}</span><button class="icon-button" aria-label={t("重新检测 OCR")} title={t("重新检测")} onclick={refreshCapabilities}><RefreshCw size={17}/></button><button class="icon-button" aria-label={t("OCR 安装指引")} title={t("安装指引")} onclick={() => act(call('open_help',{topic:'ocr'}))}><ArrowUpRight size={17}/></button></div>
           <label class="field-label" for="ocr-languages">{t("识别语言")}</label><input id="ocr-languages" class="field" value={draft.ocr.languages.join(', ')} onchange={event => draft.ocr.languages = event.currentTarget.value.split(',').map(value => value.trim()).filter(Boolean)}/>
         {:else if selected === 'custom'}
           <div class="provider-form">
@@ -63,6 +63,6 @@
             <label class="field-label" for="azure-key">{t("Vision 密钥")}</label><SecretField bind:this={credentialField} id="azure-key" name="azure_ocr" label={t("Vision 密钥")}/>
             <div class="service-disclosure"><Globe size={16}/><span>{t("选区截图发送至 Azure。")}</span></div></div>
         {/if}
-<div class="ocr-processing-option"><label for="ocr-upscale">{t("放大小图后识别")}</label><Switch id="ocr-upscale" bind:checked={draft.ocr.upscale}/></div>{/snippet}
+<div class="ocr-processing-option"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><ScanLine size={16}/></span><label for="ocr-upscale">{t("放大小图后识别")}</label></div><Switch id="ocr-upscale" bind:checked={draft.ocr.upscale}/></div>{/snippet}
   {#snippet footer()}<Button disabled={selected===draft.ocr.engine || (selected==='custom' && (!draft.ocr.custom.endpoint.trim() || (draft.ocr.custom.protocol==='openai' && !draft.ocr.custom.model.trim())))} onclick={activate}>{selected===draft.ocr.engine?t("正在使用"):t("设为当前")}</Button>{/snippet}
 </ServiceBrowser></div>

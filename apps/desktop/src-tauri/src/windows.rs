@@ -215,8 +215,8 @@ pub fn caption_palette(theme: screentrans_core::config::Theme) -> (bool, u32, u3
         screentrans_core::config::Theme::Light => false,
         screentrans_core::config::Theme::System => system_dark(),
     };
-    let background = if dark { 0x00121212 } else { 0x00f5f5f5 };
-    let text = if dark { 0x00e5e5e5 } else { 0x00242424 };
+    let background = if dark { 0x00201c1d } else { 0x00f1eef0 };
+    let text = if dark { 0x00f3edf0 } else { 0x00272120 };
     (dark, background, text)
 }
 
