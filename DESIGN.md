@@ -51,6 +51,7 @@ Brand colour is reserved for identity and primary emphasis. User accent colours 
 - Borders are 1px. Shadows belong to floating surfaces, menus and dialogs, not every row or content group.
 - Hover changes surface/colour; pressed uses a short colour response and at most .98 scale, with no change to surrounding layout. Focus-visible uses a consistent 2px ring. Continuous text editors have no persistent border or pane line: editable areas use --editor-surface, reading areas use --reading-surface, and keyboard focus changes the editable surface to --editor-active while retaining the caret; structural Dialog containers do not get an extra ring. Disabled controls remain identifiable and cannot be activated.
 - Reuse shadcn-svelte/Bits UI Button, Select, Switch, Tooltip, Dialog, Command and Resizable. Product-specific status and layout wrappers are acceptable; do not build replacements for primitives.
+- Select menus have one bounded scrolling viewport. Mouse hover changes colour without scrolling or repositioning the list; use wheel, touch or keyboard navigation to scroll. Do not mount hover-to-scroll arrow controls.
 
 ## Icons and motion
 
@@ -103,3 +104,5 @@ Apply the same tonal grouping, pill selection, rounded fields, circular action w
 Successful copy feedback stays on the initiating button as a Check, with independent timers for source and translation. Never show a success toast or screenshot notice for copying; retain recoverable failure feedback. First launch opens the compact guide; Get started saves completion and navigates to Shortcuts. About contains a default-on automatic-check preference, shared download progress and an explicit restart confirmation. Never install unsigned bytes or silently restart ongoing work. Keep update signing secrets outside public source and cleanup targets.
 
 About retains keyboard/wheel scrolling at small sizes but hides the decorative scrollbar. On Windows, update actions occupy a tiny owned native caption control left of system buttons, using the shared theme; never add another WebView or change the main client area. The tray version is dim when current, bright and actionable when newer. Tray actions may download and install directly, with the same busy/dirty checks; caption and About retain restart confirmation.
+
+The opaque Windows main window and its WebView share the document background colour at creation and on theme changes. During native resize, preserve the system-calculated client rectangle and redraw changed edges rather than preserving stale client pixels. Keep screenshot and quick-window transparency unchanged.

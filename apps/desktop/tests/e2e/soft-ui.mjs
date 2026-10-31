@@ -89,4 +89,38 @@ describe('soft desktop design through native windows', () => {
     expect(positions.every(p => p.x === positions[0].x && p.y === positions[0].y)).toBe(true);
     await writeFile(resolve(directory, 'module-origin.json'), JSON.stringify(positions, null, 2));
   });
+  it('scrolls service choices only on wheel or keyboard input and keeps the OCR icon round', async () => {
+    await appearance('dark', 1, [600, 400]);
+    await $('[aria-label="Services"]').click();
+    await $('[role="tab"]=Translation').click();
+    await $('.service-mobile [role="combobox"]').click();
+    const viewport = $('.select-viewport');
+    await viewport.waitForDisplayed();
+    expect(await $('[data-slot="select-scroll-up-button"]').isExisting()).toBe(false);
+    expect(await $('[data-slot="select-scroll-down-button"]').isExisting()).toBe(false);
+    const initial = await browser.execute(() => {
+      const menu = document.querySelector('.select-viewport');
+      menu.scrollTop = 0;
+      const box = menu.getBoundingClientRect();
+      return { x: Math.round(box.x + box.width / 2), y: Math.round(box.bottom - 4), overflow: menu.scrollHeight > menu.clientHeight };
+    });
+    expect(initial.overflow).toBe(true);
+    await browser.performActions([{ type: 'pointer', id: 'menu-mouse', parameters: { pointerType: 'mouse' }, actions: [{ type: 'pointerMove', duration: 100, x: initial.x, y: initial.y }, { type: 'pause', duration: 450 }] }]);
+    expect(await browser.execute(() => document.querySelector('.select-viewport').scrollTop)).toBe(0);
+    await browser.performActions([{ type: 'wheel', id: 'menu-wheel', actions: [{ type: 'scroll', x: initial.x, y: initial.y, deltaX: 0, deltaY: 240, duration: 150 }] }]);
+    await browser.waitUntil(() => browser.execute(() => document.querySelector('.select-viewport').scrollTop > 0));
+    await browser.saveScreenshot(resolve(directory, 'service-wheel-menu.png'));
+    await browser.keys(['Home', 'ArrowDown', 'Enter']);
+    await browser.waitUntil(async () => !await $('.choice-menu').isExisting());
+    await $('[role="tab"]=OCR').click();
+    await $('.service-mobile [role="combobox"]').click();
+    await $('[role="option"]=Youdao OCR').click();
+    const icon = await browser.execute(() => {
+      const icon = document.querySelector('.connection-line > .setting-row-icon').getBoundingClientRect();
+      return { width: icon.width, height: icon.height };
+    });
+    expect(icon.width).toBe(30);
+    expect(icon.height).toBe(30);
+    await browser.saveScreenshot(resolve(directory, 'ocr-round-icon.png'));
+  });
 });

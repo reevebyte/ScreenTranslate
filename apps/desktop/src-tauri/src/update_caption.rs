@@ -729,6 +729,11 @@ unsafe extern "system" fn caption_proc(
             return result;
         }
         let result = DefSubclassProc(hwnd, message, w, l);
+        // Keep the native client rectangle calculated by DefSubclassProc, but
+        // do not copy old right/bottom-edge pixels into the resized WebView.
+        if message == WM_NCCALCSIZE && w.0 != 0 {
+            return LRESULT(WVR_REDRAW as isize);
+        }
         if matches!(
             message,
             WM_WINDOWPOSCHANGED | WM_SIZE | WM_DPICHANGED | WM_SHOWWINDOW | WM_THEMECHANGED

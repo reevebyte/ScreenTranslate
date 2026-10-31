@@ -1,3 +1,13 @@
+# 2.0.8 交互与窗口重绘验证
+
+- 排查并修正：下拉框悬停箭头自动滚动、控件库悬停高亮后自动定位、选择器固定锚点高度与双层滚动、OCR 圆底被 flex 拉伸、Windows 主窗口默认白底外露与尺寸变化时旧边缘像素复用。
+- 浏览器实测鼠标悬停保持滚动位置，真实滚轮输入改变滚动位置，Home / 方向键 / Enter 可选择选项；深浅主题、600×400、100% / 150% 字号和减少动画通过，未出现页面脚本错误或横向溢出。
+- 浏览器预览与报告保存在本机 build/ui-regressions/，不代表原生窗口拖动验收。此前截图见用户提供的报告。
+- Windows 原生窗口测试验证 WM_NCCALCSIZE 保留系统计算的客户区矩形并请求完整重绘，4 项原生标题栏测试通过。
+- pnpm check：0 错误、0 警告；pnpm test：74 项通过；cargo fmt 与 Windows cargo clippy 通过。macOS / Linux 尚需 CI 验证。
+- cargo test --workspace --locked：66 项通过，4 项需要本地 OCR / 在线服务的测试按原设置忽略。2.0.8 Windows NSIS 正式包构建通过，约 3.14 MiB；构建脚本成功清理旧版本产物。生产资源预算检查通过，初始 JS gzip 178,796 bytes、CSS gzip 18,521 bytes。
+- 原生 WebDriver 在 onPrepare 阶段仍因端口 4445 未就绪退出；桌面控制工具也因 helper_sandbox_lock_failed 无法启动。猛烈拖动的逐帧视觉表现尚未完成实机验收，不能将浏览器截图或原生几何断言等同于此项通过。
+
 # 2.0.5 界面改版验证记录
 
 - 依据：用户提供的 FlClash 截图与选定的“居中品牌”预览。独立实现于现有 Svelte 5 / Bits UI / shadcn 控件中，没有新增运行依赖。

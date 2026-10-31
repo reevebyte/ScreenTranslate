@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ScreenTranslate",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "identifier": "io.github.reevebyte.screentranslate.v2",
   "build": {
     "beforeDevCommand": "pnpm dev",

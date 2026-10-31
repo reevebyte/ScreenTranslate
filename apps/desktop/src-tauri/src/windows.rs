@@ -221,7 +221,19 @@ pub fn caption_palette(theme: screentrans_core::config::Theme) -> (bool, u32, u3
     (dark, background, text)
 }
 
+#[cfg(windows)]
+fn main_background(theme: screentrans_core::config::Theme) -> tauri::window::Color {
+    let (_, background, _) = caption_palette(theme);
+    tauri::window::Color(
+        (background & 0xff) as u8,
+        ((background >> 8) & 0xff) as u8,
+        ((background >> 16) & 0xff) as u8,
+        255,
+    )
+}
+
 fn caption_color(window: &tauri::WebviewWindow, theme: screentrans_core::config::Theme) {
+    let _ = (window, theme);
     #[cfg(windows)]
     if let Ok(handle) = window.hwnd() {
         use windows::Win32::Graphics::Dwm::{
@@ -232,6 +244,9 @@ fn caption_color(window: &tauri::WebviewWindow, theme: screentrans_core::config:
         unsafe {
             let hwnd = windows::Win32::Foundation::HWND(handle.0);
             if window.label() == "main" {
+                // Fill newly exposed client pixels with the document's theme while
+                // WebView2 renders its next frame during live resizing.
+                let _ = window.set_background_color(Some(main_background(theme)));
                 crate::update_caption::refresh(handle.0, background, text);
             }
             let immersive = i32::from(dark);
@@ -576,16 +591,19 @@ pub(crate) fn builder<'a>(
 }
 
 pub fn show_main(app: &AppHandle) -> Result<()> {
+    let theme = lock(&app.state::<AppState>().config).appearance.theme;
     let window = match app.get_webview_window("main") {
         Some(window) => window,
-        None => builder(app, "main", "main")
-            .inner_size(600.0, 400.0)
-            .min_inner_size(600.0, 400.0)
-            .center()
-            .build()
-            .map_err(|_| window_error())?,
+        None => {
+            let main = builder(app, "main", "main")
+                .inner_size(600.0, 400.0)
+                .min_inner_size(600.0, 400.0)
+                .center();
+            #[cfg(windows)]
+            let main = main.background_color(main_background(theme));
+            main.build().map_err(|_| window_error())?
+        }
     };
-    let theme = lock(&app.state::<AppState>().config).appearance.theme;
     caption_color(&window, theme);
     request_show(&window)
 }

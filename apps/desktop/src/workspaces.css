@@ -638,8 +638,10 @@
   line-height: 1.6;
 }
 
-.connection-line > span:first-of-type {
+.connection-line > span:not(.setting-row-icon):not(.service-mode) {
   flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: var(--foreground);
 }
 

@@ -72,12 +72,32 @@ mod caption {
                 let clicks = count.clone();
                 let dismissed = Rc::new(Cell::new(0));
                 let closed = dismissed.clone();
+                let mut outer = RECT::default();
+                GetWindowRect(hwnd, &mut outer).unwrap();
+                let calculate_client = || {
+                    let mut params = NCCALCSIZE_PARAMS {
+                        rgrc: [outer; 3],
+                        ..Default::default()
+                    };
+                    let flags = SendMessageW(
+                        hwnd,
+                        WM_NCCALCSIZE,
+                        WPARAM(1),
+                        LPARAM(&mut params as *mut _ as isize),
+                    );
+                    let rect = params.rgrc[0];
+                    (flags.0, (rect.left, rect.top, rect.right, rect.bottom))
+                };
+                let (_, expected_client) = calculate_client();
                 attach(
                     hwnd,
                     Box::new(move || clicks.set(clicks.get() + 1)),
                     Box::new(move || closed.set(closed.get() + 1)),
                 )
                 .unwrap();
+                let (flags, actual_client) = calculate_client();
+                assert_eq!(actual_client, expected_client);
+                assert_eq!(flags, WVR_REDRAW as isize);
                 let button = state(hwnd).unwrap().button.get();
                 let mut before = RECT::default();
                 GetClientRect(hwnd, &mut before).unwrap();

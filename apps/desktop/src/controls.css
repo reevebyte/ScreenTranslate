@@ -294,7 +294,7 @@ input[type="checkbox"], input[type="range"] {
   z-index: 70;
   min-width: max(160px,var(--bits-select-anchor-width,160px));
   max-height: min(350px,var(--bits-select-content-available-height,350px));
-  overflow-y: auto;
+  overflow: hidden;
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-surface);
@@ -311,9 +311,20 @@ input[type="checkbox"], input[type="range"] {
   border-radius: var(--radius-compact);
 }
 
-.choice-menu [data-highlighted] {
+.select-viewport {
+  min-height: 0;
+  max-height: inherit;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.choice-menu [data-highlighted], .choice-menu [data-slot="select-item"]:not([data-disabled]):hover {
   background: var(--surface-muted);
   outline: none;
+}
+
+.choice-menu:has([data-slot="select-item"]:hover) [data-highlighted]:not(:hover) {
+  background: transparent;
 }
 
 .choice-menu [data-selected] {
