@@ -34,6 +34,7 @@ pub fn request(app: &AppHandle, source: &str) {
     }
     let _ = app.emit_to("main", "app-update-requested", ());
 }
+#[cfg(windows)]
 pub fn caption_colors(app: &AppHandle) -> (u32, u32) {
     let theme = app
         .try_state::<crate::state::AppState>()

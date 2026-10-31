@@ -209,6 +209,7 @@ pub fn apply_theme(app: &AppHandle, theme: screentrans_core::config::Theme) {
     }
 }
 
+#[cfg(windows)]
 pub fn caption_palette(theme: screentrans_core::config::Theme) -> (bool, u32, u32) {
     let dark = match theme {
         screentrans_core::config::Theme::Dark => true,
