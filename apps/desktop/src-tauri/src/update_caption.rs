@@ -292,13 +292,9 @@ unsafe fn paint_icon(
         );
     }
 }
-unsafe fn paint(button: HWND, action: &CaptionAction) {
-    // SAFETY: Called on the owning UI thread; subclass state lives until WM_NCDESTROY.
+unsafe fn paint_dc(dc: HDC, width: i32, height: i32, dpi: u32, action: &CaptionAction) {
+    // SAFETY: Caller supplies a valid target DC for the given pixel dimensions.
     unsafe {
-        let mut paint = PAINTSTRUCT::default();
-        let dc = BeginPaint(button, &mut paint);
-        let mut rect = RECT::default();
-        let _ = GetClientRect(button, &mut rect);
         let caption = action.caption.get();
         let text = action.text.get();
         let blend = |a: u32, b: u32, f: f64| -> u32 {
@@ -311,46 +307,120 @@ unsafe fn paint(button: HWND, action: &CaptionAction) {
                 })
                 .sum()
         };
-        let scale = GetDpiForWindow(action.owner).max(96) as f64 / 96.;
+        let scale = dpi.max(96) as f64 / 96.;
         let px = |n: f64| (n * scale).round() as i32;
         let loading = action.mode.get() == CaptionMode::Downloading;
         let pressed = action.pressed.get();
         let background = if action.enabled.get() && (action.hover.get() || pressed) {
-            blend(caption, text, if pressed { 0.14 } else { 0.08 })
+            blend(caption, text, if pressed { 0.14 } else { 0.09 })
+        } else if action.enabled.get() || loading {
+            blend(caption, text, 0.04)
         } else {
             caption
         };
-        let popup_width = rect.right;
-        let pill = pill_rect(popup_width, GetDpiForWindow(action.owner));
-        let brush = CreateSolidBrush(COLORREF(caption));
-        FillRect(dc, &rect, brush);
-        let _ = DeleteObject(HGDIOBJ(brush.0));
+        let popup_width = width.max(1);
+        let popup_height = height.max(1);
+        let pill = pill_rect(popup_width, dpi);
         let foreground = if action.enabled.get() || loading {
             text
         } else {
             blend(caption, text, 0.42)
         };
-        let border = CreatePen(
-            PS_SOLID,
-            px(1.).max(1),
-            COLORREF(blend(caption, text, 0.23)),
+        let border_color = blend(
+            caption,
+            text,
+            if action.hover.get() && action.enabled.get() {
+                0.24
+            } else {
+                0.15
+            },
         );
-        let fill = CreateSolidBrush(COLORREF(background));
-        let old_pen = SelectObject(dc, HGDIOBJ(border.0));
-        let old_brush = SelectObject(dc, HGDIOBJ(fill.0));
-        let _ = RoundRect(
+        let stroke_w = scale.max(1.);
+        let pcx = (pill.left + pill.right) as f64 * 0.5;
+        let pcy = (pill.top + pill.bottom) as f64 * 0.5;
+        let half_w = (pill.right - pill.left) as f64 * 0.5 - 0.5;
+        let half_h = (pill.bottom - pill.top) as f64 * 0.5 - 0.5;
+        let radius = (7. * scale).min(half_h).max(1.);
+        let badge = dismiss_rect(popup_width, dpi);
+        let bcx = (badge.left + badge.right) as f64 * 0.5;
+        let bcy = (badge.top + badge.bottom) as f64 * 0.5;
+        let br = (badge.right - badge.left) as f64 * 0.5 - 1.;
+        let badge_bg = if action.close_hover.get() {
+            blend(caption, text, 0.14)
+        } else {
+            blend(caption, text, 0.06)
+        };
+        let badge_border = blend(caption, text, 0.28);
+        let cross_r = 2.2 * scale;
+        let mut surface = vec![0_u8; (popup_width * popup_height * 4) as usize];
+        for y in 0..popup_height {
+            for x in 0..popup_width {
+                let fx = x as f64 + 0.5;
+                let fy = y as f64 + 0.5;
+                let mut color = caption;
+                let qx = (fx - pcx).abs() - (half_w - radius);
+                let qy = (fy - pcy).abs() - (half_h - radius);
+                let d_pill = qx.max(0.).hypot(qy.max(0.)) + qx.max(qy).min(0.) - radius;
+                let fill_cov = (0.5 - d_pill).clamp(0., 1.);
+                if fill_cov > 0. {
+                    color = blend(color, background, fill_cov);
+                }
+                let d_border = (d_pill + 0.5 * stroke_w).abs() - 0.5 * stroke_w;
+                let border_cov = (0.5 - d_border).clamp(0., 1.);
+                if border_cov > 0. {
+                    color = blend(color, border_color, border_cov);
+                }
+                if action.hover.get() {
+                    let d_badge = (fx - bcx).hypot(fy - bcy) - br;
+                    let b_fill = (0.5 - d_badge).clamp(0., 1.);
+                    if b_fill > 0. {
+                        color = blend(color, badge_bg, b_fill);
+                    }
+                    let d_b_border = (d_badge + 0.5 * stroke_w).abs() - 0.5 * stroke_w;
+                    let b_border = (0.5 - d_b_border).clamp(0., 1.);
+                    if b_border > 0. {
+                        color = blend(color, badge_border, b_border);
+                    }
+                    if d_badge < 0. {
+                        let ux = fx - bcx;
+                        let uy = fy - bcy;
+                        let mut x_cov = 0_f64;
+                        for (sx, sy) in [(1., 1.), (1., -1.)] {
+                            let t = ((ux * sx + uy * sy) / (2. * cross_r)).clamp(-1., 1.);
+                            let dist_seg = (ux - t * sx * cross_r).hypot(uy - t * sy * cross_r);
+                            x_cov = x_cov.max(((0.55 * scale - dist_seg) + 0.5).clamp(0., 1.));
+                        }
+                        if x_cov > 0. {
+                            color = blend(color, text, x_cov * 0.85);
+                        }
+                    }
+                }
+                let idx = ((y * popup_width + x) * 4) as usize;
+                surface[idx] = ((color >> 16) & 255) as u8;
+                surface[idx + 1] = ((color >> 8) & 255) as u8;
+                surface[idx + 2] = (color & 255) as u8;
+            }
+        }
+        let mut info = BITMAPINFO::default();
+        info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        info.bmiHeader.biWidth = popup_width;
+        info.bmiHeader.biHeight = -popup_height;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        SetDIBitsToDevice(
             dc,
-            pill.left,
-            pill.top,
-            pill.right - 1,
-            pill.bottom - 1,
-            px(14.),
-            px(14.),
+            0,
+            0,
+            popup_width as u32,
+            popup_height as u32,
+            0,
+            0,
+            0,
+            popup_height as u32,
+            surface.as_ptr() as _,
+            &info,
+            DIB_RGB_COLORS,
         );
-        SelectObject(dc, old_pen);
-        SelectObject(dc, old_brush);
-        let _ = DeleteObject(HGDIOBJ(border.0));
-        let _ = DeleteObject(HGDIOBJ(fill.0));
         let center_x = px(13.);
         let center_y = (pill.top + pill.bottom) / 2;
         paint_icon(
@@ -365,9 +435,9 @@ unsafe fn paint(button: HWND, action: &CaptionAction) {
         );
         SetBkMode(dc, TRANSPARENT);
         SetTextColor(dc, COLORREF(foreground));
-        let height = -(12. * GetDpiForWindow(action.owner) as f64 / 96.).round() as i32;
+        let font_height = -(12. * dpi.max(96) as f64 / 96.).round() as i32;
         let font = CreateFontW(
-            height,
+            font_height,
             0,
             0,
             0,
@@ -396,7 +466,7 @@ unsafe fn paint(button: HWND, action: &CaptionAction) {
             action.english.get(),
         );
         let mut label = label.encode_utf16().collect::<Vec<_>>();
-        rect = pill;
+        let mut rect = pill;
         rect.left = px(24.);
         rect.right -= px(6.);
         DrawTextW(
@@ -405,42 +475,26 @@ unsafe fn paint(button: HWND, action: &CaptionAction) {
             &mut rect,
             DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
         );
-        if action.hover.get() {
-            let badge = dismiss_rect(popup_width, GetDpiForWindow(action.owner));
-            let fill_color = if action.close_hover.get() {
-                blend(caption, text, 0.12)
-            } else {
-                caption
-            };
-            let pen = CreatePen(
-                PS_SOLID,
-                px(1.).max(1),
-                COLORREF(blend(caption, text, 0.35)),
-            );
-            let fill = CreateSolidBrush(COLORREF(fill_color));
-            let old_pen = SelectObject(dc, HGDIOBJ(pen.0));
-            let old_fill = SelectObject(dc, HGDIOBJ(fill.0));
-            let _ = Ellipse(dc, badge.left, badge.top, badge.right - 1, badge.bottom - 1);
-            SelectObject(dc, old_fill);
-            SelectObject(dc, old_pen);
-            let _ = DeleteObject(HGDIOBJ(fill.0));
-            let _ = DeleteObject(HGDIOBJ(pen.0));
-            let pen = CreatePen(PS_SOLID, px(1.).max(1), COLORREF(text));
-            let old_pen = SelectObject(dc, HGDIOBJ(pen.0));
-            let cx = (badge.left + badge.right - 1) / 2;
-            let cy = (badge.top + badge.bottom - 1) / 2;
-            let radius = px(2.);
-            let _ = MoveToEx(dc, cx - radius, cy - radius, None);
-            let _ = LineTo(dc, cx + radius + 1, cy + radius + 1);
-            let _ = MoveToEx(dc, cx + radius, cy - radius, None);
-            let _ = LineTo(dc, cx - radius - 1, cy + radius + 1);
-            SelectObject(dc, old_pen);
-            let _ = DeleteObject(HGDIOBJ(pen.0));
-        }
         SelectObject(dc, old);
         if !font.0.is_null() {
             let _ = DeleteObject(HGDIOBJ(font.0));
         }
+    }
+}
+unsafe fn paint(button: HWND, action: &CaptionAction) {
+    // SAFETY: Called on the owning UI thread; subclass state lives until WM_NCDESTROY.
+    unsafe {
+        let mut paint = PAINTSTRUCT::default();
+        let dc = BeginPaint(button, &mut paint);
+        let mut rect = RECT::default();
+        let _ = GetClientRect(button, &mut rect);
+        paint_dc(
+            dc,
+            rect.right,
+            rect.bottom,
+            GetDpiForWindow(action.owner),
+            action,
+        );
         let _ = EndPaint(button, &paint);
     }
 }
@@ -847,14 +901,11 @@ pub async fn set_update_caption(
                         }
                     }),
                 )?;
-                let dark = window.theme().ok() == Some(tauri::Theme::Dark);
-                refresh(
-                    hwnd.0,
-                    if dark { 0x181818 } else { 0xf5f5f5 },
-                    if dark { 0xe5e5e5 } else { 0x171717 },
-                );
             }
+            let (caption, text) = crate::update_ui::caption_colors(&app);
             if let Some(action) = state(hwnd) {
+                action.caption.set(caption.min(0xffffff));
+                action.text.set(text.min(0xffffff));
                 action.version.replace(version);
                 action.english.set(english.unwrap_or(false));
             }

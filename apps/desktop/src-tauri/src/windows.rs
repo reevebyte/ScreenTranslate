@@ -209,6 +209,17 @@ pub fn apply_theme(app: &AppHandle, theme: screentrans_core::config::Theme) {
     }
 }
 
+pub fn caption_palette(theme: screentrans_core::config::Theme) -> (bool, u32, u32) {
+    let dark = match theme {
+        screentrans_core::config::Theme::Dark => true,
+        screentrans_core::config::Theme::Light => false,
+        screentrans_core::config::Theme::System => system_dark(),
+    };
+    let background = if dark { 0x00121212 } else { 0x00f5f5f5 };
+    let text = if dark { 0x00e5e5e5 } else { 0x00242424 };
+    (dark, background, text)
+}
+
 fn caption_color(window: &tauri::WebviewWindow, theme: screentrans_core::config::Theme) {
     #[cfg(windows)]
     if let Ok(handle) = window.hwnd() {
@@ -216,24 +227,11 @@ fn caption_color(window: &tauri::WebviewWindow, theme: screentrans_core::config:
             DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
             DwmSetWindowAttribute,
         };
-        let dark = match theme {
-            screentrans_core::config::Theme::Dark => true,
-            screentrans_core::config::Theme::Light => false,
-            screentrans_core::config::Theme::System => system_dark(),
-        };
-        let (background, text): (u32, u32) = match theme {
-            screentrans_core::config::Theme::Light => (0x00f5f5f5, 0x00242424),
-            screentrans_core::config::Theme::Dark => (0x00121212, 0x00e5e5e5),
-            screentrans_core::config::Theme::System => (0xffffffff, 0xffffffff),
-        };
+        let (dark, background, text) = caption_palette(theme);
         unsafe {
             let hwnd = windows::Win32::Foundation::HWND(handle.0);
             if window.label() == "main" {
-                crate::update_caption::refresh(
-                    handle.0,
-                    if dark { 0x121212 } else { 0xf5f5f5 },
-                    if dark { 0xe5e5e5 } else { 0x242424 },
-                );
+                crate::update_caption::refresh(handle.0, background, text);
             }
             let immersive = i32::from(dark);
             let _ = DwmSetWindowAttribute(

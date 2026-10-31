@@ -2,6 +2,9 @@
 // Run native caption checks in a manifest-bearing integration executable.
 mod update_ui {
     pub fn request(_: &tauri::AppHandle, _: &str) {}
+    pub fn caption_colors(_: &tauri::AppHandle) -> (u32, u32) {
+        (0xf5f5f5, 0x242424)
+    }
     pub async fn on_ui<T: Send + 'static>(
         _: &tauri::AppHandle,
         _: impl FnOnce(tauri::AppHandle) -> Result<T, String> + Send + 'static,
@@ -132,6 +135,72 @@ mod caption {
                 DestroyWindow(hwnd).unwrap();
                 assert!(!IsWindow(button).as_bool());
                 assert!(state(hwnd).is_none());
+            }
+        }
+        #[test]
+        fn renders_smooth_pill_matching_light_and_dark_caption_backgrounds() {
+            unsafe {
+                let width = 156_i32;
+                let height = 36_i32;
+                let dpi = 144_u32;
+                let action = CaptionAction {
+                    owner: HWND::default(),
+                    button: Cell::new(HWND::default()),
+                    visible: Cell::new(true),
+                    enabled: Cell::new(true),
+                    english: Cell::new(false),
+                    hover: Cell::new(false),
+                    pressed: Cell::new(false),
+                    close_pressed: Cell::new(false),
+                    close_hover: Cell::new(false),
+                    version: RefCell::new("2.0.7".into()),
+                    caption: Cell::new(0xf5f5f5),
+                    text: Cell::new(0x242424),
+                    mode: Cell::new(CaptionMode::Restart),
+                    progress: Cell::new(Some(100)),
+                    frame: Cell::new(0),
+                    animating: Cell::new(false),
+                    clicked: Box::new(|| {}),
+                    dismissed: Box::new(|| {}),
+                };
+                for (name, bg, fg) in [
+                    ("light", 0xf5f5f5_u32, 0x242424_u32),
+                    ("dark", 0x121212_u32, 0xe5e5e5_u32),
+                ] {
+                    action.caption.set(bg);
+                    action.text.set(fg);
+                    let mem_dc = CreateCompatibleDC(None);
+                    let mut info = BITMAPINFO::default();
+                    info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+                    info.bmiHeader.biWidth = width;
+                    info.bmiHeader.biHeight = -height;
+                    info.bmiHeader.biPlanes = 1;
+                    info.bmiHeader.biBitCount = 32;
+                    let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
+                    let dib = CreateDIBSection(mem_dc, &info, DIB_RGB_COLORS, &mut bits, None, 0)
+                        .unwrap();
+                    let old = SelectObject(mem_dc, HGDIOBJ(dib.0));
+                    paint_dc(mem_dc, width, height, dpi, &action);
+                    let slice = std::slice::from_raw_parts(
+                        bits as *const u8,
+                        (width * height * 4) as usize,
+                    );
+                    assert_eq!(slice[0], (bg & 0xff) as u8);
+                    if let Ok(dir) = std::env::var("SCREENTRANS_CAPTION_PREVIEW_DIR") {
+                        let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+                        for px in slice.chunks_exact(4) {
+                            rgba.extend_from_slice(&[px[2], px[1], px[0], 255]);
+                        }
+                        let img =
+                            image::RgbaImage::from_raw(width as u32, height as u32, rgba).unwrap();
+                        let _ = std::fs::create_dir_all(&dir);
+                        img.save(std::path::Path::new(&dir).join(format!("caption-{name}.png")))
+                            .unwrap();
+                    }
+                    SelectObject(mem_dc, old);
+                    let _ = DeleteObject(HGDIOBJ(dib.0));
+                    let _ = DeleteDC(mem_dc);
+                }
             }
         }
     }

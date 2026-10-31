@@ -34,6 +34,17 @@ pub fn request(app: &AppHandle, source: &str) {
     }
     let _ = app.emit_to("main", "app-update-requested", ());
 }
+pub fn caption_colors(app: &AppHandle) -> (u32, u32) {
+    let theme = app
+        .try_state::<crate::state::AppState>()
+        .map(|state| {
+            let saved = lock(&state.config).appearance.theme;
+            lock(&state.theme_preview).effective(saved)
+        })
+        .unwrap_or(screentrans_core::config::Theme::System);
+    let (_, background, text) = crate::windows::caption_palette(theme);
+    (background, text)
+}
 #[tauri::command]
 pub async fn take_update_request(
     app: AppHandle,
