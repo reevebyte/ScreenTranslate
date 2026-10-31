@@ -580,7 +580,7 @@ pub fn show_main(app: &AppHandle) -> Result<()> {
     let window = match app.get_webview_window("main") {
         Some(window) => window,
         None => builder(app, "main", "main")
-            .inner_size(780.0, 520.0)
+            .inner_size(600.0, 400.0)
             .min_inner_size(600.0, 400.0)
             .center()
             .build()

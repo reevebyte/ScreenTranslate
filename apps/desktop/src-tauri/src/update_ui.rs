@@ -1,11 +1,19 @@
 use crate::state::lock;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow, menu::MenuItem};
+pub struct TrayItems {
+    pub capture: MenuItem<tauri::Wry>,
+    pub quick: MenuItem<tauri::Wry>,
+    pub toggle: MenuItem<tauri::Wry>,
+    pub main: MenuItem<tauri::Wry>,
+    pub update: MenuItem<tauri::Wry>,
+    pub quit: MenuItem<tauri::Wry>,
+}
 #[derive(Default)]
 pub struct UpdateUi {
     pub busy: std::sync::atomic::AtomicBool,
     pub request: Mutex<Option<String>>,
-    pub tray: Mutex<Option<MenuItem<tauri::Wry>>>,
+    pub tray: Mutex<Option<TrayItems>>,
 }
 pub async fn on_ui<T: Send + 'static>(
     app: &AppHandle,
@@ -46,53 +54,18 @@ fn presentation(
     if version.is_some_and(|s| s.is_empty() || s.len() > 64 || s.chars().any(char::is_control)) {
         return Err("无效的更新版本".into());
     }
-    if !matches!(
-        stage,
-        "idle"
-            | "current"
-            | "checking"
-            | "available"
-            | "downloading"
-            | "ready"
-            | "installing"
-            | "error"
-    ) {
-        return Err("无效的托盘更新状态".into());
+    match stage {
+        "idle" | "current" | "checking" | "error" => {}
+        "available" | "downloading" | "ready" | "installing" if version.is_some() => {}
+        _ => return Err("无效的托盘更新状态".into()),
     }
-    let newer = version.is_some()
-        && matches!(
-            stage,
-            "available" | "downloading" | "ready" | "installing" | "error"
-        );
-    let enabled = newer && !blocked && matches!(stage, "available" | "ready" | "error");
-    let text = if newer {
-        format!(
-            "↑ v{} · {}",
-            version.unwrap(),
-            match stage {
-                "downloading" =>
-                    if english {
-                        "Downloading…"
-                    } else {
-                        "下载中…"
-                    },
-                "installing" =>
-                    if english {
-                        "Installing…"
-                    } else {
-                        "安装中…"
-                    },
-                _ =>
-                    if english {
-                        "Update"
-                    } else {
-                        "更新"
-                    },
-            }
-        )
+    let target = if matches!(stage, "idle" | "current" | "checking") {
+        current
     } else {
-        format!("{} {current}", if english { "Version" } else { "版本" })
+        version.unwrap_or(current)
     };
+    let enabled = version.is_some() && !blocked && matches!(stage, "available" | "ready" | "error");
+    let text = format!("{} {target}", if english { "Version" } else { "版本" });
     Ok((text, enabled))
 }
 #[tauri::command]
@@ -119,9 +92,48 @@ pub async fn set_tray_update(
         english,
     )?;
     on_ui(&app, move |app| {
-        if let Some(item) = lock(&app.state::<UpdateUi>().tray).as_ref() {
-            item.set_text(text).map_err(|e| e.to_string())?;
-            item.set_enabled(enabled).map_err(|e| e.to_string())?;
+        if let Some(items) = lock(&app.state::<UpdateUi>().tray).as_ref() {
+            items
+                .capture
+                .set_text(if english {
+                    "Capture and translate"
+                } else {
+                    "截图翻译"
+                })
+                .map_err(|e| e.to_string())?;
+            items
+                .quick
+                .set_text(if english {
+                    "Quick translate"
+                } else {
+                    "快速文字翻译"
+                })
+                .map_err(|e| e.to_string())?;
+            items
+                .toggle
+                .set_text(if english {
+                    "Hide / show"
+                } else {
+                    "显示 / 隐藏译文"
+                })
+                .map_err(|e| e.to_string())?;
+            items
+                .main
+                .set_text(if english {
+                    "Open main window"
+                } else {
+                    "打开主窗口"
+                })
+                .map_err(|e| e.to_string())?;
+            items.update.set_text(text).map_err(|e| e.to_string())?;
+            items
+                .update
+                .set_enabled(enabled)
+                .map_err(|e| e.to_string())?;
+            items
+                .quit
+                .set_text(if english { "Quit" } else { "退出" })
+                .map_err(|e| e.to_string())?;
         }
         Ok(())
     })
@@ -153,13 +165,16 @@ mod tests {
         );
         let (text, enabled) =
             presentation("2.0.2", "available", Some("2.0.3"), false, false).unwrap();
-        assert!(text.contains("↑ v2.0.3"));
+        assert_eq!(text, "版本 2.0.3");
         assert!(enabled);
+        assert_eq!(
+            presentation("2.0.2", "available", Some("2.0.3"), false, true).unwrap(),
+            ("Version 2.0.3".into(), true)
+        );
         for stage in ["downloading", "installing"] {
-            assert!(
-                !presentation("2.0.2", stage, Some("2.0.3"), false, true)
-                    .unwrap()
-                    .1
+            assert_eq!(
+                presentation("2.0.2", stage, Some("2.0.3"), false, true).unwrap(),
+                ("Version 2.0.3".into(), false)
             );
         }
         assert!(
@@ -167,6 +182,11 @@ mod tests {
                 .unwrap()
                 .1
         );
+        assert_eq!(
+            presentation("2.0.2", "error", None, false, false).unwrap(),
+            ("版本 2.0.2".into(), false)
+        );
+        assert!(presentation("2.0.2", "ready", None, false, false).is_err());
         assert!(presentation("2.0.2", "available", Some("bad\nversion"), false, false).is_err());
     }
 }

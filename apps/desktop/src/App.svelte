@@ -25,11 +25,11 @@
     { route: 'providers' as Route, label: t("服务中心"), icon: SlidersHorizontal },
     { route: 'settings' as Route, label: t("设置"), icon: Settings2 },
   ]);
-  function storedSidebar() { try { return localStorage.getItem('screentranslate-sidebar-collapsed') === 'true'; } catch { return false; } }
+  function storedSidebar() { try { return localStorage.getItem('screentranslate-rail-collapsed') !== 'false'; } catch { return true; } }
   let sidebarCollapsed = $state(storedSidebar());
   function toggleSidebar() {
     sidebarCollapsed = !sidebarCollapsed;
-    try { localStorage.setItem('screentranslate-sidebar-collapsed', String(sidebarCollapsed)); } catch { /* Storage may be disabled. */ }
+    try { localStorage.setItem('screentranslate-rail-collapsed', String(sidebarCollapsed)); } catch { /* Storage may be disabled. */ }
   }
   let welcome = $state(false); let offeredWelcome = false;
   $effect(() => { if (app.data) applyAppearance(app.data.config); });
@@ -66,7 +66,7 @@
   }
 </script>
 
-<svelte:window onkeydown={keydown} oncontextmenu={event => { if (mode === 'selection' || mode === 'result') event.preventDefault(); }}/>
+<svelte:window onkeydown={keydown} oncontextmenu={event => event.preventDefault()}/>
 {#if app.fatal}
   <div class="startup-state"><Brand/><h2>{t("无法打开应用")}</h2><p>{app.fatal}</p><Button onclick={() => location.reload()}>{t("重试")}</Button></div>
 {:else if !app.data}

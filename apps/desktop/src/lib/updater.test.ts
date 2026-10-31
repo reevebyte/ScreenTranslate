@@ -5,7 +5,7 @@ vi.mock('./api',()=>({desktop:true,call,loadBootstrap:vi.fn()}));
 vi.mock('@tauri-apps/api/event',()=>({listen:vi.fn(async(name:string,fn:(e:{payload:unknown})=>void)=>{listeners.set(name,fn);return ()=>listeners.delete(name);})}));
 import {app} from './store.svelte';
 import {updates,checkUpdate,downloadUpdate,installUpdate,initializeUpdates,consumeUpdateRequest,syncUpdateUi} from './updater.svelte';
-beforeEach(()=>{call.mockReset().mockResolvedValue(undefined);app.data=previewBootstrap();app.configPending=false;app.configSaving=false;Object.assign(updates,{stage:'idle',version:'',notes:'',progress:null,error:'',dismissed:'',confirm:false,connected:false});});
+beforeEach(()=>{call.mockReset().mockResolvedValue(undefined);app.data=previewBootstrap();app.configPending=false;app.configSaving=false;Object.assign(updates,{stage:'idle',version:'',notes:'',progress:null,error:'',dismissed:'',confirm:false,connected:false,upToDateNotice:false});});
 afterEach(()=>listeners.clear());
 it('serializes checks and retains the downloaded version across checks',async()=>{
  let resolve!:(v:unknown)=>void;call.mockImplementationOnce(()=>new Promise(r=>resolve=r));
@@ -51,4 +51,10 @@ it('synchronizes tray and caption states including language and busy work',()=>{
  expect(call).toHaveBeenCalledWith('set_tray_update',expect.objectContaining({version:'2.0.3',blocked:false}));
  expect(call).toHaveBeenCalledWith('set_update_caption',expect.objectContaining({visible:true,mode:'download',enabled:true}));
  app.configPending=true;syncUpdateUi();expect(call).toHaveBeenLastCalledWith('set_update_caption',expect.objectContaining({enabled:false}));
+});
+it('shows the centered up-to-date notice only on manual check',async()=>{
+ call.mockResolvedValueOnce({available:false});await checkUpdate();
+ expect(updates.stage).toBe('current');expect(updates.upToDateNotice).toBe(false);
+ call.mockResolvedValueOnce({available:false});await checkUpdate(true);
+ expect(updates.stage).toBe('current');expect(updates.upToDateNotice).toBe(true);
 });

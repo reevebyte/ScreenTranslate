@@ -6,12 +6,13 @@ import { dirname, join } from 'node:path';
 import { cleanBuilds } from './clean-v2-builds.mjs';
 import { buildTarget, copyWindowsExecutable } from './tauri-build-output.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
-const require = createRequire(join(root, 'apps/desktop/package.json'));
+const desktopDir = join(root, 'apps/desktop');
+const require = createRequire(join(desktopDir, 'package.json'));
 const cli = join(dirname(require.resolve('@tauri-apps/cli')), 'tauri.js');
 const args = process.argv.slice(2);
 if (args[0] === 'build') await import('./check-v2-version.mjs');
 const code = await new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, [cli, ...args], { stdio: 'inherit', env: process.env });
+  const child = spawn(process.execPath, [cli, ...args], { cwd: desktopDir, stdio: 'inherit', env: process.env });
   child.on('error', reject); child.on('exit', code => resolve(code ?? 1));
 });
 if (code !== 0) process.exit(code);

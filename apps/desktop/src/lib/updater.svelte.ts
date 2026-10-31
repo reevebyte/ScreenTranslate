@@ -6,24 +6,40 @@ import { t, uiLocale } from './i18n.svelte';
 
 type Stage = 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'installing' | 'error';
 type Info = { available: boolean; version?: string; notes?: string; downloaded?: boolean };
-export const updates = $state({stage:'idle' as Stage,version:'',notes:'',progress:null as number|null,error:'',dismissed:'',confirm:false,connected:false});
+export const updates = $state({stage:'idle' as Stage,version:'',notes:'',progress:null as number|null,error:'',dismissed:'',confirm:false,connected:false,upToDateNotice:false});
 let operation = false;
 let checked = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+function showUpToDateNotice() {
+  clearTimeout(noticeTimer);
+  updates.upToDateNotice = true;
+  noticeTimer = setTimeout(() => { updates.upToDateNotice = false; }, 1800);
+}
 export function updateBlockReason() {
   if (app.configPending || app.configSaving) return t('请先保存当前配置，再安装更新');
   if (app.data && [app.data.text.job.stage,app.data.visual.job.stage].some(stage=>['capturing','recognizing','translating'].includes(stage))) return t('请等待截图或翻译完成，再安装更新');
   return '';
 }
-export async function checkUpdate() {
+export async function checkUpdate(manual = false) {
   if (operation || updates.stage === 'ready') return;
   operation = true;
-  updates.stage = 'checking'; updates.error = '';
+  updates.stage = 'checking'; updates.error = ''; updates.upToDateNotice = false;
   try {
     const result = await call<Info>('check_update');
     updates.version = result.version ?? ''; updates.notes = result.notes ?? '';
     updates.stage = result.available ? result.downloaded ? 'ready' : 'available' : 'current';
-  } catch(error) { updates.error = errorMessage(error); updates.stage = 'error'; }
+    if (manual && updates.stage === 'current') showUpToDateNotice();
+  } catch(error) {
+    const msg = errorMessage(error);
+    if (manual && msg.includes('尚未发布可用更新')) {
+      updates.stage = 'current';
+      showUpToDateNotice();
+    } else {
+      updates.error = msg;
+      updates.stage = 'error';
+    }
+  }
   finally { operation = false; }
 }
 export async function downloadUpdate() {
@@ -87,5 +103,5 @@ export function initializeUpdates() {
     subscribe('app-update-requested',()=>{void consumeUpdateRequest();}),
     subscribe<string>('app-update-caption-dismissed',({payload})=>{if(payload===updates.version)updates.dismissed=payload;}),
   ]).then(()=>{if(!disposed)updates.connected=true;}).catch(()=>{});
-  return ()=>{ disposed = true; updates.connected=false; clearTimeout(timer); cleanup.splice(0).forEach(fn=>fn()); };
+  return ()=>{ disposed = true; updates.connected=false; clearTimeout(timer); clearTimeout(noticeTimer); cleanup.splice(0).forEach(fn=>fn()); };
 }

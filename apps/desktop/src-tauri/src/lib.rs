@@ -25,7 +25,7 @@ mod windows;
 use state::{AppState, lock};
 use tauri::{
     Emitter, Manager,
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder},
 };
 
@@ -235,6 +235,11 @@ fn handle_run_event(_app: &tauri::AppHandle, event: tauri::RunEvent) {
 }
 
 fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let capture = MenuItem::with_id(app, "capture", "截图翻译", true, None::<&str>)?;
+    let quick = MenuItem::with_id(app, "quick", "快速文字翻译", true, None::<&str>)?;
+    let toggle = MenuItem::with_id(app, "toggle", "显示 / 隐藏译文", true, None::<&str>)?;
+    let main = MenuItem::with_id(app, "main", "打开主窗口", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
     let version = MenuItem::with_id(
         app,
         "update",
@@ -242,13 +247,19 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         false,
         None::<&str>,
     )?;
-    *lock(&app.state::<update_ui::UpdateUi>().tray) = Some(version.clone());
-    let capture = MenuItem::with_id(app, "capture", "截图翻译", true, None::<&str>)?;
-    let quick = MenuItem::with_id(app, "quick", "快速文字翻译", true, None::<&str>)?;
-    let main = MenuItem::with_id(app, "main", "打开主窗口", true, None::<&str>)?;
-    let toggle = MenuItem::with_id(app, "toggle", "显示 / 隐藏译文", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&version, &capture, &quick, &main, &toggle, &quit])?;
+    *lock(&app.state::<update_ui::UpdateUi>().tray) = Some(update_ui::TrayItems {
+        capture: capture.clone(),
+        quick: quick.clone(),
+        toggle: toggle.clone(),
+        main: main.clone(),
+        update: version.clone(),
+        quit: quit.clone(),
+    });
+    let menu = Menu::with_items(
+        app,
+        &[&capture, &quick, &toggle, &main, &separator, &version, &quit],
+    )?;
     let mut tray = TrayIconBuilder::with_id("main-tray")
         .tooltip("ScreenTranslate · 截图即翻译")
         .menu(&menu)
