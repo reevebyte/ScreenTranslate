@@ -50,6 +50,6 @@
   {#if selection && selection.width > 0}
     <div class="selection-rect" style:left={`${selection.x}px`} style:top={`${selection.y}px`} style:width={`${selection.width}px`} style:height={`${selection.height}px`}><span class="selection-dimensions">{Math.round(selection.width * (frame?.width ?? width) / width)} × {Math.round(selection.height * (frame?.height ?? height) / height)}</span><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i><i class="corner tm"></i><i class="corner rm"></i><i class="corner bm"></i><i class="corner lm"></i></div>
   {:else}<div class="capture-shade"></div>{/if}
-  <div class="capture-guide"><ScanLine size={17}/><span>{submitting ? t("正在识别…") : t("拖动选择区域")}</span><kbd>Esc</kbd><span>{t("取消")}</span></div>
+  <div class="capture-guide"><ScanLine size={16}/><span>{submitting ? t("正在识别…") : t("拖动选择区域")}</span><span class="capture-guide-divider" aria-hidden="true"></span><kbd>Esc</kbd><span class="capture-guide-cancel">{t("取消")}</span></div>
   {#if error}<div class="capture-error">{error}<button onclick={cancel}>{t("返回")}</button></div>{/if}
 </div>

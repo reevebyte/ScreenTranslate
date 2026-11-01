@@ -90,7 +90,7 @@
         {/each}
       </nav>
       <div class="rail-bottom">
-        <button class="sidebar-toggle" aria-label={sidebarCollapsed ? t("展开侧栏") : t("收起侧栏")} title={sidebarCollapsed ? t("展开侧栏") : t("收起侧栏")} aria-expanded={!sidebarCollapsed} onclick={toggleSidebar}><PanelsTopLeft size={19}/></button>
+        <button class="sidebar-toggle" aria-label={sidebarCollapsed ? t("展开侧栏") : t("收起侧栏")} title={sidebarCollapsed ? t("展开侧栏") : t("收起侧栏")} aria-expanded={!sidebarCollapsed} onclick={toggleSidebar}><PanelsTopLeft size={20}/></button>
       </div>
     </aside>
     <main class="main-content" aria-label={nav.find(item => item.route === app.route)?.label || t("组件")}>

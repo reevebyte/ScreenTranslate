@@ -597,7 +597,7 @@ pub fn show_main(app: &AppHandle) -> Result<()> {
         None => {
             let main = builder(app, "main", "main")
                 .inner_size(680.0, 520.0)
-                .min_inner_size(680.0, 500.0)
+                .min_inner_size(680.0, 520.0)
                 .center();
             #[cfg(windows)]
             let main = main.background_color(main_background(theme));

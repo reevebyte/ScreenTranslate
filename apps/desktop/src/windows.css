@@ -539,25 +539,58 @@
 .capture-guide {
   position: absolute;
   left: 50%;
-  bottom: 32px;
+  bottom: 36px;
   transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 9px 14px;
-  border: 1px solid #51564c;
-  border-radius: 8px;
-  background: #252925;
-  color: #f1f2ed;
+  gap: 10px;
+  padding: 7px 16px 7px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-pill);
+  background: rgba(26, 27, 31, 0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.2);
+  color: #f4f4f5;
   font-size: 13px;
+  font-weight: 500;
   white-space: nowrap;
   pointer-events: none;
+  user-select: none;
+}
+
+.capture-guide svg {
+  color: #d4d4d8;
+  flex-shrink: 0;
+}
+
+.capture-guide-divider {
+  display: inline-block;
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.18);
+  margin-inline: 2px;
 }
 
 .capture-guide kbd {
-  background: #383e33;
-  border-color: #69715f;
-  color: #f1f2ed;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 7px;
+  min-height: 20px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  font-family: inherit;
+}
+
+.capture-guide-cancel {
+  color: #a1a1aa;
+  font-size: 12px;
 }
 
 .capture-error {
@@ -1052,7 +1085,7 @@
   }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 540px) {
   .spotlight-drag-left {
     gap: 6px;
   }

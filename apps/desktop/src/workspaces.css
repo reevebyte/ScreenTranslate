@@ -24,10 +24,12 @@
   gap: 4px;
   align-items: flex-start;
   width: 100%;
+  flex-shrink: 0;
 }
 
 .rail-bottom {
   margin-top: auto;
+  flex-shrink: 0;
 }
 
 .rail-link {
@@ -83,6 +85,11 @@
   height: 40px;
   border-radius: var(--radius-pill);
   color: var(--secondary);
+  flex-shrink: 0;
+}
+
+.sidebar-toggle > svg {
+  flex-shrink: 0;
 }
 
 .sidebar-toggle:hover {
@@ -976,7 +983,7 @@ button.about-resource:hover { background: var(--surface-muted); }
   font-size: var(--text-small);
 }
 
-@media (max-width: 680px) {
+@media (max-width: 540px) {
   .navigation-rail {
     width: max(132px,9.428571rem);
   }
