@@ -8,10 +8,11 @@
   onMount(() => {
     const parent = marker.parentElement!;
     let observed: HTMLElement | null = null;
-    const update = () => {
+    const update = (fromObserver = false) => {
       const active = parent.querySelector<HTMLElement>(selector);
       if (!active) { visible = false; return; }
-      if (observed !== active) {
+      const tabChanged = observed !== active;
+      if (tabChanged) {
         if (observed) resize.unobserve(observed);
         observed = active;
         resize.observe(active);
@@ -19,11 +20,12 @@
       const bounds = active.getBoundingClientRect();
       if (!bounds.width || !bounds.height) { visible = false; return; }
       const origin = parent.getBoundingClientRect();
-      void position.set({ x: bounds.left - origin.left + parent.scrollLeft, y: bounds.top - origin.top + parent.scrollTop, width: bounds.width, height: bounds.height }, { instant: !visible || prefersReducedMotion.current });
+      const instant = !visible || prefersReducedMotion.current || (!tabChanged && fromObserver);
+      void position.set({ x: bounds.left - origin.left + parent.scrollLeft, y: bounds.top - origin.top + parent.scrollTop, width: bounds.width, height: bounds.height }, { instant });
       visible = true;
     };
-    const resize = new ResizeObserver(update);
-    const changes = new MutationObserver(update);
+    const resize = new ResizeObserver(() => update(true));
+    const changes = new MutationObserver(() => update(true));
     resize.observe(parent);
     changes.observe(parent, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-current', 'aria-pressed', 'data-state', 'class'] });
     update();
