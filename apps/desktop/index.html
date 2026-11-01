@@ -8,7 +8,8 @@
     <link rel="icon" type="image/png" href="/app-icon.png" />
     <script>
       try {
-        const theme = localStorage.getItem('screentranslate-theme') || 'system';
+        const params = new URLSearchParams(location.search);
+        const theme = params.get('theme') || localStorage.getItem('screentranslate-theme') || 'system';
         const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
         document.documentElement.classList.toggle('dark', dark);
       } catch {}

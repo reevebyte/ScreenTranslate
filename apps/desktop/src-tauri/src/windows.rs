@@ -210,6 +210,56 @@ pub fn apply_theme(app: &AppHandle, theme: screentrans_core::config::Theme) {
 }
 
 #[cfg(windows)]
+const MAIN_WINDOW_SUBCLASS_ID: usize = 0x5354_0001;
+
+#[cfg(windows)]
+unsafe extern "system" fn main_window_subclass_proc(
+    hwnd: windows::Win32::Foundation::HWND,
+    message: u32,
+    w: windows::Win32::Foundation::WPARAM,
+    l: windows::Win32::Foundation::LPARAM,
+    id: usize,
+    _ptr: usize,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::{
+        Foundation::LRESULT,
+        UI::{
+            Shell::{DefSubclassProc, RemoveWindowSubclass},
+            WindowsAndMessaging::{
+                SWP_NOCOPYBITS, SWP_NOSIZE, WINDOWPOS, WM_ERASEBKGND, WM_NCDESTROY,
+                WM_WINDOWPOSCHANGING,
+            },
+        },
+    };
+    unsafe {
+        match message {
+            WM_NCDESTROY => {
+                let _ = RemoveWindowSubclass(hwnd, Some(main_window_subclass_proc), id);
+                return DefSubclassProc(hwnd, message, w, l);
+            }
+            WM_WINDOWPOSCHANGING => {
+                if l.0 != 0 {
+                    let pos = &mut *(l.0 as *mut WINDOWPOS);
+                    if (pos.flags & SWP_NOSIZE).0 == 0 {
+                        // Suppress Windows GDI BitBlt copying of old client bits during resize.
+                        // When resizing from top or left borders, Windows default BitBlt shifts
+                        // the client area by (dx, dy) before DirectComposition / WebView2 finishes
+                        // rasterizing the new viewport, causing bottom- and right-anchored elements
+                        // to jump and twitch. Setting SWP_NOCOPYBITS lets WebView2 present directly
+                        // without intermediate blit displacement.
+                        pos.flags |= SWP_NOCOPYBITS;
+                    }
+                }
+                return DefSubclassProc(hwnd, message, w, l);
+            }
+            WM_ERASEBKGND => return LRESULT(1),
+            _ => {}
+        }
+        DefSubclassProc(hwnd, message, w, l)
+    }
+}
+
+#[cfg(windows)]
 pub fn caption_palette(theme: screentrans_core::config::Theme) -> (bool, u32, u32) {
     let dark = match theme {
         screentrans_core::config::Theme::Dark => true,
@@ -604,6 +654,18 @@ pub fn show_main(app: &AppHandle) -> Result<()> {
             main.build().map_err(|_| window_error())?
         }
     };
+    #[cfg(windows)]
+    if let Ok(handle) = window.hwnd() {
+        use windows::Win32::UI::Shell::SetWindowSubclass;
+        unsafe {
+            let _ = SetWindowSubclass(
+                windows::Win32::Foundation::HWND(handle.0),
+                Some(main_window_subclass_proc),
+                MAIN_WINDOW_SUBCLASS_ID,
+                0,
+            );
+        }
+    }
     caption_color(&window, theme);
     request_show(&window)
 }
@@ -828,13 +890,20 @@ pub fn begin_capture(app: AppHandle, monitor: Option<String>) {
                 }
             }
             for metadata in captures {
+                let theme = lock(&app.state::<AppState>().config).appearance.theme;
+                let theme_str = match theme {
+                    screentrans_core::config::Theme::Dark => "dark",
+                    screentrans_core::config::Theme::Light => "light",
+                    screentrans_core::config::Theme::System => "system",
+                };
                 if !state.jobs.is_current("capture", &ticket) {
                     return Err(AppError::cancelled());
                 }
                 let label = format!("selection-{}", metadata.id);
                 let bounds = metadata.screen_bounds.unwrap();
                 lock(&state.selections).insert(label.clone(), metadata.id.clone());
-                let window = builder(&app, &label, "selection")
+                let query = format!("selection&theme={theme_str}");
+                let window = builder(&app, &label, &query)
                     .decorations(false)
                     .transparent(true)
                     .shadow(false)

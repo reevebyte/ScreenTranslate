@@ -705,6 +705,7 @@ unsafe fn sync(owner: HWND, action: &CaptionAction) {
                 target_h,
                 SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
             );
+            let _ = InvalidateRect(button, None, false);
         }
         if action.mode.get() == CaptionMode::Downloading {
             let mut animate = windows::Win32::Foundation::BOOL(1);
@@ -728,7 +729,6 @@ unsafe fn sync(owner: HWND, action: &CaptionAction) {
             let _ = KillTimer(button, ANIMATION_TIMER);
             action.animating.set(false);
         }
-        let _ = InvalidateRect(button, None, false);
     }
 }
 unsafe extern "system" fn caption_proc(
@@ -873,6 +873,10 @@ unsafe fn update(
         let _ =
             windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(action.button.get(), true);
         sync(hwnd, action);
+        let button = action.button.get();
+        if !button.0.is_null() && visible {
+            let _ = InvalidateRect(button, None, false);
+        }
     }
 }
 /// Called on the UI thread along the existing native caption theme clock.
@@ -945,8 +949,17 @@ pub async fn set_update_caption(
             }
             let (caption, text) = crate::update_ui::caption_colors(&app);
             if let Some(action) = state(hwnd) {
-                action.caption.set(caption.min(0xffffff));
-                action.text.set(text.min(0xffffff));
+                let cap = caption.min(0xffffff);
+                let txt = text.min(0xffffff);
+                let colors_changed = action.caption.get() != cap || action.text.get() != txt;
+                if colors_changed {
+                    action.caption.set(cap);
+                    action.text.set(txt);
+                    let button = action.button.get();
+                    if !button.0.is_null() && action.visible.get() {
+                        let _ = InvalidateRect(button, None, false);
+                    }
+                }
                 action.version.replace(version);
                 action.english.set(english.unwrap_or(false));
             }
