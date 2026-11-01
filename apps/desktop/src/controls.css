@@ -288,6 +288,8 @@ input[type="checkbox"], input[type="range"] {
   border-color: transparent;
   border-radius: var(--radius-control);
   background: var(--surface-muted);
+  min-height: 34px;
+  padding: 6px 14px;
 }
 
 .choice-menu {
