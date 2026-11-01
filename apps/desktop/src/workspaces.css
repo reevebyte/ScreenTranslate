@@ -8,7 +8,6 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 20px;
   padding: 15px 8px 10px;
   border-right: 0;
   background: var(--sidebar);
@@ -16,7 +15,7 @@
   transition: width var(--motion-sidebar) var(--ease);
 }
 
-.rail-main, .rail-bottom {
+.rail-main {
   position: relative;
   isolation: isolate;
   display: flex;
@@ -28,8 +27,16 @@
 }
 
 .rail-bottom {
+  position: relative;
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  width: 100%;
   flex-shrink: 0;
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 
 .rail-link {
@@ -86,6 +93,8 @@
   border-radius: var(--radius-pill);
   color: var(--secondary);
   flex-shrink: 0;
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 
 .sidebar-toggle > svg {

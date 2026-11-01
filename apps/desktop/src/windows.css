@@ -545,22 +545,23 @@
   align-items: center;
   gap: 10px;
   padding: 7px 16px 7px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: var(--radius-pill);
-  background: rgba(26, 27, 31, 0.88);
+  background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.2);
-  color: #f4f4f5;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
+  color: #18181b;
   font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
   pointer-events: none;
   user-select: none;
+  transition: background-color var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 }
 
 .capture-guide svg {
-  color: #d4d4d8;
+  color: #52525b;
   flex-shrink: 0;
 }
 
@@ -568,7 +569,7 @@
   display: inline-block;
   width: 1px;
   height: 14px;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.12);
   margin-inline: 2px;
 }
 
@@ -579,9 +580,9 @@
   padding: 1px 7px;
   min-height: 20px;
   border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  color: #ffffff;
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  color: #18181b;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.3px;
@@ -589,8 +590,33 @@
 }
 
 .capture-guide-cancel {
-  color: #a1a1aa;
+  color: #71717a;
   font-size: 12px;
+}
+
+.dark .capture-guide {
+  background: rgba(26, 27, 31, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.2);
+  color: #f4f4f5;
+}
+
+.dark .capture-guide svg {
+  color: #d4d4d8;
+}
+
+.dark .capture-guide-divider {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.dark .capture-guide kbd {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
+.dark .capture-guide-cancel {
+  color: #a1a1aa;
 }
 
 .capture-error {

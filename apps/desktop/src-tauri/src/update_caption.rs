@@ -525,10 +525,7 @@ unsafe extern "system" fn button_proc(
         }
         let action = &*(ptr as *const CaptionAction);
         match message {
-            WM_SETTEXT => {
-                let _ = DefWindowProcW(hwnd, message, w, l);
-                return LRESULT(1);
-            }
+            WM_SETTEXT => return LRESULT(1),
             WM_TIMER if w.0 == ANIMATION_TIMER => {
                 action.frame.set(action.frame.get().wrapping_add(1));
                 let _ = InvalidateRect(hwnd, None, false);
@@ -849,11 +846,19 @@ unsafe fn update(
         let Some(action) = state(hwnd) else {
             return;
         };
-        action.visible.set(visible);
         let enabled = enabled && mode != CaptionMode::Downloading;
+        let progress = progress.map(|n| n.min(99));
+        if action.visible.get() == visible
+            && action.enabled.get() == enabled
+            && action.mode.get() == mode
+            && action.progress.get() == progress
+        {
+            return;
+        }
+        action.visible.set(visible);
         action.enabled.set(enabled);
         action.mode.set(mode);
-        action.progress.set(progress.map(|n| n.min(99)));
+        action.progress.set(progress);
         let label = caption_label(mode, progress, action.english.get());
         let label: Vec<u16> = label.encode_utf16().chain(Some(0)).collect();
         let _ = SetWindowTextW(action.button.get(), windows::core::PCWSTR(label.as_ptr()));
@@ -875,12 +880,16 @@ pub fn refresh(raw: *mut std::ffi::c_void, caption: u32, text: u32) {
     unsafe {
         let owner = HWND(raw);
         if let Some(action) = state(owner) {
-            action.caption.set(caption.min(0xffffff));
-            action.text.set(text.min(0xffffff));
+            let cap = caption.min(0xffffff);
+            let txt = text.min(0xffffff);
+            if action.caption.get() == cap && action.text.get() == txt {
+                return;
+            }
+            action.caption.set(cap);
+            action.text.set(txt);
             let button = action.button.get();
-            if !button.0.is_null() {
+            if !button.0.is_null() && action.visible.get() {
                 let _ = InvalidateRect(button, None, false);
-                let _ = UpdateWindow(button);
             }
         }
     }
