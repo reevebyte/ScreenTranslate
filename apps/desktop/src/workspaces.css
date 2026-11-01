@@ -4,14 +4,16 @@
 }
 
 .navigation-rail {
+  position: relative;
   width: max(152px,10.857143rem);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  padding: 15px 8px 10px;
+  padding: 15px 8px 60px;
   border-right: 0;
   background: var(--sidebar);
   overflow: hidden;
+  contain: layout;
   transition: width var(--motion-sidebar) var(--ease);
 }
 
@@ -27,16 +29,14 @@
 }
 
 .rail-bottom {
-  position: relative;
-  margin-top: auto;
+  position: absolute;
+  bottom: 10px;
+  left: 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   align-items: flex-start;
-  width: 100%;
   flex-shrink: 0;
-  transform: translateZ(0);
-  backface-visibility: hidden;
 }
 
 .rail-link {
@@ -93,8 +93,6 @@
   border-radius: var(--radius-pill);
   color: var(--secondary);
   flex-shrink: 0;
-  transform: translateZ(0);
-  backface-visibility: hidden;
 }
 
 .sidebar-toggle > svg {
@@ -317,25 +315,6 @@
   max-width: 32em;
 }
 
-.workspace-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-  gap: 12px;
-  min-height: max(44px,3.142857rem);
-  padding-top: 10px;
-}
-
-.footer-actions {
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.footer-actions > .button-default {
-  min-width: 80px;
-}
 
 .job-indicator {
   display: inline-flex;
@@ -487,10 +466,6 @@
   max-width: 48%;
 }
 
-.preference-value {
-  color: var(--secondary);
-  text-align: right;
-}
 
 .appearance-themes {
   display: grid;
@@ -688,11 +663,6 @@
   white-space: nowrap;
 }
 
-.label-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
 
 .secret-field {
   display: flex;
@@ -825,12 +795,6 @@
   cursor: pointer;
 }
 
-.settings-more { margin-top:10px; color:var(--secondary); }
-.settings-more > summary { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:var(--control-height); padding:8px 4px; list-style:none; cursor:pointer; border-radius:var(--radius-control); }
-.settings-more > summary::-webkit-details-marker { display:none; }
-.settings-more > summary svg { transition:transform var(--motion-fast) var(--ease); }
-.settings-more[open] > summary svg { transform:rotate(180deg); }
-.settings-more > .preference-card { margin-top:8px; color:var(--foreground); }
 .settings-panel.about-panel {
   display: flex;
   flex-direction: column;

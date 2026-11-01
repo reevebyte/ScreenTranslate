@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '$lib/i18n.svelte';
   import { onMount, tick } from 'svelte';
-  import { ScanLine, X, LoaderCircle } from '$lib/icons';
+  import { ScanLine } from '$lib/icons';
   import { call } from '$lib/api';
   import { frameUrl, errorMessage } from '$lib/utils';
   import type { FrameMetadata, Rect } from '$lib/generated';
