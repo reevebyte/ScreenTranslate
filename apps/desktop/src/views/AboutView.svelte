@@ -21,9 +21,9 @@
       {:else if app.data?.updaterReady}<Button variant="outline" size="sm" disabled={waiting} onclick={()=>updates.version && ['available','error'].includes(updates.stage) ? downloadUpdate() : checkUpdate(true)}>{#if waiting}<LoaderCircle size={15} class="spin"/>{:else}<RefreshCw size={15}/>{/if}{updates.stage === 'downloading'?t('下载中…'):updates.version && ['available','error'].includes(updates.stage)?t('下载更新'):updates.stage === 'checking'?t('检查中…'):t('检查更新')}</Button>
       {:else}<Button variant="outline" size="sm" onclick={()=>act(call('open_help',{topic:'releases'}))}>{t('查看发布')}<ArrowUpRight size={15}/></Button>{/if}
     </div>
-    {#if updates.error || status || (updates.stage==='ready' && blockReason)}
+    {#if updates.error || (status && updates.stage !== 'downloading') || (updates.stage==='ready' && blockReason)}
       <div class="about-update-status-slot">
-        {#if updates.error}<p class="about-update-status error-text" role="alert">{updates.error}</p>{:else if status}<p class="about-update-status" role="status">{#if updates.stage==='ready'}<Check size={15}/>{/if}{status}</p>{/if}
+        {#if updates.error}<p class="about-update-status error-text" role="alert">{updates.error}</p>{:else if status && updates.stage !== 'downloading'}<p class="about-update-status" role="status">{#if updates.stage==='ready'}<Check size={15}/>{/if}{status}</p>{/if}
         {#if updates.stage==='ready' && blockReason}<p class="about-update-status" role="status">{blockReason}</p>{/if}
       </div>
     {/if}
@@ -35,6 +35,14 @@
     {#if onwelcome}<button class="about-resource" onclick={onwelcome}><span class="about-resource-icon"><Keyboard size={17}/></span><span>{t('使用指南')}</span><ArrowUpRight size={16}/></button>{/if}
   </div>
 </div>
+{#if updates.stage === 'downloading'}
+  <div class="center-notice-backdrop pointer-events-none" role="presentation">
+    <div class="center-notice" role="status" aria-live="polite">
+      <span class="center-notice-icon info"><LoaderCircle size={16} class="spin"/></span>
+      <span>{t('正在下载 {0}', updates.progress === null ? '…' : updates.progress + '%')}</span>
+    </div>
+  </div>
+{/if}
 {#if updates.upToDateNotice}
   <div class="center-notice-backdrop" role="presentation" onclick={() => updates.upToDateNotice = false}>
     <div class="center-notice" role="status" aria-live="polite">

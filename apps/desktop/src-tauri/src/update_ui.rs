@@ -4,7 +4,6 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow, menu::MenuItem};
 pub struct TrayItems {
     pub capture: MenuItem<tauri::Wry>,
     pub quick: MenuItem<tauri::Wry>,
-    pub toggle: MenuItem<tauri::Wry>,
     pub main: MenuItem<tauri::Wry>,
     pub update: MenuItem<tauri::Wry>,
     pub quit: MenuItem<tauri::Wry>,
@@ -119,14 +118,6 @@ pub async fn set_tray_update(
                     "Quick translate"
                 } else {
                     "快速文字翻译"
-                })
-                .map_err(|e| e.to_string())?;
-            items
-                .toggle
-                .set_text(if english {
-                    "Hide / show"
-                } else {
-                    "显示 / 隐藏译文"
                 })
                 .map_err(|e| e.to_string())?;
             items
