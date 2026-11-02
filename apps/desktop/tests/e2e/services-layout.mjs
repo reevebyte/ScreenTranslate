@@ -43,6 +43,17 @@ describe('service configuration through native IPC',()=>{
     await expect($('#provider-model')).toHaveValue('manually-entered');
     await settleSelection();await browser.saveScreenshot(resolve(directory,'services-dark.png'));
   });
+  it('keeps the API key focus ring uniform in both themes',async()=>{
+    for(const theme of ['light','dark']) {
+      await $('[aria-label="设置"]').click();await $('[role="tab"]=外观').click();
+      await $(`button=${theme==='dark'?'深色':'浅色'}`).click();
+      await $('[aria-label="服务中心"]').click();await $('[role="tab"]=翻译接口').click();
+      await $('[aria-label="OpenAI 兼容"]').click();await $('#provider-secret').click();
+      const style=await browser.execute(()=>{const s=getComputedStyle(document.querySelector('.secret-field'));return {border:s.borderTopWidth,shadow:s.boxShadow};});
+      expect(style.border).toBe('1px');expect(style.shadow).not.toBe('none');expect(style.shadow).not.toContain('inset');
+      await browser.saveScreenshot(resolve(directory,`secret-focus-${theme}.png`));
+    }
+  });
   it('keeps the service picker and fixed actions usable at 600 by 400 with 150 percent type',async()=>{
     await $('[aria-label="设置"]').click();await $('[role="tab"]=外观').click();
     for(let i=0;i<10;i++)await $('[aria-label="增大界面字号"]').click();
