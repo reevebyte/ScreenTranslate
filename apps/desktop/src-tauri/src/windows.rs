@@ -127,6 +127,9 @@ pub fn selection_presented(window: &tauri::WebviewWindow) {
 }
 
 fn disable_transitions(window: &tauri::WebviewWindow) {
+    if window.label() == "main" {
+        return;
+    }
     #[cfg(windows)]
     if let Ok(handle) = window.hwnd() {
         use windows::Win32::Graphics::Dwm::{
@@ -210,56 +213,6 @@ pub fn apply_theme(app: &AppHandle, theme: screentrans_core::config::Theme) {
 }
 
 #[cfg(windows)]
-const MAIN_WINDOW_SUBCLASS_ID: usize = 0x5354_0001;
-
-#[cfg(windows)]
-unsafe extern "system" fn main_window_subclass_proc(
-    hwnd: windows::Win32::Foundation::HWND,
-    message: u32,
-    w: windows::Win32::Foundation::WPARAM,
-    l: windows::Win32::Foundation::LPARAM,
-    id: usize,
-    _ptr: usize,
-) -> windows::Win32::Foundation::LRESULT {
-    use windows::Win32::{
-        Foundation::LRESULT,
-        UI::{
-            Shell::{DefSubclassProc, RemoveWindowSubclass},
-            WindowsAndMessaging::{
-                SWP_NOCOPYBITS, SWP_NOSIZE, WINDOWPOS, WM_ERASEBKGND, WM_NCDESTROY,
-                WM_WINDOWPOSCHANGING,
-            },
-        },
-    };
-    unsafe {
-        match message {
-            WM_NCDESTROY => {
-                let _ = RemoveWindowSubclass(hwnd, Some(main_window_subclass_proc), id);
-                return DefSubclassProc(hwnd, message, w, l);
-            }
-            WM_WINDOWPOSCHANGING => {
-                if l.0 != 0 {
-                    let pos = &mut *(l.0 as *mut WINDOWPOS);
-                    if (pos.flags & SWP_NOSIZE).0 == 0 {
-                        // Suppress Windows GDI BitBlt copying of old client bits during resize.
-                        // When resizing from top or left borders, Windows default BitBlt shifts
-                        // the client area by (dx, dy) before DirectComposition / WebView2 finishes
-                        // rasterizing the new viewport, causing bottom- and right-anchored elements
-                        // to jump and twitch. Setting SWP_NOCOPYBITS lets WebView2 present directly
-                        // without intermediate blit displacement.
-                        pos.flags |= SWP_NOCOPYBITS;
-                    }
-                }
-                return DefSubclassProc(hwnd, message, w, l);
-            }
-            WM_ERASEBKGND => return LRESULT(1),
-            _ => {}
-        }
-        DefSubclassProc(hwnd, message, w, l)
-    }
-}
-
-#[cfg(windows)]
 pub fn caption_palette(theme: screentrans_core::config::Theme) -> (bool, u32, u32) {
     let dark = match theme {
         screentrans_core::config::Theme::Dark => true,
@@ -271,15 +224,25 @@ pub fn caption_palette(theme: screentrans_core::config::Theme) -> (bool, u32, u3
     (dark, background, text)
 }
 
-#[cfg(windows)]
-fn main_background(theme: screentrans_core::config::Theme) -> tauri::window::Color {
-    let (_, background, _) = caption_palette(theme);
-    tauri::window::Color(
-        (background & 0xff) as u8,
-        ((background >> 8) & 0xff) as u8,
-        ((background >> 16) & 0xff) as u8,
-        255,
-    )
+pub fn theme_background_color(theme: screentrans_core::config::Theme) -> tauri::window::Color {
+    #[cfg(windows)]
+    {
+        let (dark, _, _) = caption_palette(theme);
+        if dark {
+            tauri::window::Color(0x1d, 0x1c, 0x20, 255)
+        } else {
+            tauri::window::Color(0xf0, 0xee, 0xf1, 255)
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let dark = matches!(theme, screentrans_core::config::Theme::Dark);
+        if dark {
+            tauri::window::Color(0x1d, 0x1c, 0x20, 255)
+        } else {
+            tauri::window::Color(0xf0, 0xee, 0xf1, 255)
+        }
+    }
 }
 
 fn caption_color(window: &tauri::WebviewWindow, theme: screentrans_core::config::Theme) {
@@ -290,14 +253,24 @@ fn caption_color(window: &tauri::WebviewWindow, theme: screentrans_core::config:
             DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
             DwmSetWindowAttribute,
         };
+        use windows::Win32::Graphics::Gdi::{CreateSolidBrush, DeleteObject, HBRUSH};
+        use windows::Win32::UI::WindowsAndMessaging::{GCLP_HBRBACKGROUND, SetClassLongPtrW};
         let (dark, background, text) = caption_palette(theme);
         unsafe {
             let hwnd = windows::Win32::Foundation::HWND(handle.0);
             if window.label() == "main" {
-                // Fill newly exposed client pixels with the document's theme while
-                // WebView2 renders its next frame during live resizing.
-                let _ = window.set_background_color(Some(main_background(theme)));
                 crate::update_caption::refresh(handle.0, background, text);
+                let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(background));
+                let old = SetClassLongPtrW(hwnd, GCLP_HBRBACKGROUND, brush.0 as isize);
+                if old != 0 {
+                    let _ = DeleteObject(HBRUSH(old as *mut _));
+                }
+                let bg_color = if dark {
+                    tauri::window::Color(0x1d, 0x1c, 0x20, 255)
+                } else {
+                    tauri::window::Color(0xf0, 0xee, 0xf1, 255)
+                };
+                let _ = window.set_background_color(Some(bg_color));
             }
             let immersive = i32::from(dark);
             let _ = DwmSetWindowAttribute(
@@ -617,7 +590,8 @@ pub(crate) fn builder<'a>(
     query: &str,
 ) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
     lock(&app.state::<AppState>().window_lifecycle).forget(label);
-    WebviewWindowBuilder::new(
+    let theme = lock(&app.state::<AppState>().config).appearance.theme;
+    let mut builder = WebviewWindowBuilder::new(
         app,
         label,
         WebviewUrl::App(format!("index.html?window={query}").into()),
@@ -627,9 +601,7 @@ pub(crate) fn builder<'a>(
         "result-tools" => "ScreenTranslate · 工具条",
         _ => "ScreenTranslate",
     })
-    .theme(native_theme(
-        lock(&app.state::<AppState>().config).appearance.theme,
-    ))
+    .theme(native_theme(theme))
     .visible(false)
     .on_navigation(|url| {
         url.scheme() == "tauri"
@@ -637,35 +609,24 @@ pub(crate) fn builder<'a>(
                 url.host_str(),
                 Some("tauri.localhost" | "127.0.0.1" | "localhost")
             )
-    })
+    });
+    if label == "main" {
+        builder = builder.background_color(theme_background_color(theme));
+    }
+    builder
 }
 
 pub fn show_main(app: &AppHandle) -> Result<()> {
     let theme = lock(&app.state::<AppState>().config).appearance.theme;
     let window = match app.get_webview_window("main") {
         Some(window) => window,
-        None => {
-            let main = builder(app, "main", "main")
-                .inner_size(680.0, 520.0)
-                .min_inner_size(680.0, 520.0)
-                .center();
-            #[cfg(windows)]
-            let main = main.background_color(main_background(theme));
-            main.build().map_err(|_| window_error())?
-        }
+        None => builder(app, "main", "main")
+            .inner_size(680.0, 520.0)
+            .min_inner_size(680.0, 520.0)
+            .center()
+            .build()
+            .map_err(|_| window_error())?,
     };
-    #[cfg(windows)]
-    if let Ok(handle) = window.hwnd() {
-        use windows::Win32::UI::Shell::SetWindowSubclass;
-        unsafe {
-            let _ = SetWindowSubclass(
-                windows::Win32::Foundation::HWND(handle.0),
-                Some(main_window_subclass_proc),
-                MAIN_WINDOW_SUBCLASS_ID,
-                0,
-            );
-        }
-    }
     caption_color(&window, theme);
     request_show(&window)
 }

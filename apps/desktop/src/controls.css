@@ -9,6 +9,14 @@ html, body, #app {
   overflow: hidden;
 }
 
+html {
+  background: var(--background);
+}
+
+html[data-transparent="true"] {
+  background: transparent;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

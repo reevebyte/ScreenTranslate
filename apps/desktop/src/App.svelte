@@ -95,7 +95,6 @@
     </aside>
     <main class="main-content" aria-label={nav.find(item => item.route === app.route)?.label || t("组件")}>
       <div class="page-container" class:settings-page={app.route === 'settings'}>
-        {#key app.route}
         <div class="page-body">
           {#if app.route === 'shortcuts'}<ShortcutsView/>
           {:else if app.route === 'translate'}<TextView/>
@@ -104,7 +103,6 @@
           {:else if app.route === 'settings'}<SettingsView onwelcome={() => welcome = true}/>
           {:else if import.meta.env.DEV}{#await import('./views/ComponentsView.svelte') then module}<module.default/>{/await}{/if}
         </div>
-        {/key}
       </div>
       {#if app.data?.capabilities.platform !== 'windows' && updates.stage === 'available' && updates.version !== updates.dismissed}
         <aside class="update-banner" aria-label={t('软件更新')}><Download size={18}/><span>{t('发现新版本 {0}',updates.version)}</span><Button variant="outline" size="sm" onclick={()=>{app.route='settings';app.settingsTab='about';updates.dismissed=updates.version;}}>{t('查看')}</Button><button class="icon-button" aria-label={t('稍后')} onclick={()=>updates.dismissed=updates.version}><X size={16}/></button></aside>

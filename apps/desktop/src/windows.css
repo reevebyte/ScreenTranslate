@@ -349,7 +349,7 @@
   flex-shrink: 0;
   position: relative;
   overflow: hidden;
-  background: #fff;
+  background: transparent;
 }
 
 .image-canvas > img {

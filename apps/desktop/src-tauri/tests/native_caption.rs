@@ -97,7 +97,7 @@ mod caption {
                 .unwrap();
                 let (flags, actual_client) = calculate_client();
                 assert_eq!(actual_client, expected_client);
-                assert_eq!(flags, WVR_REDRAW as isize);
+                assert_eq!(flags, 0);
                 let button = state(hwnd).unwrap().button.get();
                 let mut before = RECT::default();
                 GetClientRect(hwnd, &mut before).unwrap();

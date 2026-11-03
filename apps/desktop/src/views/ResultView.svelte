@@ -5,7 +5,7 @@
   import { prefersReducedMotion } from 'svelte/motion';
   import { extractedText, screenshotNotice } from '$lib/screenshot-feedback';
   import { Dialog, Tabs } from 'bits-ui';
-  import { onMount, onDestroy, tick } from 'svelte';
+import { onMount, onDestroy, tick, untrack } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { desktop } from '$lib/api';
@@ -35,6 +35,12 @@
   let comparePosition = $state(50);
   let cleanReady = $state('');
   let originalReady = $state('');
+  $effect.pre(() => {
+    if (!floating) {
+      if (frame?.cleanId && !cleanReady) cleanReady = frame.cleanId;
+      if (frame?.id && !originalReady) originalReady = frame.id;
+    }
+  });
   let layoutReady = $state(!desktop);
   let imageError = $state(false);
   let showOriginal = $derived(original || holdingOriginal);
@@ -59,8 +65,8 @@
   const copyTimers: Partial<Record<'source' | 'translation', ReturnType<typeof setTimeout>>> = {};
   onDestroy(() => { clearTimeout(copyTimers.source); clearTimeout(copyTimers.translation); });
   let presented = '';
-  let width = $state(800);
-  let height = $state(440);
+  let width = $state(typeof window !== 'undefined' ? Math.max(300, window.innerWidth - 180) : 800);
+  let height = $state(typeof window !== 'undefined' ? Math.max(200, window.innerHeight - 80) : 440);
   let imageWidth = $state(0);
   let imageHeight = $state(0);
   let imageDragging = $state(false);
@@ -128,13 +134,14 @@
       void revealReady();
     } else if (desktop && floating) layoutReady = false;
   });
-  let previousFrameId = '';
+  let previousFrameId = untrack(() => app.data?.visual?.frame?.id ?? '');
   $effect(() => {
     if (frame && frame.id !== previousFrameId) {
       previousFrameId = frame.id;
       original = false;
       holdingOriginal = false;
-      cleanReady = '';
+      cleanReady = floating ? '' : (frame.cleanId ?? '');
+      originalReady = floating ? '' : frame.id;
       imageError = false;
       selectedId = '';
       notice = null;

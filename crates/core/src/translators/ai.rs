@@ -19,19 +19,41 @@ pub async fn translate(
     let base = backend.options.base_url.trim_end_matches('/');
     let is_anthropic = backend.provider == ProviderId::Anthropic;
     let request = if is_anthropic {
-        backend
+        let base = base.strip_suffix("/messages").unwrap_or(base);
+        let mut req = backend
             .client
             .post(format!("{base}/messages"))
             .header("x-api-key", &backend.key)
-            .header("anthropic-version", "2023-06-01")
-            .json(
-                &json!({ "model": backend.options.model, "max_tokens": 8192, "system": system,
-                "messages": [{ "role": "user", "content": user }] }),
-            )
+            .header("anthropic-version", "2023-06-01");
+        if base.to_lowercase().contains("opencode") {
+            let session = format!(
+                "screentranslate-{:x}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            );
+            req = req.header("x-opencode-session", session);
+        }
+        req.json(
+            &json!({ "model": backend.options.model, "max_tokens": 8192, "system": system,
+            "messages": [{ "role": "user", "content": user }] }),
+        )
     } else {
+        let base = base.strip_suffix("/chat/completions").unwrap_or(base);
         let mut request = backend.client.post(format!("{base}/chat/completions"));
         if !backend.key.is_empty() {
             request = request.bearer_auth(&backend.key);
+        }
+        if base.to_lowercase().contains("opencode") {
+            let session = format!(
+                "screentranslate-{:x}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            );
+            request = request.header("x-opencode-session", session);
         }
         request.json(&json!({ "model": backend.options.model, "stream": false,
             "messages": [{"role":"system","content":system},{"role":"user","content":user}] }))

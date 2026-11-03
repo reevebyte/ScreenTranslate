@@ -646,7 +646,7 @@ pub fn inherit_capture(owner: HWND) -> Result<(), String> {
             }
             Ok(())
         })();
-        if result.is_err() {
+        if result.is_err() && IsWindowVisible(button).as_bool() {
             let _ = ShowWindow(button, SW_HIDE);
         }
         result.map_err(str::to_string)
@@ -665,7 +665,9 @@ unsafe fn sync(owner: HWND, action: &CaptionAction) {
             }
             let _ = KillTimer(button, ANIMATION_TIMER);
             action.animating.set(false);
-            let _ = ShowWindow(button, SW_HIDE);
+            if IsWindowVisible(button).as_bool() {
+                let _ = ShowWindow(button, SW_HIDE);
+            }
             return;
         }
         let Some(rect) = bounds(owner) else {
@@ -674,7 +676,9 @@ unsafe fn sync(owner: HWND, action: &CaptionAction) {
             }
             let _ = KillTimer(button, ANIMATION_TIMER);
             action.animating.set(false);
-            let _ = ShowWindow(button, SW_HIDE);
+            if IsWindowVisible(button).as_bool() {
+                let _ = ShowWindow(button, SW_HIDE);
+            }
             return;
         };
         if inherit_capture(owner).is_err() {
@@ -753,11 +757,7 @@ unsafe extern "system" fn caption_proc(
             return result;
         }
         let result = DefSubclassProc(hwnd, message, w, l);
-        // Keep the native client rectangle calculated by DefSubclassProc, but
-        // do not copy old right/bottom-edge pixels into the resized WebView.
-        if message == WM_NCCALCSIZE && w.0 != 0 {
-            return LRESULT(WVR_REDRAW as isize);
-        }
+
         if matches!(
             message,
             WM_WINDOWPOSCHANGED | WM_SIZE | WM_DPICHANGED | WM_SHOWWINDOW | WM_THEMECHANGED

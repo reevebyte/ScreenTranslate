@@ -44,7 +44,12 @@
     if(value==='nvidia'){selected='nvidia';return;}
     if(value==='custom')return;
     selected='openai';
-    const presets:Record<string,[string,string]>={openai:['https://api.openai.com/v1','gpt-4.1-mini'],deepseek:['https://api.deepseek.com/v1','deepseek-chat'],ollama:['http://localhost:11434/v1','']};
+    const presets:Record<string,[string,string]>={
+      opencode:['https://opencode.ai/zen/go/v1','claude-3-5-sonnet'],
+      openai:['https://api.openai.com/v1','gpt-4.1-mini'],
+      deepseek:['https://api.deepseek.com/v1','deepseek-chat'],
+      ollama:['http://localhost:11434/v1','']
+    };
     const chosen=presets[value];if(chosen){draft.providers.openai!.baseUrl=chosen[0];draft.providers.openai!.model=chosen[1];}
   }
   async function test(){
@@ -78,7 +83,7 @@
         {#if ai}<label class="field-label" for="provider-model">{t("模型")}</label>{#if selected==='anthropic'}<div class="model-picker model-manual"><span class="model-input-brand"><ProviderIcon brand={selectedBrand}/></span><input id="provider-model" class="field" bind:value={options.model} placeholder={t("输入模型 ID")} spellcheck="false"/></div>{:else}<ModelPicker bind:value={options.model} {identity} brand={selectedBrand} load={fetchModels}/>{/if}{/if}
         <details class="service-advanced"><summary><ChevronDown size={15}/><span>{t("接口设置")}</span></summary>
           <div class="service-advanced-body">
-{#if selected==='openai'}<label class="field-label" for="provider-preset">{t("服务预设")}</label><Choice id="provider-preset" class="field" icons={{custom:"custom",openai:"openai",deepseek:"deepseek",ollama:"ollama"}} label={t("服务预设")} value={presetName} options={[["custom",t("自定义")],["openai","OpenAI"],["deepseek","DeepSeek"],["ollama",t("Ollama 本地")]]} onchange={value=>void preset(value)}/>{/if}
+{#if selected==='openai'}<label class="field-label" for="provider-preset">{t("服务预设")}</label><Choice id="provider-preset" class="field" icons={{custom:"custom",opencode:"custom",openai:"openai",deepseek:"deepseek",ollama:"ollama"}} label={t("服务预设")} value={presetName} options={[["custom",t("自定义")],["opencode","OpenCode Go"],["openai","OpenAI"],["deepseek","DeepSeek"],["ollama",t("Ollama 本地")]]} onchange={value=>void preset(value)}/>{/if}
           <label class="field-label" for="provider-endpoint">{t("服务地址")}</label><input id="provider-endpoint" class="field" bind:value={options.baseUrl} placeholder="https://…" spellcheck="false"/>
           {#if selected==='microsoft'}<label class="field-label" for="provider-region">Region</label><input id="provider-region" class="field" bind:value={options.region} placeholder={t("例如 eastasia")} spellcheck="false"/>{/if}
           {#if selected==='deepl'}<label class="checkbox-label"><input type="checkbox" bind:checked={options.freePlan} onchange={event=>{options.freePlan=event.currentTarget.checked;options.baseUrl=event.currentTarget.checked?'https://api-free.deepl.com/v2':'https://api.deepl.com/v2';}}/>{t("使用 DeepL API Free")}</label>{/if}

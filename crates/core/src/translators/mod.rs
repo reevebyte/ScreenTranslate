@@ -55,12 +55,22 @@ impl HttpTranslator {
                 "当前服务不提供兼容的模型列表",
             ));
         }
-        let mut request = self.client.get(format!(
-            "{}/models",
-            self.options.base_url.trim_end_matches('/')
-        ));
+        let base = self.options.base_url.trim_end_matches('/');
+        let base = base.strip_suffix("/chat/completions").unwrap_or(base);
+        let base = base.strip_suffix("/models").unwrap_or(base);
+        let mut request = self.client.get(format!("{base}/models"));
         if !self.key.is_empty() {
             request = request.bearer_auth(&self.key);
+        }
+        if base.to_lowercase().contains("opencode") {
+            let session = format!(
+                "screentranslate-{:x}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            );
+            request = request.header("x-opencode-session", session);
         }
         let value = json_response(request, &stop).await?;
         Ok(value
@@ -179,20 +189,36 @@ pub(crate) async fn response_bytes(
     mut response: Response,
     stop: &CancellationToken,
 ) -> Result<Vec<u8>> {
-    let code = match response.status().as_u16() {
-        401 | 403 => Some((
-            ErrorCode::Authentication,
-            "服务拒绝了请求，请检查密钥、区域或账户权限",
-        )),
-        429 => Some((ErrorCode::RateLimited, "服务请求过于频繁，请稍后重试")),
-        200..=299 => None,
-        _ => Some((
-            ErrorCode::Network,
-            "服务暂时无法处理请求，请检查配置或稍后重试",
-        )),
-    };
-    if let Some((code, message)) = code {
-        return Err(AppError::new(code, message).action("providers"));
+    let status = response.status();
+    if !status.is_success() {
+        let code = match status.as_u16() {
+            401 | 403 => ErrorCode::Authentication,
+            429 => ErrorCode::RateLimited,
+            _ => ErrorCode::Network,
+        };
+        let fallback_msg = match code {
+            ErrorCode::Authentication => "服务拒绝了请求，请检查密钥、区域或账户权限",
+            ErrorCode::RateLimited => "服务请求过于频繁，请稍后重试",
+            _ => "服务暂时无法处理请求，请检查配置或稍后重试",
+        };
+        let mut err_detail = None;
+        if code == ErrorCode::Network {
+            if let Ok(bytes) = response.bytes().await {
+                if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    err_detail = value
+                        .pointer("/error/message")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| value.get("message").and_then(|v| v.as_str()))
+                        .map(|s| s.trim().to_string());
+                }
+            }
+        }
+        let msg = if let Some(detail) = err_detail.filter(|d| !d.is_empty()) {
+            format!("{fallback_msg} ({detail})")
+        } else {
+            fallback_msg.to_string()
+        };
+        return Err(AppError::new(code, msg).action("providers"));
     }
     const LIMIT: usize = 4 * 1024 * 1024;
     if response

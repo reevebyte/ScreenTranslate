@@ -2,7 +2,13 @@ export type ProviderBrand = 'openai'|'claude'|'google'|'googlecloud'|'azure'|'mi
 export function providerBrand(id:string,endpoint=''):ProviderBrand {
   const known:Record<string,ProviderBrand>={google_free:'google',google:'googlecloud',anthropic:'claude',microsoft:'microsoft',microsoft_free:'microsoft',bing_free:'bing',tencent_free:'tencent',yandex_free:'yandex',iciba_free:'iciba',nvidia:'nvidia',deepl:'deepl',azure:'azure',youdao:'youdao'};
   if(id!=='openai')return known[id]??'custom';
-  try { const host=new URL(endpoint).hostname.toLowerCase();if(host==='api.deepseek.com')return 'deepseek';if(host.endsWith('.openai.azure.com'))return 'azure';if(host==='localhost'||host==='127.0.0.1')return new URL(endpoint).port==='11434'?'ollama':'custom'; } catch { /* Incomplete drafts retain the protocol brand. */ }
+  try {
+    const host=new URL(endpoint).hostname.toLowerCase();
+    if(host==='api.deepseek.com')return 'deepseek';
+    if(host.endsWith('.openai.azure.com'))return 'azure';
+    if(host==='localhost'||host==='127.0.0.1')return new URL(endpoint).port==='11434'?'ollama':'custom';
+    if(host.includes('opencode'))return 'custom';
+  } catch { /* Incomplete drafts retain the protocol brand. */ }
   return 'openai';
 }
 export function modelBrand(model:string,fallback:ProviderBrand):ProviderBrand {
