@@ -16,6 +16,7 @@ unsafe extern "C" {
         length: usize,
         languages: *const std::ffi::c_char,
     ) -> *mut std::ffi::c_char;
+    fn st_activate_app();
     fn st_free(pointer: *mut std::ffi::c_void);
 }
 
@@ -84,5 +85,11 @@ pub fn recognize(image: &RgbaImage, languages: &[String]) -> Result<Vec<OcrLine>
                 })
             })
             .collect()
+    }
+}
+
+pub fn activate_app() {
+    unsafe {
+        st_activate_app();
     }
 }

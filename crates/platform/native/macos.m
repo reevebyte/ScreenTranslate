@@ -92,3 +92,11 @@ char *st_recognize(const unsigned char *png, size_t length, const char *language
         return json ? strndup(json.bytes, json.length) : NULL;
     }
 }
+
+void st_activate_app(void) {
+    @autoreleasepool {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [NSApp activateIgnoringOtherApps:YES];
+        });
+    }
+}

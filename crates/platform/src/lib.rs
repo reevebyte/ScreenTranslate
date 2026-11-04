@@ -16,6 +16,11 @@ pub fn is_wayland() -> bool {
         && std::env::var("XDG_SESSION_TYPE").as_deref() != Ok("x11")
 }
 
+pub fn activate_app() {
+    #[cfg(target_os = "macos")]
+    macos::activate_app();
+}
+
 pub fn capabilities() -> PlatformCapabilities {
     let wayland = is_wayland();
     let mut notes = Vec::new();

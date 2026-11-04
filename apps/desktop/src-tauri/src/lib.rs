@@ -209,7 +209,10 @@ pub fn run() {
                 let _ = windows::toggle_quick(&handle);
             } else if !background {
                 windows::show_main(&handle)?;
+            } else {
+                let _ = windows::ensure_main(&handle);
             }
+            let _ = windows::ensure_quick(&handle);
             windows::reap_hidden_windows(handle);
             Ok(())
         });
@@ -234,9 +237,7 @@ fn handle_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
             api.prevent_exit();
         }
         #[cfg(target_os = "macos")]
-        tauri::RunEvent::Reopen {
-            ..
-        } => {
+        tauri::RunEvent::Reopen { .. } => {
             let _ = windows::show_main(app);
         }
         _ => {}

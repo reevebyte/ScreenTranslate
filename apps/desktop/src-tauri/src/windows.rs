@@ -55,6 +55,8 @@ fn reveal(window: &tauri::WebviewWindow) -> Result<()> {
     {
         let _ = window.set_focus();
     }
+    #[cfg(target_os = "macos")]
+    screentrans_platform::activate_app();
     Ok(())
 }
 
@@ -616,30 +618,24 @@ pub(crate) fn builder<'a>(
     builder
 }
 
-pub fn show_main(app: &AppHandle) -> Result<()> {
+pub fn ensure_main(app: &AppHandle) -> Result<tauri::WebviewWindow> {
+    if let Some(window) = app.get_webview_window("main") {
+        return Ok(window);
+    }
     let theme = lock(&app.state::<AppState>().config).appearance.theme;
-    let window = match app.get_webview_window("main") {
-        Some(window) => window,
-        None => builder(app, "main", "main")
-            .inner_size(680.0, 520.0)
-            .min_inner_size(680.0, 520.0)
-            .center()
-            .build()
-            .map_err(|_| window_error())?,
-    };
+    let window = builder(app, "main", "main")
+        .inner_size(680.0, 520.0)
+        .min_inner_size(680.0, 520.0)
+        .center()
+        .build()
+        .map_err(|_| window_error())?;
     caption_color(&window, theme);
-    request_show(&window)
+    Ok(window)
 }
 
-pub fn toggle_quick(app: &AppHandle) -> Result<()> {
+pub fn ensure_quick(app: &AppHandle) -> Result<tauri::WebviewWindow> {
     if let Some(window) = app.get_webview_window("quick") {
-        if window.is_visible().unwrap_or(false) {
-            window.hide().map_err(|_| window_error())?;
-        } else {
-            request_show(&window)?;
-            let _ = window.emit("focus-input", ());
-        }
-        return Ok(());
+        return Ok(window);
     }
     let window = builder(app, "quick", "quick")
         .inner_size(600.0, 320.0)
@@ -652,7 +648,25 @@ pub fn toggle_quick(app: &AppHandle) -> Result<()> {
         .center()
         .build()
         .map_err(|_| window_error())?;
+    Ok(window)
+}
+
+pub fn show_main(app: &AppHandle) -> Result<()> {
+    let window = ensure_main(app)?;
+    let theme = lock(&app.state::<AppState>().config).appearance.theme;
+    caption_color(&window, theme);
     request_show(&window)
+}
+
+pub fn toggle_quick(app: &AppHandle) -> Result<()> {
+    let window = ensure_quick(app)?;
+    if window.is_visible().unwrap_or(false) {
+        window.hide().map_err(|_| window_error())?;
+    } else {
+        request_show(&window)?;
+        let _ = window.emit("focus-input", ());
+    }
+    Ok(())
 }
 
 pub fn show_result(app: &AppHandle, frame: &FrameMetadata) -> Result<()> {
@@ -930,7 +944,8 @@ pub fn close_requested(window: &tauri::Window, api: &tauri::CloseRequestApi) {
     };
     match window.label() {
         "main"
-            if lock(&state.config).appearance.close_to_tray && lock(&state.capabilities).tray =>
+            if (cfg!(target_os = "macos") || lock(&state.config).appearance.close_to_tray)
+                && lock(&state.capabilities).tray =>
         {
             api.prevent_close();
             let _ = window.hide();
@@ -963,15 +978,10 @@ pub fn reap_hidden_windows(app: AppHandle) {
             timer.tick().await;
             let state = app.state::<AppState>();
             for (label, window) in app.webview_windows() {
-                if !matches!(label.as_str(), "main" | "quick" | "result" | "result-tools") {
+                if !matches!(label.as_str(), "result" | "result-tools") {
                     continue;
                 }
-                if (label == "main"
-                    && app
-                        .state::<crate::update_ui::UpdateUi>()
-                        .busy
-                        .load(std::sync::atomic::Ordering::Relaxed))
-                    || window.is_visible().unwrap_or(true)
+                if window.is_visible().unwrap_or(true)
                     || lock(&state.dirty_windows).contains(&label)
                     || !lock(&state.return_windows).is_empty()
                 {

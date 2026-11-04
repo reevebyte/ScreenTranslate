@@ -58,7 +58,10 @@
       if (desktop && !disposed && (mode === 'main' || mode === 'quick' || mode === 'result-tools' || app.fatal)) {
         await tick();
         await document.fonts?.ready;
-        await new Promise(resolve => requestAnimationFrame(resolve));
+        await Promise.race([
+          new Promise(resolve => requestAnimationFrame(resolve)),
+          new Promise(resolve => setTimeout(resolve, 60))
+        ]);
         if (!disposed) void call('window_ready', { frameId: null }).catch(() => {});
       }
     });
