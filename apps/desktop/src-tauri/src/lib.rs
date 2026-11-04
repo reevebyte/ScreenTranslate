@@ -223,14 +223,23 @@ pub fn run() {
         .run(handle_run_event);
 }
 
-fn handle_run_event(_app: &tauri::AppHandle, event: tauri::RunEvent) {
-    // Reaping the last hidden webview must leave tray and shortcut handlers alive.
-    // Explicit exit/restart requests carry a code and must still be honored.
-    if let tauri::RunEvent::ExitRequested {
-        code: None, api, ..
-    } = event
-    {
-        api.prevent_exit();
+fn handle_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
+    let _ = app;
+    match event {
+        // Reaping the last hidden webview must leave tray and shortcut handlers alive.
+        // Explicit exit/restart requests carry a code and must still be honored.
+        tauri::RunEvent::ExitRequested {
+            code: None, api, ..
+        } => {
+            api.prevent_exit();
+        }
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen {
+            ..
+        } => {
+            let _ = windows::show_main(app);
+        }
+        _ => {}
     }
 }
 
@@ -254,11 +263,10 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         update: version.clone(),
         quit: quit.clone(),
     });
-    let menu = Menu::with_items(app, &[&capture, &quick, &main, &separator, &version, &quit])?;
-    let mut tray = TrayIconBuilder::with_id("main-tray")
+    let menu = Menu::with_items(app, &[&main, &capture, &quick, &separator, &version, &quit])?;
+    let tray = TrayIconBuilder::with_id("main-tray")
         .tooltip("ScreenTranslate · 截图即翻译")
         .menu(&menu)
-        .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "update" => update_ui::request(app, "tray"),
             "main" => {
@@ -269,7 +277,12 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 app.exit(0);
             }
             id => shortcuts::dispatch(app, id),
-        })
+        });
+    #[cfg(target_os = "macos")]
+    let mut tray = tray.show_menu_on_left_click(true);
+    #[cfg(not(target_os = "macos"))]
+    let mut tray = tray
+        .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
             if matches!(
                 event,
