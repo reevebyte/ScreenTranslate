@@ -26,7 +26,7 @@ use state::{AppState, lock};
 use tauri::{
     Emitter, Manager,
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder},
+    tray::TrayIconBuilder,
 };
 
 pub fn run() {
@@ -288,8 +288,8 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             if matches!(
                 event,
                 tauri::tray::TrayIconEvent::Click {
-                    button: MouseButton::Left,
-                    button_state: MouseButtonState::Up,
+                    button: tauri::tray::MouseButton::Left,
+                    button_state: tauri::tray::MouseButtonState::Up,
                     ..
                 }
             ) {
