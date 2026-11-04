@@ -160,7 +160,8 @@ async function syncNativeTheme() {
 }
 let appearanceFrame = 0;
 export function applyAppearance(config: Config) {
-  const theme = config.appearance.theme;
+  const themeParam = new URLSearchParams(location.search).get('theme');
+  const theme = (themeParam === 'dark' || themeParam === 'light') ? themeParam : config.appearance.theme;
   const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   if (desktop && (new URLSearchParams(location.search).get('window') || 'main') === 'main') { desiredNativeTheme = theme; void syncNativeTheme(); }
   const root = document.documentElement;

@@ -49,7 +49,12 @@
     if (desktop) void listen<string>('navigate', ({ payload }) => { if (payload === 'ocr') { app.servicesTab = 'ocr'; app.route = 'providers'; } else if (nav.some(item => item.route === payload)) { if (payload === 'providers') app.servicesTab = 'translation'; app.route = payload as Route; } }).then(fn => { if (disposed) fn(); else navigateCleanup = fn; });
     void initialize().then(async fn => {
       if (disposed) fn(); else cleanup = fn;
-      if (import.meta.env.DEV && new URLSearchParams(location.search).has('gallery')) app.route = 'components';
+      const search = new URLSearchParams(location.search);
+      if (import.meta.env.DEV && search.has('gallery')) app.route = 'components';
+      const initialRoute = search.get('route');
+      if (initialRoute && nav.some(item => item.route === initialRoute)) app.route = initialRoute as Route;
+      const initialTab = search.get('tab');
+      if (initialTab) { app.settingsTab = initialTab; app.servicesTab = initialTab; }
       if (desktop && !disposed && (mode === 'main' || mode === 'quick' || mode === 'result-tools' || app.fatal)) {
         await tick();
         await document.fonts?.ready;
