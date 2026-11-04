@@ -17,6 +17,7 @@ unsafe extern "C" {
         languages: *const std::ffi::c_char,
     ) -> *mut std::ffi::c_char;
     fn st_activate_app();
+    fn st_hide_dock_icon();
     fn st_system_dark() -> bool;
     fn st_configure_window(window: *mut std::ffi::c_void, theme_mode: i32);
     fn st_free(pointer: *mut std::ffi::c_void);
@@ -98,6 +99,12 @@ pub fn recognize(image: &RgbaImage, languages: &[String]) -> Result<Vec<OcrLine>
 pub fn activate_app() {
     unsafe {
         st_activate_app();
+    }
+}
+
+pub fn hide_dock_icon() {
+    unsafe {
+        st_hide_dock_icon();
     }
 }
 

@@ -96,7 +96,16 @@ char *st_recognize(const unsigned char *png, size_t length, const char *language
 void st_activate_app(void) {
     @autoreleasepool {
         dispatch_async(dispatch_get_main_queue(), ^{
+            [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
             [NSApp activateIgnoringOtherApps:YES];
+        });
+    }
+}
+
+void st_hide_dock_icon(void) {
+    @autoreleasepool {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
         });
     }
 }

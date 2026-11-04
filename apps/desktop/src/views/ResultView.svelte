@@ -155,8 +155,8 @@ import { onMount, onDestroy, tick } from 'svelte';
         : 1
   );
 
-  let scaleX = $derived(floating && frame ? imageWidth / frame.width : scale);
-  let scaleY = $derived(floating && frame ? imageHeight / frame.height : scale);
+  let scaleX = $derived(floating && frame ? (imageWidth > 0 ? imageWidth / frame.width : (resultLayout?.imageWidth ? resultLayout.imageWidth / frame.width : scale)) : scale);
+  let scaleY = $derived(floating && frame ? (imageHeight > 0 ? imageHeight / frame.height : (resultLayout?.imageHeight ? resultLayout.imageHeight / frame.height : scale)) : scale);
   let contentWidth = $derived(frame ? frame.width * scaleX * (!floating && comparing ? 2 : 1) + (!floating && comparing ? 16 : 0) : 0);
   let contentHeight = $derived(frame ? frame.height * scaleY : 0);
   const handles = $derived([

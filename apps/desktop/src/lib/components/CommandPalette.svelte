@@ -4,6 +4,9 @@
   import { Search, ScanLine, Languages, ImagePlus, Settings2, PanelsTopLeft, Keyboard } from '$lib/icons';
   import { app, act, type Route } from '$lib/store.svelte';
   import { call } from '$lib/api';
+  import { formatHotkey } from '$lib/utils';
+
+  let isMac = $derived(app.data?.capabilities.platform === 'macos' || (typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent)));
 
   const actions = $derived([
     { label: t("截图翻译"), keywords: ['capture', t("截图")], icon: ScanLine, action: () => act(call('begin_capture', { monitor: null })), shortcut: app.data?.config.hotkeys.capture || '' },
@@ -32,7 +35,7 @@
             <Command.GroupHeading class="command-heading">{t("常用操作")}</Command.GroupHeading>
             {#each actions as action}
               <Command.Item value={action.label} keywords={action.keywords} onSelect={() => run(action.action)} class="command-item">
-                <span class="setting-row-icon" aria-hidden="true"><action.icon size={16}/></span><span>{action.label}</span>{#if action.shortcut}<small>{action.shortcut}</small>{/if}
+                <span class="setting-row-icon" aria-hidden="true"><action.icon size={16}/></span><span>{action.label}</span>{#if action.shortcut}<small>{formatHotkey(action.shortcut, isMac)}</small>{/if}
               </Command.Item>
             {/each}
           </Command.Group>

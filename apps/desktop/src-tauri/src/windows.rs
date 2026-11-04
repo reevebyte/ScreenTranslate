@@ -664,6 +664,8 @@ pub fn ensure_quick(app: &AppHandle) -> Result<tauri::WebviewWindow> {
 }
 
 pub fn show_main(app: &AppHandle) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    screentrans_platform::activate_app();
     let window = ensure_main(app)?;
     let theme = lock(&app.state::<AppState>().config).appearance.theme;
     caption_color(&window, theme);
@@ -734,8 +736,16 @@ pub fn show_result(app: &AppHandle, frame: &FrameMetadata) -> Result<()> {
     };
     let dpi = window.scale_factor().map_err(|_| window_error())?;
     if let Some(bounds) = frame.screen_bounds.filter(|_| overlay) {
-        layout.image_width = bounds.width / dpi;
-        layout.image_height = bounds.height / dpi;
+        #[cfg(target_os = "macos")]
+        {
+            layout.image_width = bounds.width;
+            layout.image_height = bounds.height;
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            layout.image_width = bounds.width / dpi;
+            layout.image_height = bounds.height / dpi;
+        }
     } else {
         let fit = (900.0 / frame.width as f64)
             .min(600.0 / frame.height as f64)
@@ -961,6 +971,8 @@ pub fn close_requested(window: &tauri::Window, api: &tauri::CloseRequestApi) {
         {
             api.prevent_close();
             let _ = window.hide();
+            #[cfg(target_os = "macos")]
+            screentrans_platform::hide_dock_icon();
         }
         "main" => {
             state.jobs.cancel_all();

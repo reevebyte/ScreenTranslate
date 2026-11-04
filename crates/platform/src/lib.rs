@@ -20,6 +20,10 @@ pub fn activate_app() {
     #[cfg(target_os = "macos")]
     macos::activate_app();
 }
+pub fn hide_dock_icon() {
+    #[cfg(target_os = "macos")]
+    macos::hide_dock_icon();
+}
 pub fn system_dark() -> bool {
     #[cfg(target_os = "macos")]
     return macos::system_dark();

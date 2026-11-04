@@ -5,7 +5,9 @@
   import { app, previewConfig, saveConfig, act } from '$lib/store.svelte';
   import { call } from '$lib/api';
   import { createAutosave } from '$lib/autosave';
+  import { formatHotkeyParts } from '$lib/utils';
   import type { Config } from '$lib/generated';
+  let isMac = $derived(app.data?.capabilities.platform === 'macos' || (typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent)));
   let draft = $state<Config>(structuredClone($state.snapshot(app.data!.config)));
   let last = untrack(() => JSON.stringify(draft));
   const writer = createAutosave<Config>(value => saveConfig(value, { quiet: true }));
@@ -29,7 +31,7 @@
   <div class="shortcut-cluster"><div class="shortcut-actions shortcut-grid">{#each actions as [key,label,Icon,command]}
     <div class="shortcut-action" class:primary={key === 'capture'}>
       <button class="shortcut-launch" aria-label={label} onclick={() => act(call(command, command === 'begin_capture' ? { monitor: null } : {}))}><span class="shortcut-symbol"><Icon size={25}/></span><span>{label}</span></button>
-      <div class="shortcut-binding"><div class="shortcut-chord" aria-hidden="true">{#if draft.hotkeys[key]}{#each draft.hotkeys[key].split('+') as part}<kbd>{part}</kbd>{/each}{:else}<span>{t("设置快捷键")}</span>{/if}</div><input class="shortcut-key" aria-label={t("{0}快捷键",label)} title={t("点击后按组合键，Backspace 清除")} readonly value={draft.hotkeys[key]} onkeydown={event => record(event,key)}/></div>
+      <div class="shortcut-binding"><div class="shortcut-chord" aria-hidden="true">{#if draft.hotkeys[key]}{#each formatHotkeyParts(draft.hotkeys[key], isMac) as part}<kbd>{part}</kbd>{/each}{:else}<span>{t("设置快捷键")}</span>{/if}</div><input class="shortcut-key" aria-label={t("{0}快捷键",label)} title={t("点击后按组合键，Backspace 清除")} readonly value={draft.hotkeys[key]} onkeydown={event => record(event,key)}/></div>
     </div>
   {/each}</div>
   {#if app.data?.capabilities.wayland}<button class="button button-outline button-size-default" onclick={() => act(call('configure_portal_shortcuts'))}>{t("配置系统快捷键")}<ArrowRight size={16}/></button>{/if}</div>

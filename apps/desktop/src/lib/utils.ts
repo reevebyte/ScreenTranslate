@@ -11,6 +11,38 @@ export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
 export const modifierLabel = /Mac/.test(navigator.userAgent) ? '⌘' : 'Ctrl';
 
+export function formatHotkeyPart(part: string, isMac: boolean): string {
+  if (!isMac) return part;
+  switch (part) {
+    case 'Ctrl':
+    case 'Control':
+      return '⌃';
+    case 'Alt':
+    case 'Option':
+      return '⌥';
+    case 'Shift':
+      return '⇧';
+    case 'Super':
+    case 'Meta':
+    case 'Cmd':
+    case 'Command':
+      return '⌘';
+    default:
+      return part;
+  }
+}
+
+export function formatHotkeyParts(hotkey: string | undefined | null, isMac: boolean): string[] {
+  if (!hotkey) return [];
+  return hotkey.split('+').map(part => formatHotkeyPart(part.trim(), isMac));
+}
+
+export function formatHotkey(hotkey: string | undefined | null, isMac: boolean): string {
+  const parts = formatHotkeyParts(hotkey, isMac);
+  if (parts.length === 0) return '';
+  return isMac ? parts.join(' ') : parts.join('+');
+}
+
 export const languages = [
   ['auto', '自动识别'], ['zh-Hans', '简体中文'], ['zh-Hant', '繁體中文'], ['en', '英语'],
   ['ja', '日语'], ['ko', '韩语'], ['fr', '法语'], ['de', '德语'], ['es', '西班牙语'], ['ru', '俄语'],

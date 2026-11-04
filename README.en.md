@@ -64,11 +64,11 @@ Native interactions have been verified on Windows. macOS and Linux builds are av
 2. **Select an area.** Press `Ctrl+Alt+Q`, drag to select text, then release. The translation appears in place.
 3. **Choose services as needed.** Configure translation and OCR under Services, then select Set as current. Browsing a service does not activate it.
 
-| Action | Default shortcut |
-| --- | --- |
-| Translate a screen selection | `Ctrl+Alt+Q` |
-| Hide / show a capture | `Ctrl+Alt+W` |
-| Quick text translation | `Ctrl+Alt+Space` |
+| Action | Default shortcut (Windows) | Default shortcut (macOS) |
+| --- | --- | --- |
+| Translate a screen selection | `Ctrl+Alt+Q` | `⌃⌥Q` |
+| Hide / show a capture | `Ctrl+Alt+W` | `⌃⌥W` |
+| Quick text translation | `Ctrl+Alt+Space` | `⌃⌥Space` |
 
 Edit key bindings under Shortcuts. Change the interface language under Settings → General. Updates are under Settings → About; automatic checking on launch is enabled by default.
 
