@@ -201,18 +201,22 @@ pub(crate) async fn response_bytes(
             ErrorCode::RateLimited => "服务请求过于频繁，请稍后重试",
             _ => "服务暂时无法处理请求，请检查配置或稍后重试",
         };
-        let mut err_detail = None;
-        if code == ErrorCode::Network {
-            if let Ok(bytes) = response.bytes().await {
-                if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-                    err_detail = value
+        let err_detail = if code == ErrorCode::Network {
+            response
+                .bytes()
+                .await
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                .and_then(|value| {
+                    value
                         .pointer("/error/message")
                         .and_then(|v| v.as_str())
                         .or_else(|| value.get("message").and_then(|v| v.as_str()))
-                        .map(|s| s.trim().to_string());
-                }
-            }
-        }
+                        .map(|s| s.trim().to_string())
+                })
+        } else {
+            None
+        };
         let msg = if let Some(detail) = err_detail.filter(|d| !d.is_empty()) {
             format!("{fallback_msg} ({detail})")
         } else {
