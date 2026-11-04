@@ -227,23 +227,15 @@ pub fn caption_palette(theme: screentrans_core::config::Theme) -> (bool, u32, u3
 }
 
 pub fn theme_background_color(theme: screentrans_core::config::Theme) -> tauri::window::Color {
-    #[cfg(windows)]
-    {
-        let (dark, _, _) = caption_palette(theme);
-        if dark {
-            tauri::window::Color(0x1d, 0x1c, 0x20, 255)
-        } else {
-            tauri::window::Color(0xf0, 0xee, 0xf1, 255)
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        let dark = matches!(theme, screentrans_core::config::Theme::Dark);
-        if dark {
-            tauri::window::Color(0x1d, 0x1c, 0x20, 255)
-        } else {
-            tauri::window::Color(0xf0, 0xee, 0xf1, 255)
-        }
+    let dark = match theme {
+        screentrans_core::config::Theme::Dark => true,
+        screentrans_core::config::Theme::Light => false,
+        screentrans_core::config::Theme::System => system_dark(),
+    };
+    if dark {
+        tauri::window::Color(0x1d, 0x1c, 0x20, 255)
+    } else {
+        tauri::window::Color(0xf0, 0xee, 0xf1, 255)
     }
 }
 
@@ -295,29 +287,43 @@ fn caption_color(window: &tauri::WebviewWindow, theme: screentrans_core::config:
             );
         }
     }
+    #[cfg(target_os = "macos")]
+    if let Ok(ns_window) = window.ns_window() {
+        screentrans_platform::configure_window(ns_window, theme);
+    }
     let _ = (window, theme);
 }
 
-#[cfg(windows)]
 fn system_dark() -> bool {
-    use windows::{
-        Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW},
-        core::w,
-    };
-    let mut light = 1u32;
-    let mut size = 4u32;
-    unsafe {
-        let _ = RegGetValueW(
-            HKEY_CURRENT_USER,
-            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
-            w!("AppsUseLightTheme"),
-            RRF_RT_REG_DWORD,
-            None,
-            Some(&mut light as *mut _ as _),
-            Some(&mut size),
-        );
+    #[cfg(windows)]
+    {
+        use windows::{
+            Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW},
+            core::w,
+        };
+        let mut light = 1u32;
+        let mut size = 4u32;
+        unsafe {
+            let _ = RegGetValueW(
+                HKEY_CURRENT_USER,
+                w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+                w!("AppsUseLightTheme"),
+                RRF_RT_REG_DWORD,
+                None,
+                Some(&mut light as *mut _ as _),
+                Some(&mut size),
+            );
+        }
+        light == 0
     }
-    light == 0
+    #[cfg(target_os = "macos")]
+    {
+        screentrans_platform::system_dark()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        false
+    }
 }
 
 const RESULT_CONTROLS_HEIGHT: f64 = 48.0;
@@ -614,6 +620,12 @@ pub(crate) fn builder<'a>(
     });
     if label == "main" {
         builder = builder.background_color(theme_background_color(theme));
+        #[cfg(target_os = "macos")]
+        {
+            builder = builder
+                .title_bar_style(tauri::TitleBarStyle::Transparent)
+                .hidden_title(true);
+        }
     }
     builder
 }

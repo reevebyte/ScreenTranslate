@@ -17,6 +17,8 @@ unsafe extern "C" {
         languages: *const std::ffi::c_char,
     ) -> *mut std::ffi::c_char;
     fn st_activate_app();
+    fn st_system_dark() -> bool;
+    fn st_configure_window(window: *mut std::ffi::c_void, theme_mode: i32);
     fn st_free(pointer: *mut std::ffi::c_void);
 }
 
@@ -26,14 +28,19 @@ pub fn capture(display: u32) -> Result<RgbaImage> {
     unsafe {
         let pointer = st_capture_display(display, &mut length, &mut error);
         if pointer.is_null() {
-            if !error.is_null() {
+            let error_str = if !error.is_null() {
+                let msg = CStr::from_ptr(error).to_string_lossy().into_owned();
                 st_free(error.cast());
-            }
-            return Err(AppError::new(
-                ErrorCode::PermissionDenied,
-                "macOS 未能截图，请允许屏幕录制权限后重试",
-            )
-            .action("permissions"));
+                msg
+            } else {
+                String::new()
+            };
+            let message = if error_str == "screen_recording_permission" {
+                "macOS 屏幕录制未授权：请在系统设置中允许权限（开启后须完全退出并重启应用生效）"
+            } else {
+                "macOS 屏幕截图失败，请确保屏幕录制权限已开启并重启应用重试"
+            };
+            return Err(AppError::new(ErrorCode::PermissionDenied, message).action("permissions"));
         }
         let result = image::load_from_memory(std::slice::from_raw_parts(pointer, length));
         st_free(pointer.cast());
@@ -91,5 +98,20 @@ pub fn recognize(image: &RgbaImage, languages: &[String]) -> Result<Vec<OcrLine>
 pub fn activate_app() {
     unsafe {
         st_activate_app();
+    }
+}
+
+pub fn system_dark() -> bool {
+    unsafe { st_system_dark() }
+}
+
+pub fn configure_window(window_ptr: *mut std::ffi::c_void, theme: screentrans_core::config::Theme) {
+    let mode = match theme {
+        screentrans_core::config::Theme::System => 0,
+        screentrans_core::config::Theme::Dark => 1,
+        screentrans_core::config::Theme::Light => 2,
+    };
+    unsafe {
+        st_configure_window(window_ptr, mode);
     }
 }

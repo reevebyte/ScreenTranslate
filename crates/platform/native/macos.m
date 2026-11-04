@@ -100,3 +100,34 @@ void st_activate_app(void) {
         });
     }
 }
+
+bool st_system_dark(void) {
+    @autoreleasepool {
+        NSString *style = [[NSUserDefaults standardUserDefaults] stringForKey:@"AppleInterfaceStyle"];
+        return [style isEqualToString:@"Dark"];
+    }
+}
+
+void st_configure_window(void *windowPtr, int themeMode) {
+    if (!windowPtr) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @autoreleasepool {
+            NSWindow *window = (__bridge NSWindow *)windowPtr;
+            BOOL isDark = NO;
+            if (themeMode == 1) {
+                isDark = YES;
+            } else if (themeMode == 2) {
+                isDark = NO;
+            } else {
+                isDark = st_system_dark();
+            }
+            [window setTitlebarAppearsTransparent:YES];
+            [window setTitleVisibility:NSWindowTitleHidden];
+            if (@available(macOS 11.0, *)) {
+                [window setTitlebarSeparatorStyle:NSTitlebarSeparatorStyleNone];
+            }
+            NSColor *bg = isDark ? [NSColor colorWithSRGBRed:0x1d/255.0 green:0x1c/255.0 blue:0x20/255.0 alpha:1.0] : [NSColor colorWithSRGBRed:0xf0/255.0 green:0xee/255.0 blue:0xf1/255.0 alpha:1.0];
+            [window setBackgroundColor:bg];
+        }
+    });
+}

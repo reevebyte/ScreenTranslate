@@ -20,6 +20,19 @@ pub fn activate_app() {
     #[cfg(target_os = "macos")]
     macos::activate_app();
 }
+pub fn system_dark() -> bool {
+    #[cfg(target_os = "macos")]
+    return macos::system_dark();
+    #[cfg(not(target_os = "macos"))]
+    return false;
+}
+
+pub fn configure_window(window_ptr: *mut std::ffi::c_void, theme: screentrans_core::config::Theme) {
+    #[cfg(target_os = "macos")]
+    macos::configure_window(window_ptr, theme);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (window_ptr, theme);
+}
 
 pub fn capabilities() -> PlatformCapabilities {
     let wayland = is_wayland();

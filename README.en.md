@@ -38,6 +38,18 @@ Open the **[latest release](https://github.com/reevebyte/ScreenTranslate/release
 
 Native interactions have been verified on Windows. macOS and Linux builds are available; the complete experience still needs verification on those systems.
 
+> ### macOS first-run guide
+>
+> Because this project does not use a commercial Apple Developer certificate, macOS Gatekeeper may display a message such as "cannot be opened because the developer cannot be verified" or "is damaged and cannot be opened":
+>
+> - **Option 1 (Control-click):** Drag the app into Applications, hold `Control` while right-clicking `ScreenTranslate.app`, select "Open", and confirm by clicking "Open".
+> - **Option 2 (Terminal command):** Open Terminal and run the following command to remove the quarantine flag:
+>   ```sh
+>   xattr -cr /Applications/ScreenTranslate.app
+>   ```
+>
+> *Note: After granting Screen Recording permission in System Settings, completely quit the application (`Cmd + Q` or Tray -> Quit) and restart it for the permission to take effect.*
+
 ## Features
 
 - **Translate in place:** select screen text and view the translation at the same location. Compare, zoom, drag and correct recognized text.
