@@ -41,6 +41,10 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('floating screenshot recovery', () => {
+  it('renders in main window when not floating', async () => {
+    const view = render(ResultView, { floating: false });
+    expect(view.container).not.toBeNull();
+  });
   it('leaves Space activation on toolbar buttons to the focused control', async () => {
     app.data!.visual.output = 'translation';
     app.data!.visual.job.stage = 'complete';

@@ -5,7 +5,7 @@
   import { prefersReducedMotion } from 'svelte/motion';
   import { extractedText, screenshotNotice } from '$lib/screenshot-feedback';
   import { Dialog, Tabs } from 'bits-ui';
-import { onMount, onDestroy, tick, untrack } from 'svelte';
+import { onMount, onDestroy, tick } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { desktop } from '$lib/api';
@@ -30,17 +30,14 @@ import { onMount, onDestroy, tick, untrack } from 'svelte';
   import Choice from '$lib/components/ui/choice.svelte';
 
   let { floating = false, toolsOnly = false }: { floating?: boolean; toolsOnly?: boolean } = $props();
+  let session = $derived(app.data?.visual);
+  let frame = $derived(session?.frame);
+  let sourceText = $derived(extractedText(session));
   let original = $state(false);
   let holdingOriginal = $state(false);
   let comparePosition = $state(50);
   let cleanReady = $state('');
   let originalReady = $state('');
-  $effect.pre(() => {
-    if (!floating) {
-      if (frame?.cleanId && !cleanReady) cleanReady = frame.cleanId;
-      if (frame?.id && !originalReady) originalReady = frame.id;
-    }
-  });
   let layoutReady = $state(!desktop);
   let imageError = $state(false);
   let showOriginal = $derived(original || holdingOriginal);
@@ -122,9 +119,6 @@ import { onMount, onDestroy, tick, untrack } from 'svelte';
     return () => { disposed=true;stops.forEach(stop=>stop()); };
   });
 
-  let session = $derived(app.data?.visual);
-  let sourceText = $derived(extractedText(session));
-  let frame = $derived(session?.frame);
   $effect(() => {
     if (resultLayout && resultLayout.frameId === frame?.id) {
       controlsAbove = resultLayout.controlsAbove;
@@ -134,7 +128,7 @@ import { onMount, onDestroy, tick, untrack } from 'svelte';
       void revealReady();
     } else if (desktop && floating) layoutReady = false;
   });
-  let previousFrameId = untrack(() => app.data?.visual?.frame?.id ?? '');
+  let previousFrameId = '';
   $effect(() => {
     if (frame && frame.id !== previousFrameId) {
       previousFrameId = frame.id;
