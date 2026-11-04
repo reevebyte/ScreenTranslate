@@ -1,3 +1,8 @@
+# ScreenTranslate 2.0.20
+
+- 修复主窗口切换到截图结果视图异常崩溃问题：理顺 ResultView 组件内响应式状态与衍生变量声明次序，彻底消除组件挂载时的变量未初始化异常（TDZ），保证导航栏切换即点即显。
+- 规范化网络异常处理逻辑：重构 HTTP 响应错误信息解析流程为标准链式调用，完全消除 Rust Clippy 静态检查警告，确保各平台 CI 与发布流程全绿通过。
+
 # ScreenTranslate 2.0.19
 
 - 彻底根治主窗口拖动缩放右侧残影与撕裂：对齐 ModelBench 原生轻量架构，完全移除在 Win32 消息循环中对主窗口强行注入的背景色绘制覆盖与 DWM 动画禁用（DWMWA_TRANSITIONS_FORCEDISABLED），恢复 Windows DWM 原生硬件合成与平滑缩放同步机制。
