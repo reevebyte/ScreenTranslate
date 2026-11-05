@@ -1,5 +1,6 @@
-# ScreenTranslate 2.0.23
+# ScreenTranslate 2.0.24
 
+- 修复 macOS 构建中 Clippy 对平台未用变量提示报错导致 CI 失败的问题，确保全平台自动化构建与发布流程全绿通过。
 - 彻底根治 macOS 截图后画面瞬间变形与错位：消除 Retina 高分屏下选区逻辑点位被重复除以缩放比的坐标换算错误，并优化结果视图初始缩放与挂载防抖，确保原位框选即切即稳。
 - 支持 macOS 关闭主窗口隐藏 Dock 图标：点击窗口左上角关闭按钮后自动切换为系统附属模式（Accessory），从程序坞（Dock）中隐藏图标并仅保留顶部菜单栏托盘，点击托盘重新呼出时无缝恢复 Dock 图标。
 - 全面适配 macOS 原生快捷键符号展示：在快捷操作页面与全局命令搜索中，将控制键智能转换为标准 Mac 符号（⌃ Control、⌥ Option、⇧ Shift、⌘ Command），告别 Windows 风格的 Ctrl/Alt 文本。
@@ -8,6 +9,8 @@
 由于本项目未购买商业开发者证书，首次下载打开如提示“无法验证开发者”或“应用已损坏”：
 - 方式一：拖入“应用程序”文件夹后，**按住 Control 键鼠标右键点击图标 -> 选择「打开」**，在弹窗中点击「仍要打开」。
 - 方式二：在终端执行命令移除隔离属性：`xattr -cr /Applications/ScreenTranslate.app`
+
+# ScreenTranslate 2.0.23
 
 # ScreenTranslate 2.0.22
 

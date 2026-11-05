@@ -734,6 +734,7 @@ pub fn show_result(app: &AppHandle, frame: &FrameMetadata) -> Result<()> {
         let _ = window.center();
         ResultLayout::default()
     };
+    #[cfg(not(target_os = "macos"))]
     let dpi = window.scale_factor().map_err(|_| window_error())?;
     if let Some(bounds) = frame.screen_bounds.filter(|_| overlay) {
         #[cfg(target_os = "macos")]
