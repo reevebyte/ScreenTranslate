@@ -18,6 +18,7 @@ unsafe extern "C" {
     ) -> *mut std::ffi::c_char;
     fn st_activate_app();
     fn st_hide_dock_icon();
+    fn st_focus_app();
     fn st_system_dark() -> bool;
     fn st_configure_window(window: *mut std::ffi::c_void, theme_mode: i32);
     fn st_free(pointer: *mut std::ffi::c_void);
@@ -105,6 +106,12 @@ pub fn activate_app() {
 pub fn hide_dock_icon() {
     unsafe {
         st_hide_dock_icon();
+    }
+}
+
+pub fn focus_app() {
+    unsafe {
+        st_focus_app();
     }
 }
 

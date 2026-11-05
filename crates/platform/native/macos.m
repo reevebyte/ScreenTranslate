@@ -110,6 +110,14 @@ void st_hide_dock_icon(void) {
     }
 }
 
+void st_focus_app(void) {
+    @autoreleasepool {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [NSApp activateIgnoringOtherApps:YES];
+        });
+    }
+}
+
 bool st_system_dark(void) {
     @autoreleasepool {
         NSString *style = [[NSUserDefaults standardUserDefaults] stringForKey:@"AppleInterfaceStyle"];

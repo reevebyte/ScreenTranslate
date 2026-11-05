@@ -1,3 +1,14 @@
+# ScreenTranslate 2.0.25
+
+- 彻底解决 macOS 关闭主窗口后截图或快捷翻译时程序坞（Dock）图标再次弹出的问题：保持附属后台工具模式（Accessory），仅在显式打开主设置窗口时恢复 Dock 图标。
+- 修复 macOS 截图结果窗口偶发位置跳动或未在原位的问题：优化 AppKit 窗口坐标与尺寸计算时序，先设定新窗口大小再对齐屏幕选区点位，根治高度变化引起的顶部坐标偏差。
+- 补充 macOS 更新版本后系统录屏权限重置的一步直达命令说明（tccutil reset），提升免证书分发下的更新体验。
+
+### macOS 首次安装与更新权限提示
+由于本项目为开源自编译/分发、未购买苹果商业开发者证书，更新二进制后若出现录屏无法捕捉：
+- 可在终端执行一步重置命令即可直接弹出新授权询问：`tccutil reset ScreenCapture io.github.reevebyte.screentranslate.v2`
+- 首次安装如提示“无法验证开发者”或“应用已损坏”：按住 Control 键右键点击应用图标选择「打开」，或在终端执行 `xattr -cr /Applications/ScreenTranslate.app`。
+
 # ScreenTranslate 2.0.24
 
 - 修复 macOS 构建中 Clippy 对平台未用变量提示报错导致 CI 失败的问题，确保全平台自动化构建与发布流程全绿通过。

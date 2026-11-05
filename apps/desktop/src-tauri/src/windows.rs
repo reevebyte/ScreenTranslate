@@ -56,7 +56,11 @@ fn reveal(window: &tauri::WebviewWindow) -> Result<()> {
         let _ = window.set_focus();
     }
     #[cfg(target_os = "macos")]
-    screentrans_platform::activate_app();
+    if window.label() == "main" {
+        screentrans_platform::activate_app();
+    } else {
+        screentrans_platform::focus_app();
+    }
     Ok(())
 }
 
@@ -543,10 +547,10 @@ fn place_result(
     #[cfg(target_os = "macos")]
     {
         window
-            .set_position(tauri::LogicalPosition::new(outer.x, outer.y))
+            .set_size(tauri::LogicalSize::new(outer.width, outer.height))
             .map_err(|_| window_error())?;
         window
-            .set_size(tauri::LogicalSize::new(outer.width, outer.height))
+            .set_position(tauri::LogicalPosition::new(outer.x, outer.y))
             .map_err(|_| window_error())?;
     }
     #[cfg(not(target_os = "macos"))]
@@ -577,8 +581,8 @@ fn place_on_desktop(
     {
         let w = bounds.width.max(120.0);
         let h = bounds.height.max(80.0);
-        let _ = window.set_position(tauri::LogicalPosition::new(bounds.x, bounds.y));
         let _ = window.set_size(tauri::LogicalSize::new(w, h));
+        let _ = window.set_position(tauri::LogicalPosition::new(bounds.x, bounds.y));
         let _ = frame;
     }
     #[cfg(not(target_os = "macos"))]

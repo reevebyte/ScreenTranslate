@@ -24,6 +24,10 @@ pub fn hide_dock_icon() {
     #[cfg(target_os = "macos")]
     macos::hide_dock_icon();
 }
+pub fn focus_app() {
+    #[cfg(target_os = "macos")]
+    macos::focus_app();
+}
 pub fn system_dark() -> bool {
     #[cfg(target_os = "macos")]
     return macos::system_dark();
