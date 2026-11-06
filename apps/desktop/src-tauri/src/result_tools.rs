@@ -89,10 +89,11 @@ pub fn prepare(app: &AppHandle) -> Result<WebviewWindow> {
         .build()
         .map_err(|_| windows::window_error())?;
     #[cfg(target_os = "macos")]
-    if let (Some(image), Ok(tool_ptr)) = (app.get_webview_window("result"), tool.ns_window()) {
-        if let Ok(image_ptr) = image.ns_window() {
-            screentrans_platform::attach_child_window(image_ptr, tool_ptr);
-        }
+    if let Some((image_ptr, tool_ptr)) = app
+        .get_webview_window("result")
+        .and_then(|image| image.ns_window().ok().zip(tool.ns_window().ok()))
+    {
+        screentrans_platform::attach_child_window(image_ptr, tool_ptr);
     }
     Ok(tool)
 }
