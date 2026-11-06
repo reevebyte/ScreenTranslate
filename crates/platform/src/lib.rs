@@ -28,6 +28,18 @@ pub fn focus_app() {
     #[cfg(target_os = "macos")]
     macos::focus_app();
 }
+pub fn mouse_button_down() -> bool {
+    #[cfg(target_os = "macos")]
+    return macos::mouse_button_down();
+    #[cfg(not(target_os = "macos"))]
+    return false;
+}
+pub fn attach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void) {
+    #[cfg(target_os = "macos")]
+    macos::attach_child_window(parent, child);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (parent, child);
+}
 pub fn system_dark() -> bool {
     #[cfg(target_os = "macos")]
     return macos::system_dark();

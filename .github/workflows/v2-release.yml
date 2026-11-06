@@ -177,6 +177,20 @@ jobs:
       - run: pnpm check
       - run: pnpm test
       - run: pnpm types:check
+      - name: Cache or pre-download Tauri Linux bundling dependencies
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p ~/.cache/tauri
+          for i in 1 2 3 4 5; do
+            curl -fL --connect-timeout 20 --retry 3 \
+              https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy-07333c6/linuxdeploy-x86_64.AppImage \
+              -o ~/.cache/tauri/linuxdeploy-x86_64.AppImage && chmod +x ~/.cache/tauri/linuxdeploy-x86_64.AppImage && break || sleep 3
+          done
+          for i in 1 2 3 4 5; do
+            curl -fL --connect-timeout 20 --retry 3 \
+              https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64 \
+              -o ~/.cache/tauri/AppRun-x86_64 && chmod +x ~/.cache/tauri/AppRun-x86_64 && break || sleep 3
+          done
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ github.token }}

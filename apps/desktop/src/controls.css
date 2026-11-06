@@ -13,8 +13,9 @@ html {
   background: var(--background);
 }
 
-html[data-transparent="true"] {
-  background: transparent;
+html[data-transparent="true"],
+html[data-transparent="true"] body {
+  background: transparent !important;
 }
 
 body {

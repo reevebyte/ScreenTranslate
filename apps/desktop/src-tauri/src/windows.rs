@@ -292,8 +292,10 @@ fn caption_color(window: &tauri::WebviewWindow, theme: screentrans_core::config:
         }
     }
     #[cfg(target_os = "macos")]
-    if let Ok(ns_window) = window.ns_window() {
-        screentrans_platform::configure_window(ns_window, theme);
+    if window.label() == "main" {
+        if let Ok(ns_window) = window.ns_window() {
+            screentrans_platform::configure_window(ns_window, theme);
+        }
     }
     let _ = (window, theme);
 }
@@ -927,7 +929,12 @@ pub fn begin_capture(app: AppHandle, monitor: Option<String>) {
             // A late OS/portal error from an abandoned capture must not tear
             // down selection windows that belong to its replacement.
             cancel_capture(&app, true);
-            let _ = show_main(&app);
+            if app
+                .get_webview_window("main")
+                .is_some_and(|w| w.is_visible().unwrap_or(false))
+            {
+                let _ = show_main(&app);
+            }
             let _ = app.emit("app-error", error);
         }
     });

@@ -405,7 +405,7 @@ import { onMount, onDestroy, tick } from 'svelte';
 />
 
 <div class="result-workspace" class:floating bind:clientWidth={workspaceWidth}>
-  {#if toolsOnly}<div class="toolbar-window">{@render floatingToolbar()}</div>
+  {#if toolsOnly}<!-- svelte-ignore a11y_no_static_element_interactions --><div class="toolbar-window" onpointerenter={() => { void getCurrentWindow?.()?.setFocus?.()?.catch(() => {}); }} onpointerdown={() => { void getCurrentWindow?.()?.setFocus?.()?.catch(() => {}); }}>{@render floatingToolbar()}</div>
   {:else if !frame}
     <div class="capture-empty">
       <span class="capture-empty-symbol" aria-hidden="true"><ScanLine size={28}/></span>

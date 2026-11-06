@@ -78,7 +78,7 @@ pub fn prepare(app: &AppHandle) -> Result<WebviewWindow> {
     } else {
         builder
     };
-    builder
+    let tool = builder
         .inner_size(248.0, 48.0)
         .decorations(false)
         .transparent(true)
@@ -87,7 +87,14 @@ pub fn prepare(app: &AppHandle) -> Result<WebviewWindow> {
         .always_on_top(true)
         .skip_taskbar(true)
         .build()
-        .map_err(|_| windows::window_error())
+        .map_err(|_| windows::window_error())?;
+    #[cfg(target_os = "macos")]
+    if let (Some(image), Ok(tool_ptr)) = (app.get_webview_window("result"), tool.ns_window()) {
+        if let Ok(image_ptr) = image.ns_window() {
+            screentrans_platform::attach_child_window(image_ptr, tool_ptr);
+        }
+    }
+    Ok(tool)
 }
 fn place(app: &AppHandle, tool: &WebviewWindow, bounds: Rect) -> Result<()> {
     lock(&app.state::<AppState>().result_toolbar).expected =
@@ -131,6 +138,10 @@ pub fn sync(app: &AppHandle) -> Result<()> {
         return Ok(());
     }
     let tool = prepare(app)?;
+    #[cfg(target_os = "macos")]
+    if let (Ok(image_ptr), Ok(tool_ptr)) = (image.ns_window(), tool.ns_window()) {
+        screentrans_platform::attach_child_window(image_ptr, tool_ptr);
+    }
     if settings.detached {
         clamp_toolbar(app)?;
     } else {
@@ -194,7 +205,16 @@ pub async fn finish_image_drag(window: &WebviewWindow) -> Result<()> {
             tokio::time::sleep(Duration::from_millis(16)).await;
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        while screentrans_platform::mouse_button_down() {
+            if !lock(&window.state::<AppState>().result_toolbar).image_moving {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(16)).await;
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     tokio::time::sleep(Duration::from_millis(160)).await;
     if *lock(&window.state::<AppState>().result_frame_id) == frame_id {
         finish_image_gesture(window.app_handle())?;

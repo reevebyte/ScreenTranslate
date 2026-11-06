@@ -118,6 +118,25 @@ void st_focus_app(void) {
     }
 }
 
+bool st_mouse_button_down(void) {
+    @autoreleasepool {
+        return ([NSEvent pressedMouseButtons] & 1) != 0;
+    }
+}
+
+void st_attach_child_window(void *parentPtr, void *childPtr) {
+    if (!parentPtr || !childPtr) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @autoreleasepool {
+            NSWindow *parent = (__bridge NSWindow *)parentPtr;
+            NSWindow *child = (__bridge NSWindow *)childPtr;
+            if (child.parentWindow != parent) {
+                [parent addChildWindow:child ordered:NSWindowAbove];
+            }
+        }
+    });
+}
+
 bool st_system_dark(void) {
     @autoreleasepool {
         NSString *style = [[NSUserDefaults standardUserDefaults] stringForKey:@"AppleInterfaceStyle"];
