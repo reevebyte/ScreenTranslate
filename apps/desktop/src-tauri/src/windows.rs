@@ -245,31 +245,33 @@ pub fn theme_background_color(theme: screentrans_core::config::Theme) -> tauri::
 
 fn caption_color(window: &tauri::WebviewWindow, theme: screentrans_core::config::Theme) {
     let _ = (window, theme);
+    if window.label() != "main" {
+        #[cfg(windows)]
+        let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
+        return;
+    }
     #[cfg(windows)]
     if let Ok(handle) = window.hwnd() {
         use windows::Win32::Graphics::Dwm::{
             DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
             DwmSetWindowAttribute,
         };
-        use windows::Win32::Graphics::Gdi::{CreateSolidBrush, DeleteObject, HBRUSH};
-        use windows::Win32::UI::WindowsAndMessaging::{GCLP_HBRBACKGROUND, SetClassLongPtrW};
         let (dark, background, text) = caption_palette(theme);
         unsafe {
             let hwnd = windows::Win32::Foundation::HWND(handle.0);
-            if window.label() == "main" {
-                crate::update_caption::refresh(handle.0, background, text);
-                let brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(background));
-                let old = SetClassLongPtrW(hwnd, GCLP_HBRBACKGROUND, brush.0 as isize);
-                if old != 0 {
-                    let _ = DeleteObject(HBRUSH(old as *mut _));
-                }
-                let bg_color = if dark {
-                    tauri::window::Color(0x1d, 0x1c, 0x20, 255)
-                } else {
-                    tauri::window::Color(0xf0, 0xee, 0xf1, 255)
-                };
-                let _ = window.set_background_color(Some(bg_color));
+            crate::update_caption::refresh(handle.0, background, text);
+            use windows::Win32::Graphics::Gdi::{DeleteObject, HBRUSH};
+            use windows::Win32::UI::WindowsAndMessaging::{GCLP_HBRBACKGROUND, SetClassLongPtrW};
+            let old = SetClassLongPtrW(hwnd, GCLP_HBRBACKGROUND, 0);
+            if old != 0 {
+                let _ = DeleteObject(HBRUSH(old as *mut _));
             }
+            let bg_color = if dark {
+                tauri::window::Color(0x1d, 0x1c, 0x20, 255)
+            } else {
+                tauri::window::Color(0xf0, 0xee, 0xf1, 255)
+            };
+            let _ = window.set_background_color(Some(bg_color));
             let immersive = i32::from(dark);
             let _ = DwmSetWindowAttribute(
                 hwnd,
@@ -292,10 +294,8 @@ fn caption_color(window: &tauri::WebviewWindow, theme: screentrans_core::config:
         }
     }
     #[cfg(target_os = "macos")]
-    if window.label() == "main" {
-        if let Ok(ns_window) = window.ns_window() {
-            screentrans_platform::configure_window(ns_window, theme);
-        }
+    if let Ok(ns_window) = window.ns_window() {
+        screentrans_platform::configure_window(ns_window, theme);
     }
     let _ = (window, theme);
 }
@@ -632,6 +632,8 @@ pub(crate) fn builder<'a>(
                 .title_bar_style(tauri::TitleBarStyle::Transparent)
                 .hidden_title(true);
         }
+    } else {
+        builder = builder.background_color(tauri::window::Color(0, 0, 0, 0));
     }
     builder
 }

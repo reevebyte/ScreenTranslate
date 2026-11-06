@@ -191,7 +191,7 @@ jobs:
               https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64 \
               -o ~/.cache/tauri/AppRun-x86_64 && chmod +x ~/.cache/tauri/AppRun-x86_64 && break || sleep 3
           done
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:

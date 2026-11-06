@@ -14,7 +14,12 @@ html {
 }
 
 html[data-transparent="true"],
-html[data-transparent="true"] body {
+html[data-transparent="true"] body,
+html[data-transparent="true"] #app,
+body[data-window="quick"],
+body[data-window="result"],
+body[data-window="result-tools"],
+body[data-window="selection"] {
   background: transparent !important;
 }
 
@@ -23,10 +28,6 @@ body {
   color: var(--foreground);
   font-size: var(--text-ui);
   line-height: 1.45;
-}
-
-body[data-window="quick"], body[data-window="result"], body[data-window="result-tools"], body[data-window="selection"] {
-  background: transparent;
 }
 
 button, input, textarea, select {

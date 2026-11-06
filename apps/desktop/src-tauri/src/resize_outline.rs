@@ -73,7 +73,7 @@ fn position(handles: &[isize], b: Rect, s: f64, owner: Option<(isize, Rect)>) ->
                 outer.y.round() as i32,
                 outer.width.round() as i32,
                 outer.height.round() as i32,
-                SWP_NOACTIVATE | SWP_NOZORDER,
+                SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOCOPYBITS,
             )
             .map_err(|_| window_error())?;
         }

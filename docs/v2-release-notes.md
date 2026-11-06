@@ -1,3 +1,10 @@
+# ScreenTranslate 2.0.27
+
+- 彻底根治浮动截图窗口拉伸与缩放时的坐标撕裂与内容溢出：移除在实时拖拽中叠加的滞后屏幕相对坐标偏移，将图层位置严格约束在窗口内边距中，无论多猛烈快速抽拉，截图均牢固锁定在选区框内，绝不外冲或露在框外。
+- 补齐 macOS 标准 `Info.plist` 配置文件：显式声明屏幕录制权限描述（`NSScreenCaptureUsageDescription`），彻底解决 macOS 14/15 Gatekeeper 误将应用判定为“已损坏”的问题，首次下载打开直接弹出标准互联网下载确认框，点击【打开】即可运行。
+- 升级全平台 GitHub Actions 构建流水线至 `tauri-action@v1`，确保 macOS DMG / App 包在打包时执行完整的深度 Ad-hoc 签名与资源树校验，保持后续更新权限持久稳定。
+- 彻底封堵 Windows 透明浮动窗口与底色冲突：优化 DWM 标题栏与背景刷清除策略，移除透明窗口的冗余非空背景色，确保全屏与浮动贴图纯粹通透。
+
 # ScreenTranslate 2.0.26
 
 - 修复 GitHub Actions Linux AppImage 打包时因上游下载 504 Gateway Timeout 导致发版失败的问题，增加打包依赖预下载与重试容错机制。

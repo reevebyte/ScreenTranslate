@@ -163,23 +163,35 @@ import { onMount, onDestroy, tick } from 'svelte';
     ['nw',t("左上角"),'NorthWest'], ['n',t("上边"),'North'], ['ne',t("右上角"),'NorthEast'], ['e',t("右边"),'East'],
     ['se',t("右下角"),'SouthEast'], ['s',t("下边"),'South'], ['sw',t("左下角"),'SouthWest'], ['w',t("左边"),'West'],
   ] as const);
-  let resizing: { id:number;node:HTMLElement;start:Promise<unknown>;direction:string;anchor:{left:number;top:number;right:number;bottom:number;width:number;height:number} } | null = null;
+  let resizing: { id:number;node:HTMLElement;start:Promise<unknown>;direction:string;startCursor:{x:number;y:number};currentCursor:{x:number;y:number};anchor:{left:number;top:number;right:number;bottom:number;width:number;height:number} } | null = null;
   let resizePreview = $state<{left:number;top:number;width:number;height:number}|null>(null);
   let previewFrame=0;
-  let resizeEnding=false;
+  let resizeEnding=$state(false);
   let nativeOutlineReady=$state(false);
   function paintResizePreview() {
     const gesture=resizing;if(!gesture)return;
     const anchor=gesture.anchor,dpr=devicePixelRatio || 1;
-    const width=Math.round((resultLayout?.imageWidth ?? anchor.width)*dpr)/dpr;
-    const height=Math.round((resultLayout?.imageHeight ?? anchor.height)*dpr)/dpr;
+    let width: number;
+    let height: number;
+    if (resizeEnding && resultLayout) {
+      width = Math.round((resultLayout.imageWidth ?? anchor.width)*dpr)/dpr;
+      height = Math.round((resultLayout.imageHeight ?? anchor.height)*dpr)/dpr;
+    } else {
+      const dx=gesture.currentCursor.x-gesture.startCursor.x;
+      const dy=gesture.currentCursor.y-gesture.startCursor.y;
+      const west=gesture.direction.includes('West'),north=gesture.direction.includes('North');
+      const east=gesture.direction.includes('East'),south=gesture.direction.includes('South');
+      const horizontal=west?-1:(east?1:0);
+      const vertical=north?-1:(south?1:0);
+      width=Math.round((horizontal===0?anchor.width:Math.max(32,Math.min(16000,anchor.width+horizontal*dx)))*dpr)/dpr;
+      height=Math.round((vertical===0?anchor.height:Math.max(12,Math.min(16000,anchor.height+vertical*dy)))*dpr)/dpr;
+    }
     const west=gesture.direction.includes('West'),north=gesture.direction.includes('North');
     resizePreview={left:Math.round(((west?anchor.right-width:anchor.left)-screenX)*dpr)/dpr,top:Math.round(((north?anchor.bottom-height:anchor.top)-screenY)*dpr)/dpr,width,height};
-    // Geometry is committed synchronously in this RAF, before other observers or
-    // the compositor read the native origin. Waiting for Svelte's next flush
-    // leaves one old edge at the new window position during west/north resizing.
-    const surface=gesture.node.closest('.floating-canvas-stage') as HTMLElement;
-    Object.assign(surface.style,{left:resizePreview.left+'px',right:'auto',top:resizePreview.top+'px',width:width+'px',height:height+'px'});
+    if (resizeEnding) {
+      const surface=gesture.node.closest('.floating-canvas-stage') as HTMLElement | null;
+      if(surface)Object.assign(surface.style,{left:resizePreview.left+'px',right:'auto',top:resizePreview.top+'px',width:width+'px',height:height+'px'});
+    }
     previewFrame=requestAnimationFrame(paintResizePreview);
   }
   let resizeFrame = 0;
@@ -191,14 +203,20 @@ import { onMount, onDestroy, tick } from 'svelte';
     const node=event.currentTarget as HTMLElement;
     try { node.setPointerCapture(event.pointerId); } catch { /* Test pointers do not have native capture. */ }
     const rect=node.closest('.floating-canvas-stage')!.getBoundingClientRect();
-    resizing={id:event.pointerId,node,start:call('begin_result_resize',{direction}),direction,anchor:{left:screenX+rect.left,top:screenY+rect.top,right:screenX+rect.right,bottom:screenY+rect.bottom,width:rect.width,height:rect.height}};
+    const curX=event.screenX||(event.clientX+screenX);
+    const curY=event.screenY||(event.clientY+screenY);
+    resizing={id:event.pointerId,node,start:call('begin_result_resize',{direction}),direction,startCursor:{x:curX,y:curY},currentCursor:{x:curX,y:curY},anchor:{left:screenX+rect.left,top:screenY+rect.top,right:screenX+rect.right,bottom:screenY+rect.bottom,width:rect.width,height:rect.height}};
     paintResizePreview();
     const gesture=resizing;
     resizing.start.then(()=>{if(resizing===gesture)nativeOutlineReady=true;}).catch(() => { void endResize(); });
   }
   function resizeMove(event: PointerEvent) {
     if (!resizing || resizeEnding || resizing.id !== event.pointerId) return;
-    event.preventDefault(); resizeDirty=true;
+    event.preventDefault();
+    const curX=event.screenX||(event.clientX+screenX);
+    const curY=event.screenY||(event.clientY+screenY);
+    resizing.currentCursor={x:curX,y:curY};
+    resizeDirty=true;
     if (!resizeFrame) resizeFrame=requestAnimationFrame(() => { resizeFrame=0; void writeResize(); });
   }
   async function writeResize() {
@@ -236,6 +254,14 @@ import { onMount, onDestroy, tick } from 'svelte';
         await tick();
       } catch { /* Restore even when a native window was closed during release. */ }
       if(previewFrame){cancelAnimationFrame(previewFrame);previewFrame=0;}
+      const stage = gesture.node.closest('.floating-canvas-stage') as HTMLElement | null;
+      if (stage) {
+        stage.style.left = '';
+        stage.style.right = '';
+        stage.style.top = '';
+        stage.style.width = '';
+        stage.style.height = '';
+      }
       resizing=null;resizePreview=null;nativeOutlineReady=false;
       // Paint the final CSS outline before retiring its native counterpart.
       await tick();
@@ -425,11 +451,11 @@ import { onMount, onDestroy, tick } from 'svelte';
       class="floating-canvas-stage"
       class:dragging={imageDragging}
       class:native-resizing={nativeOutlineReady && /Windows/.test(navigator.userAgent)}
-      style:left={resizePreview ? resizePreview.left+'px' : undefined}
-      style:right={resizePreview ? 'auto' : undefined}
-      style:top={resizePreview ? resizePreview.top+'px' : undefined}
-      style:width={resizePreview ? resizePreview.width+'px' : undefined}
-      style:height={resizePreview ? resizePreview.height+'px' : undefined}
+      style:left={resizeEnding && resizePreview ? resizePreview.left+'px' : undefined}
+      style:right={resizeEnding && resizePreview ? 'auto' : undefined}
+      style:top={resizeEnding && resizePreview ? resizePreview.top+'px' : undefined}
+      style:width={resizeEnding && resizePreview ? resizePreview.width+'px' : undefined}
+      style:height={resizeEnding && resizePreview ? resizePreview.height+'px' : undefined}
       style:--image-width={`${resultLayout?.imageWidth ?? Math.max(0,frame.width * scale)}px`}
       bind:clientWidth={imageWidth}
       bind:clientHeight={imageHeight}
