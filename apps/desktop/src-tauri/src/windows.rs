@@ -831,6 +831,34 @@ pub fn cancel_capture(app: &AppHandle, restore: bool) {
     }
 }
 
+#[cfg(windows)]
+fn dismiss_transient_popups() -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EndMenu, FindWindowExW, IsWindowVisible, SW_HIDE, ShowWindow,
+    };
+    use windows::core::w;
+
+    let mut had_popup = false;
+    unsafe {
+        let _ = EndMenu();
+        for class_name in [w!("#32768"), w!("tooltips_class32")] {
+            let mut current = HWND::default();
+            while let Ok(next) = FindWindowExW(HWND::default(), current, class_name, None) {
+                if next.0.is_null() {
+                    break;
+                }
+                current = next;
+                if IsWindowVisible(next).as_bool() {
+                    had_popup = true;
+                    let _ = ShowWindow(next, SW_HIDE);
+                }
+            }
+        }
+    }
+    had_popup
+}
+
 pub fn begin_capture(app: AppHandle, monitor: Option<String>) {
     cancel_capture(&app, true);
     let state = app.state::<AppState>();
@@ -856,11 +884,15 @@ pub fn begin_capture(app: AppHandle, monitor: Option<String>) {
             let _ = window.hide();
         }
     }
+    #[cfg(windows)]
+    let had_popup = dismiss_transient_popups();
     flush_compositor();
     tauri::async_runtime::spawn(async move {
         let result = async {
             #[cfg(windows)]
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            if had_popup {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
 
             let state = app.state::<AppState>();
             let wayland = lock(&state.capabilities).wayland;
