@@ -20,10 +20,6 @@
   "bundle": {
     "active": true,
     "useLocalToolsDir": true,
-    "resources": {
-      "../../../LICENSE": "licenses/LICENSE.txt",
-      "../../../docs/v2-third-party-notices.txt": "licenses/THIRD_PARTY_NOTICES.txt"
-    },
     "targets": "all",
     "icon": [
       "icons/32x32.png",

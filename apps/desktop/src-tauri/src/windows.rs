@@ -847,9 +847,21 @@ pub fn begin_capture(app: AppHandle, monitor: Option<String>) {
             let _ = window.hide();
         }
     }
+    #[cfg(target_os = "linux")]
+    if lock(&state.capabilities).wayland {
+        if let Some(window) = app.get_webview_window("main")
+            && window.is_visible().unwrap_or(false)
+        {
+            lock(&state.return_windows).push("main".into());
+            let _ = window.hide();
+        }
+    }
     flush_compositor();
     tauri::async_runtime::spawn(async move {
         let result = async {
+            #[cfg(windows)]
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
             let state = app.state::<AppState>();
             let wayland = lock(&state.capabilities).wayland;
             if wayland {
