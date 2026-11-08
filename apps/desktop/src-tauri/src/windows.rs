@@ -856,7 +856,7 @@ fn dismiss_transient_popups() -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{
         EndMenu, FindWindowExW, IsWindowVisible, SPI_SETSELECTIONFADE, SW_HIDE, SWP_HIDEWINDOW,
         SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
-        SetWindowPos, ShowWindow, SystemParametersInfoW,
+        SendMessageW, SetWindowPos, ShowWindow, SystemParametersInfoW, WM_CANCELMODE,
     };
     use windows::core::w;
 
@@ -874,6 +874,8 @@ fn dismiss_transient_popups() -> bool {
             w!("tooltips_class32"),
             w!("SysShadow"),
             w!("Xaml_WindowedPopupClass"),
+            w!("TopLevelWindowForOverflowXamlIsland"),
+            w!("NotifyIconOverflowWindow"),
         ] {
             let mut current = HWND::default();
             while let Ok(next) = FindWindowExW(HWND::default(), current, class_name, None) {
@@ -900,6 +902,8 @@ fn dismiss_transient_popups() -> bool {
                         0,
                         SWP_HIDEWINDOW | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
                     );
+                    use windows::Win32::Foundation::{LPARAM, WPARAM};
+                    let _ = SendMessageW(next, WM_CANCELMODE, WPARAM(0), LPARAM(0));
                 }
             }
         }
