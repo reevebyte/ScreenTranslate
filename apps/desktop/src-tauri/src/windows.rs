@@ -850,13 +850,9 @@ pub fn disable_selection_fade() {
 fn dismiss_transient_popups() -> bool {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{DWMWA_TRANSITIONS_FORCEDISABLED, DwmSetWindowAttribute};
-    use windows::Win32::Graphics::Gdi::{
-        RDW_ALLCHILDREN, RDW_ERASENOW, RDW_INVALIDATE, RDW_UPDATENOW, RedrawWindow,
-    };
     use windows::Win32::UI::WindowsAndMessaging::{
-        EndMenu, FindWindowExW, IsWindowVisible, SPI_SETSELECTIONFADE, SW_HIDE, SWP_HIDEWINDOW,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
-        SendMessageW, SetWindowPos, ShowWindow, SystemParametersInfoW, WM_CANCELMODE,
+        EndMenu, FindWindowExW, IsWindowVisible, SPI_SETSELECTIONFADE, SW_HIDE,
+        SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ShowWindow, SystemParametersInfoW,
     };
     use windows::core::w;
 
@@ -874,8 +870,6 @@ fn dismiss_transient_popups() -> bool {
             w!("tooltips_class32"),
             w!("SysShadow"),
             w!("Xaml_WindowedPopupClass"),
-            w!("TopLevelWindowForOverflowXamlIsland"),
-            w!("NotifyIconOverflowWindow"),
         ] {
             let mut current = HWND::default();
             while let Ok(next) = FindWindowExW(HWND::default(), current, class_name, None) {
@@ -893,28 +887,38 @@ fn dismiss_transient_popups() -> bool {
                         std::mem::size_of::<i32>() as u32,
                     );
                     let _ = ShowWindow(next, SW_HIDE);
-                    let _ = SetWindowPos(
-                        next,
-                        HWND::default(),
-                        0,
-                        0,
-                        0,
-                        0,
-                        SWP_HIDEWINDOW | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
-                    );
-                    use windows::Win32::Foundation::{LPARAM, WPARAM};
-                    let _ = SendMessageW(next, WM_CANCELMODE, WPARAM(0), LPARAM(0));
                 }
             }
         }
-        let _ = RedrawWindow(
-            HWND::default(),
-            None,
-            None,
-            RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_ERASENOW,
-        );
     }
     had_popup
+}
+
+#[cfg(windows)]
+fn hide_tray_overflow_if_still_open() {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowExW, IsWindowVisible, SW_HIDE, ShowWindow,
+    };
+    use windows::core::w;
+
+    unsafe {
+        for class_name in [
+            w!("TopLevelWindowForOverflowXamlIsland"),
+            w!("NotifyIconOverflowWindow"),
+        ] {
+            let mut current = HWND::default();
+            while let Ok(next) = FindWindowExW(HWND::default(), current, class_name, None) {
+                if next.0.is_null() {
+                    break;
+                }
+                current = next;
+                if IsWindowVisible(next).as_bool() {
+                    let _ = ShowWindow(next, SW_HIDE);
+                }
+            }
+        }
+    }
 }
 
 pub fn begin_capture(app: AppHandle, monitor: Option<String>) {
@@ -957,7 +961,8 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
         let result = async {
             #[cfg(windows)]
             if had_popup {
-                tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(160)).await;
+                hide_tray_overflow_if_still_open();
                 flush_compositor();
             }
 
