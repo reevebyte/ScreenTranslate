@@ -1,6 +1,3 @@
-# ScreenTranslate 2.0.28
+# ScreenTranslate 2.0.29
 
-- 彻底消除 Windows 托盘右键点击“截图翻译”时的菜单残影与托盘浮层滞留：禁用系统菜单选中项淡出动画（`SPI_SETSELECTIONFADE`），并在从托盘触发截屏时自动收起系统托盘溢出浮层。
-- 严格隔离快捷键截屏与托盘截屏的弹窗清理逻辑：使用快捷键触发截屏时不再触碰 Windows 11 任务栏内部浮层或等待延时，消除全屏闪动与任务栏右下角多余抽动，实现秒级无感抓屏。
-- 修复 Linux 桌面 Portal 截屏无响应问题：移除非必要的模态窗口句柄绑定并增加截图文件落盘就绪轮询，确保选区截图后稳定进入识别与翻译流程。
-- 清理打包配置中越界的相对路径资源映射，确保 macOS 应用包签名结构纯净完整。
+- 修复 macOS 下载安装包打开提示“已损坏”的问题：对齐 Cuvilo 打包签名配置，在 `tauri.conf.json` 与发布流水线中显式启用完整的应用包 Ad-hoc 签名（`signingIdentity: "-"`、`hardenedRuntime: false`、`APPLE_SIGNING_IDENTITY: "-"`）并增加 `codesign --verify --deep --strict` 校验，确保首次下载打开直接弹出标准“从互联网下载的 App，确定要打开它吗？”确认框。
