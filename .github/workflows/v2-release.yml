@@ -107,7 +107,7 @@ jobs:
           if (!release && process.env.FINISH_ONLY === 'true') throw new Error('Metadata-only mode requires an existing draft with uploaded installers');
           if (!release) release = await request('/releases', 'POST', {
             tag_name: tag, name: `ScreenTranslate ${tag}`, draft: true, prerelease: tag.includes('-'),
-            body: await readFile('docs/v2-release-notes.md', 'utf8'),
+            body: (await readFile('docs/v2-release-notes.md', 'utf8')).split(/\r?\n(?=# ScreenTranslate )/)[0].trim(),
           });
           if (!Number.isSafeInteger(release.id) || release.id <= 0) throw new Error('Missing release ID');
           await writeFile('release.json', JSON.stringify(release));
