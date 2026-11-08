@@ -847,30 +847,28 @@ pub fn disable_selection_fade() {
 }
 
 #[cfg(windows)]
-fn dismiss_transient_popups() -> bool {
+fn dismiss_transient_popups(from_tray: bool) -> bool {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{DWMWA_TRANSITIONS_FORCEDISABLED, DwmSetWindowAttribute};
     use windows::Win32::UI::WindowsAndMessaging::{
-        EndMenu, FindWindowExW, IsWindowVisible, SPI_SETSELECTIONFADE, SW_HIDE,
-        SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, ShowWindow, SystemParametersInfoW,
+        EndMenu, FindWindowExW, IsWindowVisible, SW_HIDE, ShowWindow,
     };
     use windows::core::w;
 
     let mut had_popup = false;
     unsafe {
-        let _ = SystemParametersInfoW(
-            SPI_SETSELECTIONFADE,
-            0,
-            Some(std::ptr::null_mut()),
-            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-        );
         let _ = EndMenu();
-        for class_name in [
-            w!("#32768"),
-            w!("tooltips_class32"),
-            w!("SysShadow"),
-            w!("Xaml_WindowedPopupClass"),
-        ] {
+        let classes: &[windows::core::PCWSTR] = if from_tray {
+            &[
+                w!("#32768"),
+                w!("tooltips_class32"),
+                w!("SysShadow"),
+                w!("Xaml_WindowedPopupClass"),
+            ]
+        } else {
+            &[w!("#32768")]
+        };
+        for &class_name in classes {
             let mut current = HWND::default();
             while let Ok(next) = FindWindowExW(HWND::default(), current, class_name, None) {
                 if next.0.is_null() {
@@ -955,12 +953,14 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
         }
     }
     #[cfg(windows)]
-    let had_popup = dismiss_transient_popups() || from_tray;
-    flush_compositor();
+    let had_popup = dismiss_transient_popups(from_tray) || from_tray;
+    if had_popup {
+        flush_compositor();
+    }
     tauri::async_runtime::spawn(async move {
         let result = async {
             #[cfg(windows)]
-            if had_popup {
+            if had_popup && from_tray {
                 tokio::time::sleep(std::time::Duration::from_millis(160)).await;
                 hide_tray_overflow_if_still_open();
                 flush_compositor();
