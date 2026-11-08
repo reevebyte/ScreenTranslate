@@ -834,15 +834,22 @@ pub fn cancel_capture(app: &AppHandle, restore: bool) {
 #[cfg(windows)]
 fn dismiss_transient_popups() -> bool {
     use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{DWMWA_TRANSITIONS_FORCEDISABLED, DwmSetWindowAttribute};
     use windows::Win32::UI::WindowsAndMessaging::{
-        EndMenu, FindWindowExW, IsWindowVisible, SW_HIDE, ShowWindow,
+        EndMenu, FindWindowExW, IsWindowVisible, SW_HIDE, SWP_HIDEWINDOW, SWP_NOACTIVATE,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos, ShowWindow,
     };
     use windows::core::w;
 
     let mut had_popup = false;
     unsafe {
         let _ = EndMenu();
-        for class_name in [w!("#32768"), w!("tooltips_class32")] {
+        for class_name in [
+            w!("#32768"),
+            w!("tooltips_class32"),
+            w!("SysShadow"),
+            w!("Xaml_WindowedPopupClass"),
+        ] {
             let mut current = HWND::default();
             while let Ok(next) = FindWindowExW(HWND::default(), current, class_name, None) {
                 if next.0.is_null() {
@@ -851,7 +858,23 @@ fn dismiss_transient_popups() -> bool {
                 current = next;
                 if IsWindowVisible(next).as_bool() {
                     had_popup = true;
+                    let disabled: i32 = 1;
+                    let _ = DwmSetWindowAttribute(
+                        next,
+                        DWMWA_TRANSITIONS_FORCEDISABLED,
+                        &disabled as *const _ as _,
+                        std::mem::size_of::<i32>() as u32,
+                    );
                     let _ = ShowWindow(next, SW_HIDE);
+                    let _ = SetWindowPos(
+                        next,
+                        HWND::default(),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_HIDEWINDOW | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER,
+                    );
                 }
             }
         }
@@ -860,6 +883,14 @@ fn dismiss_transient_popups() -> bool {
 }
 
 pub fn begin_capture(app: AppHandle, monitor: Option<String>) {
+    begin_capture_with_source(app, monitor, false);
+}
+
+pub fn begin_capture_from_tray(app: AppHandle) {
+    begin_capture_with_source(app, None, true);
+}
+
+pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_tray: bool) {
     cancel_capture(&app, true);
     let state = app.state::<AppState>();
     let ticket = state.jobs.begin("capture");
@@ -885,13 +916,13 @@ pub fn begin_capture(app: AppHandle, monitor: Option<String>) {
         }
     }
     #[cfg(windows)]
-    let had_popup = dismiss_transient_popups();
+    let had_popup = dismiss_transient_popups() || from_tray;
     flush_compositor();
     tauri::async_runtime::spawn(async move {
         let result = async {
             #[cfg(windows)]
             if had_popup {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(60)).await;
             }
 
             let state = app.state::<AppState>();

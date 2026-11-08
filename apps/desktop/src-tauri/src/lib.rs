@@ -269,6 +269,7 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .tooltip("ScreenTranslate · 截图即翻译")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
+            "capture" => windows::begin_capture_from_tray(app.clone()),
             "update" => update_ui::request(app, "tray"),
             "main" => {
                 let _ = windows::show_main(app);
@@ -293,7 +294,7 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                     ..
                 }
             ) {
-                windows::begin_capture(tray.app_handle().clone(), None);
+                windows::begin_capture_from_tray(tray.app_handle().clone());
             }
         });
     if let Some(icon) = app.default_window_icon() {
