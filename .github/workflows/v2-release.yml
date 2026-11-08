@@ -194,6 +194,7 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          APPLE_SIGNING_IDENTITY: "-"
         with:
           projectPath: apps/desktop
           releaseId: ${{ needs.prepare.outputs.release_id }}
@@ -202,6 +203,11 @@ jobs:
           # The final job is the sole writer of updater metadata; matrix jobs only upload binaries/signatures.
           includeUpdaterJson: false
           updaterJsonPreferNsis: true
+      - name: Verify macOS bundle code signature
+        if: runner.os == 'macOS'
+        run: |
+          codesign --verify --deep --strict --verbose=2 "target/${{ matrix.target }}/release/bundle/macos/ScreenTranslate.app"
+          codesign -dv --verbose=4 "target/${{ matrix.target }}/release/bundle/macos/ScreenTranslate.app"
   manifests:
     if: ${{ always() && !cancelled() && needs.prepare.result == 'success' && needs.prepare.outputs.signed_updates == 'true' && (needs.build.result == 'success' || (inputs.finish_only == true && needs.build.result == 'skipped')) }}
     needs: [prepare, build]
