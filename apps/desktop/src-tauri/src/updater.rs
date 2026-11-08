@@ -288,31 +288,167 @@ pub async fn download_update(app: AppHandle, window: WebviewWindow, version: Str
         AppError::new(ErrorCode::Network, "更新下载失败，请检查网络或代理后重试")
     }))
 }
+fn install_package(update: &Update, bytes: &[u8]) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    if bytes.starts_with(b"!<arch>\n") {
+        return install_linux_deb(update, bytes);
+    }
+    update
+        .install(bytes)
+        .map_err(|_| AppError::new(ErrorCode::Internal, "无法启动更新安装，请重试"))?;
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("/usr/bin/tccutil")
+            .args([
+                "reset",
+                "ScreenCapture",
+                "io.github.reevebyte.screentranslate.v2",
+            ])
+            .status();
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn install_linux_deb(update: &Update, bytes: &[u8]) -> Result<()> {
+    use std::{
+        io::Write,
+        os::unix::fs::PermissionsExt,
+        process::{Command, Stdio},
+    };
+    update
+        .verify(bytes)
+        .map_err(|_| AppError::new(ErrorCode::InvalidResponse, "更新包签名校验失败，请重试"))?;
+    let pkg_path =
+        std::env::temp_dir().join(format!("screentranslate-update-{}.deb", update.version));
+    std::fs::write(&pkg_path, bytes)
+        .map_err(|_| AppError::new(ErrorCode::Internal, "无法写入临时更新包，请重试"))?;
+    let _ = std::fs::set_permissions(&pkg_path, std::fs::Permissions::from_mode(0o644));
+
+    let run_result = (|| -> Result<()> {
+        if let Ok(output) = Command::new("pkexec")
+            .args([
+                "env",
+                "DEBIAN_FRONTEND=noninteractive",
+                "dpkg",
+                "--force-confdef",
+                "--force-confold",
+                "-i",
+            ])
+            .arg(&pkg_path)
+            .output()
+        {
+            if output.status.success() {
+                return Ok(());
+            }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("lock-frontend") || stderr.contains("dpkg status database is locked")
+            {
+                return Err(AppError::new(
+                    ErrorCode::Internal,
+                    "系统包管理器正被其他程序占用，请关闭软件中心或终端 apt 后重试",
+                ));
+            }
+        }
+
+        let zenity = Command::new("zenity")
+            .args(["--password", "--title=Authentication Required"])
+            .output()
+            .map_err(|_| AppError::new(ErrorCode::Internal, "无法启动系统密码验证窗口，请重试"))?;
+        if !zenity.status.success() {
+            return Err(AppError::new(
+                ErrorCode::PermissionDenied,
+                "已取消管理员密码验证",
+            ));
+        }
+        let stdout = String::from_utf8_lossy(&zenity.stdout);
+        let password = stdout
+            .lines()
+            .rev()
+            .find(|line| !line.is_empty())
+            .unwrap_or_else(|| stdout.trim_end_matches(['\r', '\n']));
+
+        let mut child = Command::new("sudo")
+            .args([
+                "-S",
+                "-k",
+                "-p",
+                "",
+                "env",
+                "DEBIAN_FRONTEND=noninteractive",
+                "dpkg",
+                "--force-confdef",
+                "--force-confold",
+                "-i",
+            ])
+            .arg(&pkg_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|_| AppError::new(ErrorCode::Internal, "无法调用 sudo 安装更新包"))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = writeln!(stdin, "{password}");
+            let _ = stdin.flush();
+        }
+        let output = child
+            .wait_with_output()
+            .map_err(|_| AppError::new(ErrorCode::Internal, "更新安装进程异常中断，请重试"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("lock-frontend") || stderr.contains("dpkg status database is locked") {
+            Err(AppError::new(
+                ErrorCode::Internal,
+                "系统包管理器正被其他程序占用，请关闭软件中心或终端 apt 后重试",
+            ))
+        } else if stderr.contains("Sorry, try again") || stderr.contains("incorrect password") {
+            Err(AppError::new(
+                ErrorCode::PermissionDenied,
+                "管理员密码不正确，请重试",
+            ))
+        } else {
+            Err(AppError::new(
+                ErrorCode::Internal,
+                "无法启动更新安装，请重试",
+            ))
+        }
+    })();
+
+    let _ = std::fs::remove_file(&pkg_path);
+    run_result
+}
+
 #[tauri::command]
 pub async fn install_update(app: AppHandle, window: WebviewWindow, version: String) -> Result<()> {
     authorize(window.label())?;
     let pending_state = app.state::<PendingUpdate>();
     let pending = pending_state.0.lock().await;
-    let state = app.state::<AppState>();
-    let sessions = lock(&state.sessions);
-    install_allowed(
-        !lock(&state.dirty_windows).is_empty(),
-        &[sessions.text.job.stage, sessions.visual.job.stage],
-        !lock(&state.selections).is_empty(),
-    )?;
-    drop(sessions);
+    {
+        let state = app.state::<AppState>();
+        let sessions = lock(&state.sessions);
+        install_allowed(
+            !lock(&state.dirty_windows).is_empty(),
+            &[sessions.text.job.stage, sessions.visual.job.stage],
+            !lock(&state.selections).is_empty(),
+        )?;
+    }
     let update = pending
         .update
         .as_ref()
         .filter(|update| update.version == version)
+        .cloned()
         .ok_or_else(|| AppError::new(ErrorCode::InvalidInput, "更新版本已变化，请重新检查"))?;
     let bytes = pending
         .bytes
         .as_ref()
+        .cloned()
         .ok_or_else(|| AppError::new(ErrorCode::InvalidInput, "请先下载更新"))?;
-    update
-        .install(bytes)
-        .map_err(|_| AppError::new(ErrorCode::Internal, "无法启动更新安装，请重试"))?;
+    drop(pending);
+    tokio::task::spawn_blocking(move || install_package(&update, &bytes))
+        .await
+        .map_err(|_| AppError::new(ErrorCode::Internal, "无法启动更新安装，请重试"))??;
     #[cfg(not(windows))]
     app.restart();
     #[cfg(windows)]

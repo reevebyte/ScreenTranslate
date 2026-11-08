@@ -40,7 +40,7 @@ pub fn capture(display: u32) -> Result<RgbaImage> {
                 String::new()
             };
             let message = if error_str == "screen_recording_permission" {
-                "macOS 屏幕录制未授权：请在系统设置中允许权限（开启后须完全退出并重启应用生效）"
+                "macOS 屏幕录制未授权：已自动刷新权限项，请在系统设置中开启开关并点击“退出并重新打开”"
             } else {
                 "macOS 屏幕截图失败，请确保屏幕录制权限已开启并重启应用重试"
             };

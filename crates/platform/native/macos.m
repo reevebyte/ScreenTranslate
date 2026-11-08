@@ -2,6 +2,7 @@
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
 #import <Vision/Vision.h>
 #import <CoreGraphics/CoreGraphics.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -13,10 +14,67 @@
 @implementation STCaptureReply
 @end
 
+static pthread_mutex_t g_tcc_mutex = PTHREAD_MUTEX_INITIALIZER;
+static BOOL g_tcc_reset_this_run = NO;
+
+static NSString *st_current_binary_tcc_key(void) {
+    NSBundle *bundle = [NSBundle mainBundle];
+    NSString *version = [bundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"0";
+    NSString *execPath = [bundle executablePath] ?: @"";
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:execPath error:nil];
+    NSDate *mtime = [attrs fileModificationDate];
+    unsigned long long size = [attrs fileSize];
+    long long ts = mtime ? (long long)[mtime timeIntervalSince1970] : 0;
+    return [NSString stringWithFormat:@"%@:%lld:%llu", version, ts, size];
+}
+
+static void st_reset_screen_capture_tcc(void) {
+    @try {
+        NSString *bundleId = [[NSBundle mainBundle] bundleIdentifier] ?: @"io.github.reevebyte.screentranslate.v2";
+        NSTask *task = [[NSTask alloc] init];
+        [task setLaunchPath:@"/usr/bin/tccutil"];
+        [task setArguments:@[@"reset", @"ScreenCapture", bundleId]];
+        [task setStandardOutput:[NSPipe pipe]];
+        [task setStandardError:[NSPipe pipe]];
+        [task launch];
+        [task waitUntilExit];
+    } @catch (NSException *exception) {
+    }
+}
+
+static void st_ensure_screen_tcc_fresh(BOOL force_on_denied) {
+    pthread_mutex_lock(&g_tcc_mutex);
+    NSString *sig = st_current_binary_tcc_key();
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *prepared = [defaults stringForKey:@"ScreenTranslateTCCBinaryKey"];
+    if (![sig isEqualToString:prepared] && !g_tcc_reset_this_run) {
+        if (force_on_denied || !CGPreflightScreenCaptureAccess()) {
+            g_tcc_reset_this_run = YES;
+            st_reset_screen_capture_tcc();
+            if (force_on_denied) {
+                CGRequestScreenCaptureAccess();
+            }
+        }
+    }
+    pthread_mutex_unlock(&g_tcc_mutex);
+}
+
+static void st_mark_screen_tcc_verified(void) {
+    pthread_mutex_lock(&g_tcc_mutex);
+    NSString *sig = st_current_binary_tcc_key();
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    if (![sig isEqualToString:[defaults stringForKey:@"ScreenTranslateTCCBinaryKey"]]) {
+        [defaults setObject:sig forKey:@"ScreenTranslateTCCBinaryKey"];
+        [defaults synchronize];
+    }
+    pthread_mutex_unlock(&g_tcc_mutex);
+}
+
 void st_free(void *pointer) { free(pointer); }
 
 unsigned char *st_capture_display(uint32_t displayID, size_t *length, char **error) {
     @autoreleasepool {
+        st_ensure_screen_tcc_fresh(NO);
         if (!CGPreflightScreenCaptureAccess() && !CGRequestScreenCaptureAccess()) {
             *error = strdup("screen_recording_permission");
             return NULL;
@@ -45,9 +103,21 @@ unsigned char *st_capture_display(uint32_t displayID, size_t *length, char **err
                     }];
             }];
         if (dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC)) != 0 || !reply.data) {
+            if (reply.error) {
+                NSInteger code = reply.error.code;
+                NSString *desc = [reply.error localizedDescription];
+                if (code == -3801 || (desc && ([desc localizedCaseInsensitiveContainsString:@"declined"] ||
+                                               [desc localizedCaseInsensitiveContainsString:@"denied"] ||
+                                               [desc localizedCaseInsensitiveContainsString:@"permission"]))) {
+                    st_ensure_screen_tcc_fresh(YES);
+                    *error = strdup("screen_recording_permission");
+                    return NULL;
+                }
+            }
             *error = strdup("capture_failed");
             return NULL;
         }
+        st_mark_screen_tcc_verified();
         *length = reply.data.length;
         unsigned char *result = malloc(*length);
         if (result) { memcpy(result, reply.data.bytes, *length); }
