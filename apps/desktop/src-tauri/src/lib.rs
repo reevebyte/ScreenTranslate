@@ -172,6 +172,7 @@ pub fn run() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+            windows::disable_selection_fade();
             app.manage(updater::PendingUpdate::default());
             app.manage(update_ui::UpdateUi::default());
             let key = updater::public_key();

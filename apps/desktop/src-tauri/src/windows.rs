@@ -831,18 +831,43 @@ pub fn cancel_capture(app: &AppHandle, restore: bool) {
     }
 }
 
+pub fn disable_selection_fade() {
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SPI_SETSELECTIONFADE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+        };
+        let _ = SystemParametersInfoW(
+            SPI_SETSELECTIONFADE,
+            0,
+            Some(std::ptr::null_mut()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        );
+    }
+}
+
 #[cfg(windows)]
 fn dismiss_transient_popups() -> bool {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Dwm::{DWMWA_TRANSITIONS_FORCEDISABLED, DwmSetWindowAttribute};
+    use windows::Win32::Graphics::Gdi::{
+        RDW_ALLCHILDREN, RDW_ERASENOW, RDW_INVALIDATE, RDW_UPDATENOW, RedrawWindow,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
-        EndMenu, FindWindowExW, IsWindowVisible, SW_HIDE, SWP_HIDEWINDOW, SWP_NOACTIVATE,
-        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos, ShowWindow,
+        EndMenu, FindWindowExW, IsWindowVisible, SPI_SETSELECTIONFADE, SW_HIDE, SWP_HIDEWINDOW,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+        SetWindowPos, ShowWindow, SystemParametersInfoW,
     };
     use windows::core::w;
 
     let mut had_popup = false;
     unsafe {
+        let _ = SystemParametersInfoW(
+            SPI_SETSELECTIONFADE,
+            0,
+            Some(std::ptr::null_mut()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        );
         let _ = EndMenu();
         for class_name in [
             w!("#32768"),
@@ -878,6 +903,12 @@ fn dismiss_transient_popups() -> bool {
                 }
             }
         }
+        let _ = RedrawWindow(
+            HWND::default(),
+            None,
+            None,
+            RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_ERASENOW,
+        );
     }
     had_popup
 }
@@ -922,7 +953,8 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
         let result = async {
             #[cfg(windows)]
             if had_popup {
-                tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+                flush_compositor();
             }
 
             let state = app.state::<AppState>();
