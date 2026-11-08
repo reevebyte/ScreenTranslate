@@ -927,6 +927,67 @@ pub fn begin_capture_from_tray(app: AppHandle) {
     begin_capture_with_source(app, None, true);
 }
 
+fn hash_rgba(width: u32, height: u32, bytes: &[u8]) -> (u32, u32, u64) {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    width.hash(&mut hasher);
+    height.hash(&mut hasher);
+    bytes.len().hash(&mut hasher);
+    let step = (bytes.len() / 4096).max(1);
+    for b in bytes.iter().step_by(step) {
+        b.hash(&mut hasher);
+    }
+    (width, height, hasher.finish())
+}
+
+async fn clipboard_image_digest(app: AppHandle) -> Option<(u32, u32, u64)> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    tokio::task::spawn_blocking(move || {
+        let image = app.clipboard().read_image().ok()?;
+        let bytes = image.rgba();
+        if image.width() == 0 || image.height() == 0 || bytes.is_empty() {
+            return None;
+        }
+        Some(hash_rgba(image.width(), image.height(), bytes))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+async fn recover_wayland_clipboard_capture(
+    app: AppHandle,
+    before: Option<(u32, u32, u64)>,
+) -> Option<CaptureFrame> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    tokio::task::spawn_blocking(move || {
+        for _ in 0..6 {
+            if let Ok(image) = app.clipboard().read_image() {
+                let width = image.width();
+                let height = image.height();
+                let bytes = image.rgba();
+                if width > 0
+                    && height > 0
+                    && !bytes.is_empty()
+                    && before != Some(hash_rgba(width, height, bytes))
+                    && let Some(rgba) = image::RgbaImage::from_raw(width, height, bytes.to_vec())
+                {
+                    return Some(CaptureFrame {
+                        image: rgba,
+                        screen_bounds: None,
+                        scale_factor: 1.0,
+                    });
+                }
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_tray: bool) {
     cancel_capture(&app, true);
     let state = app.state::<AppState>();
@@ -974,7 +1035,16 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
             let state = app.state::<AppState>();
             let wayland = lock(&state.capabilities).wayland;
             if wayland {
-                let frame = SystemCapture.capture(None, ticket.stop.clone()).await?;
+                let before_clip = clipboard_image_digest(app.clone()).await;
+                let frame = match SystemCapture.capture(None, ticket.stop.clone()).await {
+                    Ok(frame) => frame,
+                    Err(err) if err.code != ErrorCode::Cancelled => {
+                        recover_wayland_clipboard_capture(app.clone(), before_clip)
+                            .await
+                            .ok_or(err)?
+                    }
+                    Err(err) => return Err(err),
+                };
                 if !state.jobs.is_current("capture", &ticket) {
                     return Err(AppError::cancelled());
                 }
