@@ -944,13 +944,12 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
         }
     }
     #[cfg(target_os = "linux")]
-    if lock(&state.capabilities).wayland {
-        if let Some(window) = app.get_webview_window("main")
-            && window.is_visible().unwrap_or(false)
-        {
-            lock(&state.return_windows).push("main".into());
-            let _ = window.hide();
-        }
+    if lock(&state.capabilities).wayland
+        && let Some(window) = app.get_webview_window("main")
+        && window.is_visible().unwrap_or(false)
+    {
+        lock(&state.return_windows).push("main".into());
+        let _ = window.hide();
     }
     #[cfg(windows)]
     let had_popup = dismiss_transient_popups(from_tray) || from_tray;
