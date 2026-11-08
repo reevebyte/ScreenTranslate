@@ -26,20 +26,20 @@ pub async fn screenshot(stop: CancellationToken) -> Result<CaptureFrame> {
         let url = url::Url::parse(&uri).map_err(|_| portal_error())?;
         let path = url.to_file_path().map_err(|_| portal_error())?;
         for _ in 0..10 {
-            if let Ok(metadata) = std::fs::metadata(&path) {
-                if metadata.is_file() && metadata.len() > 0 && metadata.len() <= 64 * 1024 * 1024 {
-                    if let Ok(reader) = image::ImageReader::open(&path) {
-                        if let Ok(mut reader) = reader.with_guessed_format() {
-                            let mut limits = image::Limits::default();
-                            limits.max_image_width = Some(16000);
-                            limits.max_image_height = Some(16000);
-                            limits.max_alloc = Some(192 * 1024 * 1024);
-                            reader.limits(limits);
-                            if let Ok(decoded) = reader.decode() {
-                                return Ok(decoded.to_rgba8());
-                            }
-                        }
-                    }
+            if let Ok(metadata) = std::fs::metadata(&path)
+                && metadata.is_file()
+                && metadata.len() > 0
+                && metadata.len() <= 64 * 1024 * 1024
+                && let Ok(reader) = image::ImageReader::open(&path)
+                && let Ok(mut reader) = reader.with_guessed_format()
+            {
+                let mut limits = image::Limits::default();
+                limits.max_image_width = Some(16000);
+                limits.max_image_height = Some(16000);
+                limits.max_alloc = Some(192 * 1024 * 1024);
+                reader.limits(limits);
+                if let Ok(decoded) = reader.decode() {
+                    return Ok(decoded.to_rgba8());
                 }
             }
             std::thread::sleep(std::time::Duration::from_millis(50));

@@ -954,7 +954,13 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
     }
     #[cfg(windows)]
     let had_popup = dismiss_transient_popups(from_tray) || from_tray;
+    #[cfg(windows)]
     if had_popup {
+        flush_compositor();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = from_tray;
         flush_compositor();
     }
     tauri::async_runtime::spawn(async move {
