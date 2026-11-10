@@ -3,12 +3,12 @@ import { render, fireEvent, cleanup, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { previewBootstrap } from '$lib/preview';
 
-const { call, startDragging, events } = vi.hoisted(() => ({ call: vi.fn().mockResolvedValue(undefined), startDragging: vi.fn().mockResolvedValue(undefined), events: new Map<string,Set<(event:{payload:unknown})=>void>>() }));
+const { call, startDragging, startResizeDragging, events } = vi.hoisted(() => ({ call: vi.fn().mockResolvedValue(undefined), startDragging: vi.fn().mockResolvedValue(undefined), startResizeDragging: vi.fn().mockResolvedValue(undefined), events: new Map<string,Set<(event:{payload:unknown})=>void>>() }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async (name:string, fn:(event:{payload:unknown})=>void) => {
   const listeners=events.get(name)??new Set();listeners.add(fn);events.set(name,listeners);return ()=>listeners.delete(fn);
 }) }));
 vi.mock('$lib/api', () => ({ desktop: true, call, loadBootstrap: vi.fn() }));
-vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ startDragging }) }));
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ startDragging, startResizeDragging, innerSize: vi.fn().mockResolvedValue({width:640,height:448}) }) }));
 vi.mock('svelte/motion', () => ({ prefersReducedMotion: { current: true } }));
 vi.mock('svelte-sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 import { app } from '$lib/store.svelte';
@@ -241,7 +241,7 @@ describe('floating screenshot recovery', () => {
     expect((tools.querySelector('.floating-hud') as HTMLElement).style.transform).toBe('');
   });
 
-  it('keeps the toolbar inside the result window and drags without focus-changing IPC on Wayland', async () => {
+  it('keeps and hides the embedded toolbar through a Wayland image drag', async () => {
     app.data!.capabilities.wayland = true;
     const view = render(ResultView, { floating: true });
     await waitFor(() => expect(events.get('result-layout-changed')?.size).toBe(1));
@@ -249,22 +249,25 @@ describe('floating screenshot recovery', () => {
     expect(document.querySelector('.toolbar-window')).toBeNull();
 
     await fireEvent.pointerDown(view.getByAltText('截图原文'), { button: 0 });
-    await waitFor(() => expect(startDragging).toHaveBeenCalledOnce());
-    expect(call).not.toHaveBeenCalledWith('begin_result_drag');
-    expect(call).not.toHaveBeenCalledWith('finish_result_drag');
+    await waitFor(() => expect(call).toHaveBeenCalledWith('begin_result_drag'));
+    expect(startDragging).not.toHaveBeenCalled();
+    expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(true);
+    broadcast('result-drag-ended','test-frame');
+    await waitFor(() => expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(false));
   });
 
-  it('sends pointer deltas for Wayland resizing instead of reading unavailable screen coordinates', async () => {
+  it('uses native resize dragging on Wayland instead of pointer deltas', async () => {
     app.data!.capabilities.wayland = true;
     const view = render(ResultView, { floating: true });
     const handle = view.getByRole('button', { name: '调整右边大小' });
     await fireEvent.pointerDown(handle, { button: 0, pointerId: 1, screenX: 100, screenY: 100 });
+    await waitFor(() => expect(startResizeDragging).toHaveBeenCalledWith('East'));
+    expect(call).toHaveBeenCalledWith('begin_result_resize', { direction: 'East' });
     await fireEvent.pointerMove(handle, { pointerId: 1, screenX: 124, screenY: 136 });
-    await waitFor(() => expect(call).toHaveBeenCalledWith('update_result_resize', {
-      finish: false,
-      dx: 24,
-      dy: 36,
-    }));
+    expect(call).not.toHaveBeenCalledWith('update_result_resize', expect.objectContaining({finish:false}));
+    expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(true);
+    broadcast('result-resize-ended','test-frame');
+    await waitFor(() => expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(false));
   });
 
   it('lets the user cancel a running job without starting a window drag', async () => {

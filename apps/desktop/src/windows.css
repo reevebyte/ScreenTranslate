@@ -1139,6 +1139,11 @@
   pointer-events: none;
 }
 
+.floating-controls.gesture-active {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .floating-hud.dragging, .floating-hud.dragging .hud-grip {
   cursor: grabbing;
 }

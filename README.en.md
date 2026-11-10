@@ -32,7 +32,7 @@ Open the **[latest release](https://github.com/reevebyte/ScreenTranslate/release
 | **Windows 10 / 11 · x64** | **`*x64-setup.exe`**. Follow the installer; system WebView2 is required. |
 | macOS 14+ · Apple Silicon | `*aarch64.dmg` |
 | macOS 14+ · Intel | `*x64.dmg` |
-| Linux · x64 | `.AppImage`; `.deb` and `.rpm` are also available. |
+| Linux · x64 | `.AppImage`; Debian and Ubuntu users can also choose `.deb`. |
 
 `.sig`, `latest.json`, `latest-v2.json` and `.app.tar.gz` files are used by the updater and do not need to be downloaded manually. GitHub's `Source code` archives are not installers.
 

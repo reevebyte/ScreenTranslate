@@ -52,4 +52,21 @@ test('Tauri receives the explicit release tag so updater URLs never fall back to
  assert.ok(action,'Missing Tauri release action');
  assert.match(action,/releaseId: \$\{\{ needs\.prepare\.outputs\.release_id \}\}/);
  assert.match(action,/tagName: \$\{\{ env\.RELEASE_TAG \}\}/);
+ assert.match(
+  workflow,
+  /target: x86_64-pc-windows-msvc\r?\n            bundles: nsis/
+ );
+ assert.match(
+  workflow,
+  /target: x86_64-unknown-linux-gnu\r?\n            bundles: appimage,deb/
+ );
+ assert.match(
+  workflow,
+  /target: x86_64-apple-darwin\r?\n            bundles: dmg/
+ );
+ assert.match(
+  workflow,
+  /target: aarch64-apple-darwin\r?\n            bundles: dmg/
+ );
+ assert.match(action,/--bundles \$\{\{ matrix\.bundles \}\}/);
 });

@@ -32,7 +32,7 @@
 | **Windows 10 / 11 · x64** | **`*x64-setup.exe`**，按提示安装；需要系统 WebView2 |
 | macOS 14+ · Apple Silicon | `*aarch64.dmg` |
 | macOS 14+ · Intel | `*x64.dmg` |
-| Linux · x64 | `.AppImage`；也提供 `.deb` 与 `.rpm` |
+| Linux · x64 | `.AppImage`；Debian / Ubuntu 也可选择 `.deb` |
 
 `.sig`、`latest.json`、`latest-v2.json` 和 `.app.tar.gz` 用于自动更新，无需手动下载。GitHub 的 `Source code` 是源码，不是安装包。
 

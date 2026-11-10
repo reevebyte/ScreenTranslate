@@ -28,6 +28,35 @@ fn wayland_image_bounds(layout: &windows::ResultLayout, scale: f64) -> Rect {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn resized_layout_for_wayland(
+    layout: &windows::ResultLayout,
+    direction: crate::result_resize::ResizeDirection,
+    scale: f64,
+    start_size: (u32, u32),
+    final_size: (u32, u32),
+) -> windows::ResultLayout {
+    use crate::result_resize::ResizeDirection::*;
+    let mut resized = layout.clone();
+    if matches!(
+        direction,
+        NorthWest | NorthEast | East | SouthEast | SouthWest | West
+    ) {
+        let start = layout.image_width;
+        let delta = (final_size.0 as f64 - start_size.0 as f64) / scale;
+        resized.image_width = (start + delta).clamp(32.0_f64.min(start), 16000.0);
+    }
+    if matches!(
+        direction,
+        NorthWest | NorthEast | North | SouthEast | South | SouthWest
+    ) {
+        let start = layout.image_height;
+        let delta = (final_size.1 as f64 - start_size.1 as f64) / scale;
+        resized.image_height = (start + delta).clamp(12.0_f64.min(start), 16000.0);
+    }
+    resized
+}
+
 pub fn image_bounds(window: &WebviewWindow) -> Result<Rect> {
     let state = window.state::<AppState>();
     let frame = lock(&state.sessions)
@@ -219,15 +248,131 @@ pub fn begin_drag(app: &AppHandle) {
     bar.expected = None;
 }
 pub fn begin_image_drag(app: &AppHandle) -> Result<()> {
-    lock(&app.state::<AppState>().result_toolbar).image_moving = true;
+    #[cfg(target_os = "linux")]
+    let generation = {
+        let state = app.state::<AppState>();
+        let mut bar = lock(&state.result_toolbar);
+        bar.image_moving = true;
+        bar.gesture_generation += 1;
+        bar.gesture_generation
+    };
+    #[cfg(not(target_os = "linux"))]
+    {
+        lock(&app.state::<AppState>().result_toolbar).image_moving = true;
+    }
+    #[cfg(target_os = "linux")]
+    if screentrans_platform::is_wayland() {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(8)).await;
+            finish_wayland_drag_gesture(&app, Some(generation));
+        });
+    }
     sync(app)
 }
 pub fn finish_image_gesture(app: &AppHandle) -> Result<()> {
     lock(&app.state::<AppState>().result_toolbar).finish_image_gesture();
     sync(app)
 }
+
+#[cfg(target_os = "linux")]
+fn finish_wayland_drag_gesture(app: &AppHandle, expected_generation: Option<u64>) {
+    let state = app.state::<AppState>();
+    let frame_id = {
+        let mut bar = lock(&state.result_toolbar);
+        if expected_generation.is_some_and(|expected| expected != bar.gesture_generation)
+            || !bar.image_moving
+        {
+            return;
+        }
+        bar.finish_image_gesture();
+        lock(&state.result_frame_id).clone()
+    };
+    let _ = app.emit_to("result", "result-drag-ended", frame_id);
+}
+
+#[cfg(target_os = "linux")]
+fn finish_wayland_resize_gesture(
+    app: &AppHandle,
+    window: &WebviewWindow,
+    expected_generation: u64,
+) {
+    let state = app.state::<AppState>();
+    if lock(&state.result_toolbar).gesture_generation != expected_generation {
+        return;
+    }
+    let Some(gesture) = lock(&state.result_resize).clone() else {
+        return;
+    };
+    if *lock(&state.result_frame_id) != gesture.frame_id {
+        *lock(&state.result_resize) = None;
+        return;
+    }
+    let Ok(size) = window.inner_size() else {
+        return;
+    };
+    let layout = resized_layout_for_wayland(
+        &gesture.layout,
+        gesture.direction,
+        gesture.scale,
+        gesture.start_size,
+        (size.width, size.height),
+    );
+    *lock(&state.result_layout) = layout.clone();
+    *lock(&state.result_resize) = None;
+    lock(&state.result_toolbar).finish_image_gesture();
+    let _ = window.emit("result-layout-changed", layout);
+    let _ = app.emit_to("result", "result-resize-ended", gesture.frame_id);
+}
+
+#[cfg(target_os = "linux")]
+fn schedule_wayland_drag_finish(window: &tauri::Window) {
+    let app = window.app_handle().clone();
+    let generation = {
+        let state = app.state::<AppState>();
+        let mut bar = lock(&state.result_toolbar);
+        if !bar.image_moving {
+            return;
+        }
+        bar.gesture_generation += 1;
+        bar.gesture_generation
+    };
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(240)).await;
+        finish_wayland_drag_gesture(&app, Some(generation));
+    });
+}
+
+#[cfg(target_os = "linux")]
+fn schedule_wayland_resize_finish(window: &tauri::Window) {
+    let app = window.app_handle().clone();
+    let generation = {
+        let state = app.state::<AppState>();
+        let mut bar = lock(&state.result_toolbar);
+        if !bar.image_resizing {
+            return;
+        }
+        bar.gesture_generation += 1;
+        bar.gesture_generation
+    };
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(180)).await;
+        let Some(window) = app.get_webview_window("result") else {
+            return;
+        };
+        finish_wayland_resize_gesture(&app, &window, generation);
+    });
+}
+
 pub async fn finish_image_drag(window: &WebviewWindow) -> Result<()> {
     let frame_id = lock(&window.state::<AppState>().result_frame_id).clone();
+    #[cfg(target_os = "linux")]
+    if screentrans_platform::is_wayland() {
+        if *lock(&window.state::<AppState>().result_frame_id) == frame_id {
+            finish_wayland_drag_gesture(window.app_handle(), None);
+        }
+        return Ok(());
+    }
     // On Windows startDragging dispatches the native move loop before its Promise
     // resolves. Wait for the actual mouse release rather than that IPC reply.
     #[cfg(windows)]
@@ -278,6 +423,10 @@ pub fn window_changed(window: &tauri::Window) {
         return;
     }
     if screentrans_platform::is_wayland() {
+        #[cfg(target_os = "linux")]
+        if label == "result" {
+            schedule_wayland_drag_finish(window);
+        }
         return;
     }
     if label == "result" {
@@ -322,6 +471,22 @@ pub fn window_changed(window: &tauri::Window) {
     });
 }
 
+pub fn window_resized(window: &tauri::Window) {
+    let label = window.label();
+    if label != "result" && label != "result-tools" {
+        return;
+    }
+    #[cfg(target_os = "linux")]
+    if screentrans_platform::is_wayland() {
+        if label == "result" && lock(&window.state::<AppState>().result_resize).is_some() {
+            schedule_wayland_resize_finish(window);
+            return;
+        }
+        return;
+    }
+    window_changed(window);
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::wayland_image_bounds;
@@ -345,5 +510,49 @@ mod tests {
         let right = wayland_image_bounds(&layout, 2.0);
         assert_eq!((left.x, left.width), (16.0, 48.0));
         assert_eq!((right.x, right.width), (448.0, 48.0));
+    }
+}
+
+#[cfg(test)]
+mod resize_tests {
+    use super::resized_layout_for_wayland;
+    use crate::{result_resize::ResizeDirection, windows::ResultLayout};
+
+    #[test]
+    fn wayland_native_resize_keeps_the_unused_viewport_reserve() {
+        let layout = ResultLayout {
+            frame_id: "frame".into(),
+            image_width: 40.0,
+            image_height: 20.0,
+            ..Default::default()
+        };
+        let resized = resized_layout_for_wayland(
+            &layout,
+            ResizeDirection::SouthEast,
+            1.0,
+            (256, 84),
+            (286, 124),
+        );
+        assert_eq!((resized.image_width, resized.image_height), (70.0, 60.0));
+    }
+
+    #[test]
+    fn wayland_native_resize_changes_only_the_dragged_axes() {
+        let layout = ResultLayout {
+            image_width: 400.0,
+            image_height: 200.0,
+            ..Default::default()
+        };
+        let north = resized_layout_for_wayland(
+            &layout,
+            ResizeDirection::North,
+            1.5,
+            (616, 364),
+            (616, 304),
+        );
+        assert_eq!((north.image_width, north.image_height), (400.0, 160.0));
+        let west =
+            resized_layout_for_wayland(&layout, ResizeDirection::West, 1.5, (616, 364), (556, 364));
+        assert_eq!((west.image_width, west.image_height), (360.0, 200.0));
     }
 }

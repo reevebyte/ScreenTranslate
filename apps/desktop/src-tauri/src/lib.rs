@@ -103,11 +103,11 @@ pub fn run() {
                     windows::apply_theme(&app, theme);
                 });
             }
-            if matches!(
-                event,
-                tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)
-            ) {
+            if matches!(event, tauri::WindowEvent::Moved(_)) {
                 result_tools::window_changed(window);
+            }
+            if matches!(event, tauri::WindowEvent::Resized(_)) {
+                result_tools::window_resized(window);
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 windows::close_requested(window, api);
@@ -305,6 +305,8 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         tray = tray.icon(icon.clone());
     }
     tray.build(app)?;
+    lock(&app.state::<AppState>().capabilities).tray = true;
+    let _ = app.emit("capabilities-changed", ());
     let _ = app.emit("tray-ready", ());
     Ok(())
 }

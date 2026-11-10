@@ -21,6 +21,8 @@ pub struct ResizeGesture {
     pub cursor: (f64, f64),
     pub direction: ResizeDirection,
     pub scale: f64,
+    #[cfg(target_os = "linux")]
+    pub start_size: (u32, u32),
     pub layout: crate::windows::ResultLayout,
 }
 

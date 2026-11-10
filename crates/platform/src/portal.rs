@@ -20,6 +20,59 @@ fn portal_error() -> AppError {
     .action("permissions")
 }
 
+fn shortcut_error(value: &str) -> AppError {
+    AppError::new(ErrorCode::Configuration, format!("快捷键格式无效：{value}")).action("hotkeys")
+}
+
+fn preferred_trigger(value: &str) -> Option<String> {
+    let mut trigger = Vec::new();
+    for raw in value.split('+') {
+        let part = raw.trim();
+        if part.is_empty() {
+            return None;
+        }
+        let lower = part.to_ascii_lowercase();
+        let upper = part.to_ascii_uppercase();
+        let function_key = upper.len() > 1
+            && upper.starts_with('F')
+            && upper[1..]
+                .chars()
+                .all(|character| character.is_ascii_digit());
+        let token = match lower.as_str() {
+            "ctrl" | "control" => "CTRL".to_string(),
+            "alt" => "ALT".to_string(),
+            "shift" => "SHIFT".to_string(),
+            "super" | "meta" | "win" | "logo" => "LOGO".to_string(),
+            "space" => "space".to_string(),
+            "enter" | "return" => "Return".to_string(),
+            "tab" => "Tab".to_string(),
+            "escape" | "esc" => "Escape".to_string(),
+            "backspace" => "BackSpace".to_string(),
+            "delete" => "Delete".to_string(),
+            "arrowup" => "Up".to_string(),
+            "arrowdown" => "Down".to_string(),
+            "arrowleft" => "Left".to_string(),
+            "arrowright" => "Right".to_string(),
+            "pageup" => "Page_Up".to_string(),
+            "pagedown" => "Page_Down".to_string(),
+            "home" => "Home".to_string(),
+            "end" => "End".to_string(),
+            "insert" => "Insert".to_string(),
+            _ if part.len() == 1
+                && part
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric()) =>
+            {
+                part.to_ascii_lowercase()
+            }
+            _ if function_key => upper,
+            _ => return None,
+        };
+        trigger.push(token);
+    }
+    (!trigger.is_empty()).then(|| trigger.join("+"))
+}
+
 fn decode_image_file(path: &Path) -> Option<image::RgbaImage> {
     let metadata = std::fs::metadata(path).ok()?;
     if !metadata.is_file() || metadata.len() == 0 || metadata.len() > 64 * 1024 * 1024 {
@@ -178,14 +231,18 @@ pub async fn shortcuts(
         .iter()
         .filter(|(_, _, key)| !key.is_empty())
         .map(|(id, description, key)| {
-            NewShortcut::new(*id, *description).preferred_trigger(Some(key.as_str()))
+            preferred_trigger(key)
+                .map(|trigger| {
+                    NewShortcut::new(*id, *description).preferred_trigger(Some(trigger.as_str()))
+                })
+                .ok_or_else(|| shortcut_error(key))
         })
-        .collect();
+        .collect::<Result<_>>()?;
     let binding = tokio::time::timeout(
         Duration::from_secs(120),
         portal.bind_shortcuts(&session, &shortcuts, None, Default::default()),
     );
-    tokio::select! {
+    let bound = tokio::select! {
         _ = stop.cancelled() => { let _ = session.close().await; return Ok(()); }
         result = binding => result
     .map_err(|_| portal_error())?
@@ -193,6 +250,10 @@ pub async fn shortcuts(
     .response()
     .map_err(|_| portal_error())?,
     };
+    if bound.shortcuts().is_empty() {
+        let _ = session.close().await;
+        return Err(portal_error());
+    }
     let closed = session.receive_closed().await.map_err(|_| portal_error())?;
     futures_util::pin_mut!(closed);
     handler("ready".into());
@@ -208,4 +269,26 @@ pub async fn shortcuts(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preferred_trigger;
+
+    #[test]
+    fn portal_triggers_use_the_freedesktop_shortcut_language() {
+        assert_eq!(
+            preferred_trigger("Ctrl+Alt+Q").as_deref(),
+            Some("CTRL+ALT+q")
+        );
+        assert_eq!(
+            preferred_trigger("Ctrl+Alt+Space").as_deref(),
+            Some("CTRL+ALT+space")
+        );
+        assert_eq!(
+            preferred_trigger("Win+Shift+F12").as_deref(),
+            Some("LOGO+SHIFT+F12")
+        );
+        assert_eq!(preferred_trigger("Ctrl+Unknown"), None);
+    }
 }

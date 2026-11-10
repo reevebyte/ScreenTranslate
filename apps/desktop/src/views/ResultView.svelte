@@ -105,6 +105,10 @@ import { onMount, onDestroy, tick } from 'svelte';
     };
     void (async () => {
       if (!toolsOnly) await subscribe<{text:string;tone:'normal'|'error'}>('result-feedback', value => showNotice(value.text,value.tone));
+      if (isWayland) {
+        await subscribe('result-drag-ended', () => { imageDragging = false; });
+        await subscribe('result-resize-ended', () => clearWaylandResize());
+      }
       await subscribe('result-display-changed', applyDisplay);
       applyDisplay(await call('result_display'));
       if (toolsOnly) {
@@ -164,7 +168,7 @@ import { onMount, onDestroy, tick } from 'svelte';
     ['nw',t("左上角"),'NorthWest'], ['n',t("上边"),'North'], ['ne',t("右上角"),'NorthEast'], ['e',t("右边"),'East'],
     ['se',t("右下角"),'SouthEast'], ['s',t("下边"),'South'], ['sw',t("左下角"),'SouthWest'], ['w',t("左边"),'West'],
   ] as const);
-  let resizing: { id:number;node:HTMLElement;start:Promise<unknown>;direction:string;startCursor:{x:number;y:number};currentCursor:{x:number;y:number};anchor:{left:number;top:number;right:number;bottom:number;width:number;height:number} } | null = null;
+  let resizing = $state<{ id:number;node:HTMLElement;start:Promise<unknown>;direction:string;startCursor:{x:number;y:number};currentCursor:{x:number;y:number};anchor:{left:number;top:number;right:number;bottom:number;width:number;height:number} } | null>(null);
   let resizePreview = $state<{left:number;top:number;width:number;height:number}|null>(null);
   let previewFrame=0;
   let resizeEnding=$state(false);
@@ -212,17 +216,26 @@ import { onMount, onDestroy, tick } from 'svelte';
     event.preventDefault();event.stopPropagation();
     if (!desktop || event.button !== 0 || resizing || resizeEnding) return;
     const node=event.currentTarget as HTMLElement;
-    try { node.setPointerCapture(event.pointerId); } catch { /* Test pointers do not have native capture. */ }
     const rect=node.closest('.floating-canvas-stage')!.getBoundingClientRect();
     const curX=event.screenX||(event.clientX+screenX);
     const curY=event.screenY||(event.clientY+screenY);
     resizing={id:event.pointerId,node,start:call('begin_result_resize',{direction}),direction,startCursor:{x:curX,y:curY},currentCursor:{x:curX,y:curY},anchor:{left:screenX+rect.left,top:screenY+rect.top,right:screenX+rect.right,bottom:screenY+rect.bottom,width:rect.width,height:rect.height}};
-    paintResizePreview();
     const gesture=resizing;
+    if (isWayland) {
+      resizePreview=null;
+      gesture.start.then(() => {
+        if (resizing !== gesture) return;
+        return getCurrentWindow().startResizeDragging(direction);
+      }).catch(() => { void endResize(); });
+      return;
+    }
+    try { node.setPointerCapture(event.pointerId); } catch { /* Test pointers do not have native capture. */ }
+    paintResizePreview();
     resizing.start.then(()=>{if(resizing===gesture)nativeOutlineReady=true;}).catch(() => { void endResize(); });
   }
   function resizeMove(event: PointerEvent) {
     if (!resizing || resizeEnding || resizing.id !== event.pointerId) return;
+    if (isWayland) return;
     event.preventDefault();
     const curX=event.screenX||(event.clientX+screenX);
     const curY=event.screenY||(event.clientY+screenY);
@@ -232,16 +245,37 @@ import { onMount, onDestroy, tick } from 'svelte';
   }
   async function writeResize() {
     const gesture=resizing;
-    if (!gesture || !resizeDirty || resizeWrite) return;
+    if (!gesture || isWayland || !resizeDirty || resizeWrite) return;
     resizeDirty=false;
     const write=gesture.start.then(() => call('update_result_resize',resizeArgs(false, gesture)));
     resizeWrite=write;
     try { await write; } catch { void endResize(); }
     finally { if (resizeWrite === write) resizeWrite=null; if (resizeDirty && !resizeEnding && resizing === gesture && !resizeFrame) resizeFrame=requestAnimationFrame(() => { resizeFrame=0;void writeResize(); }); }
   }
+  function clearWaylandResize() {
+    if (!isWayland) return;
+    if (resizeFrame) { cancelAnimationFrame(resizeFrame); resizeFrame=0; }
+    if (previewFrame) { cancelAnimationFrame(previewFrame); previewFrame=0; }
+    const stage = resizing?.node.closest('.floating-canvas-stage') as HTMLElement | null;
+    if (stage) {
+      stage.style.left = '';
+      stage.style.right = '';
+      stage.style.top = '';
+      stage.style.width = '';
+      stage.style.height = '';
+    }
+    resizing=null; resizePreview=null; nativeOutlineReady=false; resizeEnding=false; resizeDirty=false;
+  }
   async function endResize(event?: PointerEvent) {
     const gesture=resizing;
     if (!gesture || resizeEnding || (event && event.pointerId !== gesture.id)) return;
+    if (isWayland) {
+      resizeEnding=true;
+      try { await gesture.start; } catch { /* Native resize may be cancelled by the compositor. */ }
+      try { await call('update_result_resize',{finish:true}); } catch { /* Window may already be closed. */ }
+      clearWaylandResize();
+      return;
+    }
     if (resizeDirty && !resizeWrite) void writeResize();
     const flushLatest = resizeDirty;
     // Keep the preview tracking native layout until the final pending write settles.
@@ -397,17 +431,30 @@ import { onMount, onDestroy, tick } from 'svelte';
     void (async () => {
       try {
         if (isWayland) {
-          await getCurrentWindow().startDragging();
+          await call('begin_result_drag');
         } else {
           await call('begin_result_drag');
           await getCurrentWindow().startDragging();
         }
-      } catch { showNotice(t("无法移动截图，请重试"), 'error'); }
+      } catch {
+        if (isWayland) {
+          imageDragging = false;
+          void call('finish_result_drag').catch(()=>{});
+        }
+        showNotice(t("无法移动截图，请重试"), 'error');
+      }
       finally {
-        if (!isWayland) await call('finish_result_drag').catch(()=>{});
-        imageDragging = false;
+        if (!isWayland) {
+          await call('finish_result_drag').catch(()=>{});
+          imageDragging = false;
+        }
       }
     })();
+  }
+  function releaseImageDrag() {
+    if (!isWayland || !imageDragging) return;
+    imageDragging = false;
+    void call('finish_result_drag').catch(()=>{});
   }
 
   function keydown(event: KeyboardEvent) {
@@ -445,6 +492,8 @@ import { onMount, onDestroy, tick } from 'svelte';
 
 <svelte:window
   onkeydown={keydown}
+  onpointerup={releaseImageDrag}
+  onpointercancel={releaseImageDrag}
   onkeyup={event => {
     if (event.key === ' ' && holdingOriginal) setDisplay(original, comparing, false);
   }}
@@ -525,7 +574,7 @@ import { onMount, onDestroy, tick } from 'svelte';
       <div class="result-selection-border">{#each handles as [position,label,direction]}<button class={`resize-handle ${position}`} aria-label={t("调整{0}大小",label)} onpointerdown={event => resize(event,direction)} onpointermove={resizeMove} onpointerup={endResize} onpointercancel={endResize} onlostpointercapture={endResize}></button>{/each}</div>
 
     </div>
-    <div class="floating-controls" class:toolbar-left={toolbarAlignLeft} class:notice-compact={!!notice && contentHeight < 60} inert={!!notice && contentHeight < 60} style:top={controlsAbove ? `${imagePadding}px` : `${frame.height * scaleY + imagePadding}px`}>
+    <div class="floating-controls" class:toolbar-left={toolbarAlignLeft} class:gesture-active={imageDragging || !!resizing} class:notice-compact={!!notice && contentHeight < 60} inert={!!notice && contentHeight < 60 || imageDragging || !!resizing} style:top={controlsAbove ? `${imagePadding}px` : `${frame.height * scaleY + imagePadding}px`}>
       {#if !desktop || isWayland}{@render floatingToolbar()}{/if}
 
     </div>

@@ -15,6 +15,8 @@ pub struct ToolbarState {
     #[serde(skip)]
     pub generation: u64,
     #[serde(skip)]
+    pub gesture_generation: u64,
+    #[serde(skip)]
     pub image_moving: bool,
     #[serde(skip)]
     pub image_resizing: bool,

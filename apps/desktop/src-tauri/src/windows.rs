@@ -416,6 +416,8 @@ pub fn begin_result_resize(
         (cursor.x, cursor.y)
     };
     let bounds = crate::result_tools::image_bounds(window)?;
+    #[cfg(target_os = "linux")]
+    let size = window.inner_size().map_err(|_| window_error())?;
     *lock(&state.result_resize) = Some(crate::result_resize::ResizeGesture {
         #[cfg(windows)]
         outline: crate::resize_outline::ResizeOutline::new(window, bounds, scale)?,
@@ -425,9 +427,15 @@ pub fn begin_result_resize(
         cursor,
         direction,
         scale,
+        #[cfg(target_os = "linux")]
+        start_size: (size.width, size.height),
         layout,
     });
-    lock(&state.result_toolbar).image_resizing = true;
+    {
+        let mut toolbar = lock(&state.result_toolbar);
+        toolbar.image_resizing = true;
+        toolbar.gesture_generation += 1;
+    }
     crate::result_tools::sync(window.app_handle())?;
     Ok(())
 }

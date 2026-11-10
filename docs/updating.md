@@ -43,7 +43,7 @@ Windows 标题栏的下载按钮不会增加 WebView；点击先下载，再次�
 
 提交并推送修复后，从 main 新运行发布工作流：tag 填 v2.0.2，并勾选“Only finish update metadata using the existing uploaded installers”。此模式跳过四个平台编译，复用草稿中已上传的安装包，只生成更新清单。
 
-四个平台只上传安装包和签名，不再各自改写 latest.json。最后一个任务从认证后的 Release 附件目录与下载的 .sig 文件统一生成清单，必须包含 Windows x64、Linux x64、macOS Intel 和 Apple Silicon；存在 MSI、DEB、RPM 时也保留对应条目。缺少任一主要平台或签名会明确报错，不会上传不完整清单。
+四个平台只上传安装包和签名，不再各自改写 latest.json。最后一个任务从认证后的 Release 附件目录与下载的 .sig 文件统一生成清单，必须包含 Windows x64、Linux x64、macOS Intel 和 Apple Silicon；存在历史 DEB 附件时也保留对应条目。缺少任一主要平台或签名会明确报错，不会上传不完整清单。
 
 补清单模式不读取旧 latest.json，因此草稿临时地址、latest/download 地址、旧清单损坏或并发合并遗漏都不会影响重建。新清单中的地址固定到指定版本；签名内容直接保留上传的 .sig 原文。上传 latest.json、latest-v2.json、许可证及第三方说明后，流程重新下载两份清单并逐字节比对。最后任务变绿后才发布草稿。
 

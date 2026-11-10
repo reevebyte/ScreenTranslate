@@ -37,7 +37,17 @@ pub async fn begin_result_drag(window: WebviewWindow) -> Result<()> {
             "请在截图窗口移动截图",
         ));
     }
-    crate::result_tools::begin_image_drag(window.app_handle())
+    crate::result_tools::begin_image_drag(window.app_handle())?;
+    #[cfg(target_os = "linux")]
+    if screentrans_platform::is_wayland() {
+        // Keep focus and the native drag request in one backend turn. Starting them
+        // from separate IPC calls made the first drag only focus the Wayland window.
+        let _ = window.set_focus();
+        window
+            .start_dragging()
+            .map_err(|_| AppError::new(ErrorCode::Internal, "无法移动截图，请重试"))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
