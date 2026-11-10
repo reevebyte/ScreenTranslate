@@ -241,6 +241,32 @@ describe('floating screenshot recovery', () => {
     expect((tools.querySelector('.floating-hud') as HTMLElement).style.transform).toBe('');
   });
 
+  it('keeps the toolbar inside the result window and drags without focus-changing IPC on Wayland', async () => {
+    app.data!.capabilities.wayland = true;
+    const view = render(ResultView, { floating: true });
+    await waitFor(() => expect(events.get('result-layout-changed')?.size).toBe(1));
+    expect(view.container.querySelector('.floating-shell')?.contains(view.getByRole('toolbar', { name: '截图操作' }))).toBe(true);
+    expect(document.querySelector('.toolbar-window')).toBeNull();
+
+    await fireEvent.pointerDown(view.getByAltText('截图原文'), { button: 0 });
+    await waitFor(() => expect(startDragging).toHaveBeenCalledOnce());
+    expect(call).not.toHaveBeenCalledWith('begin_result_drag');
+    expect(call).not.toHaveBeenCalledWith('finish_result_drag');
+  });
+
+  it('sends pointer deltas for Wayland resizing instead of reading unavailable screen coordinates', async () => {
+    app.data!.capabilities.wayland = true;
+    const view = render(ResultView, { floating: true });
+    const handle = view.getByRole('button', { name: '调整右边大小' });
+    await fireEvent.pointerDown(handle, { button: 0, pointerId: 1, screenX: 100, screenY: 100 });
+    await fireEvent.pointerMove(handle, { pointerId: 1, screenX: 124, screenY: 136 });
+    await waitFor(() => expect(call).toHaveBeenCalledWith('update_result_resize', {
+      finish: false,
+      dx: 24,
+      dy: 36,
+    }));
+  });
+
   it('lets the user cancel a running job without starting a window drag', async () => {
     const view = renderResult();
     const button = view.getByRole('button', { name: '取消截图翻译' });

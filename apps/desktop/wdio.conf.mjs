@@ -34,6 +34,19 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const endpoint = `http://127.0.0.1:${server.address().port}/v1`;
 const appBinaryPath = fileURLToPath(new URL(`../../target/debug/screentranslate${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url));
 
+export async function switchToWindowMode(name) {
+  const deadline = Date.now() + 15000;
+  do {
+    for (const handle of await browser.getWindowHandles()) {
+      await browser.switchToWindow(handle);
+      const mode = await browser.execute(() => new URLSearchParams(location.search).get('window') || 'main');
+      if (mode === name) return handle;
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (Date.now() < deadline);
+  throw new Error(`Window mode ${name} was not available`);
+}
+
 export const config = {
   runner: 'local',
   specs: ['./tests/e2e/desktop.mjs'],
@@ -47,9 +60,11 @@ export const config = {
   connectionRetryCount: 1,
   mochaOpts: { timeout: 90000 },
   before: async () => {
+    await switchToWindowMode('main');
     await browser.$('.app-shell').waitForDisplayed();
     await browser.execute(async()=>{document.querySelectorAll('.rail-main .rail-link')[1]?.click();await new Promise(resolve=>setTimeout(resolve,350));});
     await browser.execute(async()=>{localStorage.setItem('screentranslate-ui-language','zh-CN');await window.__TAURI__.event.emit('ui-locale-changed',{language:'zh-CN'});});
+    await browser.waitUntil(() => browser.execute(() => document.documentElement.lang === 'zh-CN'));
     await browser.tauri.execute(async ({ core }, endpoint) => {
       const snapshot = await core.invoke('bootstrap');
       const config = snapshot.config;

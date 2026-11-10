@@ -191,6 +191,7 @@ pub fn run() {
             if !cfg!(feature = "e2e")
                 && screentrans_platform::is_wayland()
                 && lock(&state.config).wayland_shortcuts
+                && !lock(&state.capabilities).global_shortcuts
             {
                 shortcuts::configure_portal(handle.clone(), keys);
             }
@@ -208,6 +209,8 @@ pub fn run() {
                 windows::begin_capture(handle.clone(), None);
             } else if arguments.iter().any(|arg| arg == "--quick") {
                 let _ = windows::toggle_quick(&handle);
+            } else if arguments.iter().any(|arg| arg == "--toggle-result") {
+                let _ = windows::toggle_result(&handle);
             } else if !background {
                 windows::show_main(&handle)?;
             } else {

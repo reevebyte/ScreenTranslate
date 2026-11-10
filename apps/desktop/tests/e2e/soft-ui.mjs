@@ -49,7 +49,6 @@ describe('soft desktop design through native windows', () => {
     await appearance('light', 1.5, [600, 400]);
     await $('[aria-label="设置"]').click();
     await $('[role="tab"]=常规').click();
-    await $('summary=更多设置').click();
     await $('#auto-copy').scrollIntoView();
     await expect($('#auto-copy')).toBeDisplayed();
     await browser.saveScreenshot(resolve(directory, 'advanced-min150.png'));
@@ -89,7 +88,7 @@ describe('soft desktop design through native windows', () => {
     expect(positions.every(p => p.x === positions[0].x && p.y === positions[0].y)).toBe(true);
     await writeFile(resolve(directory, 'module-origin.json'), JSON.stringify(positions, null, 2));
   });
-  it('scrolls service choices only on wheel or keyboard input and keeps the OCR icon round', async () => {
+  it('keeps service choices steady on hover, supports keyboard scrolling, and keeps the OCR icon round', async () => {
     await appearance('dark', 1, [600, 400]);
     await $('[aria-label="Services"]').click();
     await $('[role="tab"]=Translation').click();
@@ -107,9 +106,11 @@ describe('soft desktop design through native windows', () => {
     expect(initial.overflow).toBe(true);
     await browser.performActions([{ type: 'pointer', id: 'menu-mouse', parameters: { pointerType: 'mouse' }, actions: [{ type: 'pointerMove', duration: 100, x: initial.x, y: initial.y }, { type: 'pause', duration: 450 }] }]);
     expect(await browser.execute(() => document.querySelector('.select-viewport').scrollTop)).toBe(0);
-    await browser.performActions([{ type: 'wheel', id: 'menu-wheel', actions: [{ type: 'scroll', x: initial.x, y: initial.y, deltaX: 0, deltaY: 240, duration: 150 }] }]);
+    // WebView2's WebDriver builds are non-trusted and do not trigger native wheel defaults.
+    // Exercise the supported keyboard path instead of passing on a synthetic event alone.
+    await browser.keys(['ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown']);
     await browser.waitUntil(() => browser.execute(() => document.querySelector('.select-viewport').scrollTop > 0));
-    await browser.saveScreenshot(resolve(directory, 'service-wheel-menu.png'));
+    await browser.saveScreenshot(resolve(directory, 'service-keyboard-menu.png'));
     await browser.keys(['Home', 'ArrowDown', 'Enter']);
     await browser.waitUntil(async () => !await $('.choice-menu').isExisting());
     await $('[role="tab"]=OCR').click();
@@ -119,8 +120,8 @@ describe('soft desktop design through native windows', () => {
       const icon = document.querySelector('.connection-line > .setting-row-icon').getBoundingClientRect();
       return { width: icon.width, height: icon.height };
     });
-    expect(icon.width).toBe(30);
-    expect(icon.height).toBe(30);
+    expect(icon.width).toBe(icon.height);
+    expect(icon.width).toBe(36);
     await browser.saveScreenshot(resolve(directory, 'ocr-round-icon.png'));
   });
 });

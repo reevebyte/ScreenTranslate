@@ -32,6 +32,7 @@ import { onMount, onDestroy, tick } from 'svelte';
   let { floating = false, toolsOnly = false }: { floating?: boolean; toolsOnly?: boolean } = $props();
   let session = $derived(app.data?.visual);
   let frame = $derived(session?.frame);
+  let isWayland = $derived(!!app.data?.capabilities.wayland);
   let sourceText = $derived(extractedText(session));
   let original = $state(false);
   let holdingOriginal = $state(false);
@@ -197,6 +198,16 @@ import { onMount, onDestroy, tick } from 'svelte';
   let resizeFrame = 0;
   let resizeWrite: Promise<unknown> | null = null;
   let resizeDirty = false;
+  function resizeArgs(finish: boolean, gesture: typeof resizing = resizing) {
+    if (isWayland && gesture) {
+      return {
+        finish,
+        dx: gesture.currentCursor.x - gesture.startCursor.x,
+        dy: gesture.currentCursor.y - gesture.startCursor.y,
+      };
+    }
+    return { finish };
+  }
   function resize(event: PointerEvent,direction: typeof handles[number][2]) {
     event.preventDefault();event.stopPropagation();
     if (!desktop || event.button !== 0 || resizing || resizeEnding) return;
@@ -223,7 +234,7 @@ import { onMount, onDestroy, tick } from 'svelte';
     const gesture=resizing;
     if (!gesture || !resizeDirty || resizeWrite) return;
     resizeDirty=false;
-    const write=gesture.start.then(() => call('update_result_resize',{finish:false}));
+    const write=gesture.start.then(() => call('update_result_resize',resizeArgs(false, gesture)));
     resizeWrite=write;
     try { await write; } catch { void endResize(); }
     finally { if (resizeWrite === write) resizeWrite=null; if (resizeDirty && !resizeEnding && resizing === gesture && !resizeFrame) resizeFrame=requestAnimationFrame(() => { resizeFrame=0;void writeResize(); }); }
@@ -241,7 +252,7 @@ import { onMount, onDestroy, tick } from 'svelte';
     try {
       await gesture.start;
       await resizeWrite;
-      if (flushLatest) await call('update_result_resize',{finish:false});
+      if (flushLatest) await call('update_result_resize',resizeArgs(false, gesture));
     } catch { /* Restore tools even after a failed resize request. */ }
     finally {
       // Keep the fixed screen anchor until the last native geometry and IPC layout
@@ -249,8 +260,14 @@ import { onMount, onDestroy, tick } from 'svelte';
       await tick();await new Promise(resolve=>{const fallback=setTimeout(resolve,80);requestAnimationFrame(()=>requestAnimationFrame(()=>{clearTimeout(fallback);resolve(undefined);}));});
       try {
         const finalLayout=await call<ResultLayout>('result_layout');if(finalLayout)resultLayout=finalLayout;
-        const size=await getCurrentWindow().innerSize();
-        for(let i=0;i<12 && !disposed && !document.hidden && (Math.abs(innerWidth*devicePixelRatio-size.width)>.5 || Math.abs(innerHeight*devicePixelRatio-size.height)>.5);i++)await Promise.race([new Promise(requestAnimationFrame),new Promise(resolve=>setTimeout(resolve,60))]);
+        if (isWayland && finalLayout) {
+          const expectedWidth=Math.max(240, finalLayout.imageWidth ?? 0)+16;
+          const expectedHeight=(finalLayout.imageHeight ?? 0)+64;
+          for(let i=0;i<12 && !disposed && !document.hidden && (Math.abs(innerWidth-expectedWidth)>.5 || Math.abs(innerHeight-expectedHeight)>.5);i++)await Promise.race([new Promise(requestAnimationFrame),new Promise(resolve=>setTimeout(resolve,60))]);
+        } else {
+          const size=await getCurrentWindow().innerSize();
+          for(let i=0;i<12 && !disposed && !document.hidden && (Math.abs(innerWidth*devicePixelRatio-size.width)>.5 || Math.abs(innerHeight*devicePixelRatio-size.height)>.5);i++)await Promise.race([new Promise(requestAnimationFrame),new Promise(resolve=>setTimeout(resolve,60))]);
+        }
         await tick();
       } catch { /* Restore even when a native window was closed during release. */ }
       if(previewFrame){cancelAnimationFrame(previewFrame);previewFrame=0;}
@@ -379,11 +396,15 @@ import { onMount, onDestroy, tick } from 'svelte';
     imageDragging = true;
     void (async () => {
       try {
-        await call('begin_result_drag');
-        await getCurrentWindow().startDragging();
+        if (isWayland) {
+          await getCurrentWindow().startDragging();
+        } else {
+          await call('begin_result_drag');
+          await getCurrentWindow().startDragging();
+        }
       } catch { showNotice(t("无法移动截图，请重试"), 'error'); }
       finally {
-        await call('finish_result_drag').catch(()=>{});
+        if (!isWayland) await call('finish_result_drag').catch(()=>{});
         imageDragging = false;
       }
     })();
@@ -451,11 +472,11 @@ import { onMount, onDestroy, tick } from 'svelte';
       class="floating-canvas-stage"
       class:dragging={imageDragging}
       class:native-resizing={nativeOutlineReady && /Windows/.test(navigator.userAgent)}
-      style:left={resizeEnding && resizePreview ? resizePreview.left+'px' : undefined}
-      style:right={resizeEnding && resizePreview ? 'auto' : undefined}
-      style:top={resizeEnding && resizePreview ? resizePreview.top+'px' : undefined}
-      style:width={resizeEnding && resizePreview ? resizePreview.width+'px' : undefined}
-      style:height={resizeEnding && resizePreview ? resizePreview.height+'px' : undefined}
+      style:left={resizeEnding && resizePreview && !isWayland ? resizePreview.left+'px' : undefined}
+      style:right={resizeEnding && resizePreview && !isWayland ? 'auto' : undefined}
+      style:top={resizeEnding && resizePreview && !isWayland ? resizePreview.top+'px' : undefined}
+      style:width={resizeEnding && resizePreview && !isWayland ? resizePreview.width+'px' : undefined}
+      style:height={resizeEnding && resizePreview && !isWayland ? resizePreview.height+'px' : undefined}
       style:--image-width={`${resultLayout?.imageWidth ?? Math.max(0,frame.width * scale)}px`}
       bind:clientWidth={imageWidth}
       bind:clientHeight={imageHeight}
@@ -505,7 +526,7 @@ import { onMount, onDestroy, tick } from 'svelte';
 
     </div>
     <div class="floating-controls" class:toolbar-left={toolbarAlignLeft} class:notice-compact={!!notice && contentHeight < 60} inert={!!notice && contentHeight < 60} style:top={controlsAbove ? `${imagePadding}px` : `${frame.height * scaleY + imagePadding}px`}>
-      {#if !desktop}{@render floatingToolbar()}{/if}
+      {#if !desktop || isWayland}{@render floatingToolbar()}{/if}
 
     </div>
       {#if notice}<div class="overlay-notice" role={notice.tone === 'error' ? 'alert' : 'status'} style:top={contentHeight < 60 ? '50%' : ((controlsAbove ? 56 : 8) + contentHeight / 2) + 'px'} transition:fade={{ duration: prefersReducedMotion.current ? 0 : 120 }}>{notice.text}</div>{/if}

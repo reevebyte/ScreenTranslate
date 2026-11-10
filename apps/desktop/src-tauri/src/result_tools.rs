@@ -6,6 +6,28 @@ use screentrans_core::{Rect, Result};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 
+#[cfg(target_os = "linux")]
+fn wayland_image_bounds(layout: &windows::ResultLayout, scale: f64) -> Rect {
+    let width = layout.image_width * scale;
+    let padding = windows::RESULT_PADDING * scale;
+    let viewport_width = layout.image_width.max(windows::RESULT_CONTROLS_WIDTH) * scale;
+    Rect {
+        x: if layout.image_align_left {
+            padding
+        } else {
+            viewport_width + padding - width
+        },
+        y: windows::RESULT_PADDING * scale
+            + if layout.controls_above {
+                windows::RESULT_CONTROLS_HEIGHT * scale
+            } else {
+                0.0
+            },
+        width,
+        height: layout.image_height * scale,
+    }
+}
+
 pub fn image_bounds(window: &WebviewWindow) -> Result<Rect> {
     let state = window.state::<AppState>();
     let frame = lock(&state.sessions)
@@ -18,6 +40,10 @@ pub fn image_bounds(window: &WebviewWindow) -> Result<Rect> {
         return Err(windows::window_error());
     }
     let scale = window.scale_factor().map_err(|_| windows::window_error())?;
+    #[cfg(target_os = "linux")]
+    if screentrans_platform::is_wayland() && layout.image_width > 0.0 && layout.image_height > 0.0 {
+        return Ok(wayland_image_bounds(&layout, scale));
+    }
     let pos = window
         .inner_position()
         .map_err(|_| windows::window_error())?;
@@ -127,6 +153,9 @@ pub fn clamp_toolbar(app: &AppHandle) -> Result<()> {
     place(app, &tool, crate::result_toolbar::clamp(bounds, area))
 }
 pub fn sync(app: &AppHandle) -> Result<()> {
+    if screentrans_platform::is_wayland() {
+        return Ok(());
+    }
     let Some(image) = app.get_webview_window("result") else {
         return Ok(());
     };
@@ -170,12 +199,17 @@ pub fn dock(app: &AppHandle, above: bool, align_left: bool) -> Result<windows::R
         bar.align_left = align_left;
         bar.detached = false;
     }
-    sync(app)?;
     let state = app.state::<AppState>();
     let mut result = lock(&state.result_layout).clone();
-    let bar = lock(&state.result_toolbar);
+    let bar = lock(&state.result_toolbar).clone();
     result.controls_above = bar.above;
     result.toolbar_align_left = bar.align_left;
+    if screentrans_platform::is_wayland() {
+        *lock(&state.result_layout) = result.clone();
+        let _ = app.emit_to("result", "result-layout-changed", result.clone());
+    } else {
+        sync(app)?;
+    }
     Ok(result)
 }
 pub fn begin_drag(app: &AppHandle) {
@@ -243,6 +277,9 @@ pub fn window_changed(window: &tauri::Window) {
     if label != "result" && label != "result-tools" {
         return;
     }
+    if screentrans_platform::is_wayland() {
+        return;
+    }
     if label == "result" {
         let state = window.state::<AppState>();
         let bar = lock(&state.result_toolbar);
@@ -283,4 +320,30 @@ pub fn window_changed(window: &tauri::Window) {
             let _ = sync(&app);
         }
     });
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::wayland_image_bounds;
+    use crate::windows::ResultLayout;
+
+    #[test]
+    fn wayland_small_capture_bounds_follow_css_alignment() {
+        let layout = ResultLayout {
+            frame_id: "frame".into(),
+            image_width: 24.0,
+            image_height: 12.0,
+            ..Default::default()
+        };
+        let left = wayland_image_bounds(
+            &ResultLayout {
+                image_align_left: true,
+                ..layout.clone()
+            },
+            2.0,
+        );
+        let right = wayland_image_bounds(&layout, 2.0);
+        assert_eq!((left.x, left.width), (16.0, 48.0));
+        assert_eq!((right.x, right.width), (448.0, 48.0));
+    }
 }

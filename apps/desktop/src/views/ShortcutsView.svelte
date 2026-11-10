@@ -34,5 +34,5 @@
       <div class="shortcut-binding"><div class="shortcut-chord" aria-hidden="true">{#if draft.hotkeys[key]}{#each formatHotkeyParts(draft.hotkeys[key], isMac) as part}<kbd>{part}</kbd>{/each}{:else}<span>{t("设置快捷键")}</span>{/if}</div><input class="shortcut-key" aria-label={t("{0}快捷键",label)} title={t("点击后按组合键，Backspace 清除")} readonly value={draft.hotkeys[key]} onkeydown={event => record(event,key)}/></div>
     </div>
   {/each}</div>
-  {#if app.data?.capabilities.wayland}<button class="button button-outline button-size-default" onclick={() => act(call('configure_portal_shortcuts'))}>{t("配置系统快捷键")}<ArrowRight size={16}/></button>{/if}</div>
+  {#if app.data?.capabilities.wayland && !app.data?.capabilities.globalShortcuts}<button class="button button-outline button-size-default" onclick={() => act(call('configure_portal_shortcuts'))}>{t("配置系统快捷键")}<ArrowRight size={16}/></button>{/if}</div>
 </div>

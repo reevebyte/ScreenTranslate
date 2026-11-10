@@ -332,9 +332,9 @@ fn system_dark() -> bool {
     }
 }
 
-const RESULT_CONTROLS_HEIGHT: f64 = 48.0;
-const RESULT_CONTROLS_WIDTH: f64 = 240.0;
-const RESULT_PADDING: f64 = 8.0;
+pub(crate) const RESULT_CONTROLS_HEIGHT: f64 = 48.0;
+pub(crate) const RESULT_CONTROLS_WIDTH: f64 = 240.0;
+pub(crate) const RESULT_PADDING: f64 = 8.0;
 
 #[derive(Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -403,7 +403,18 @@ pub fn begin_result_resize(
         .ok_or_else(window_error)?;
     let layout = lock(&state.result_layout).clone();
     let scale = window.scale_factor().map_err(|_| window_error())?;
-    let cursor = window.cursor_position().map_err(|_| window_error())?;
+    #[cfg(target_os = "linux")]
+    let cursor = if screentrans_platform::is_wayland() {
+        (0.0, 0.0)
+    } else {
+        let cursor = window.cursor_position().map_err(|_| window_error())?;
+        (cursor.x, cursor.y)
+    };
+    #[cfg(not(target_os = "linux"))]
+    let cursor = {
+        let cursor = window.cursor_position().map_err(|_| window_error())?;
+        (cursor.x, cursor.y)
+    };
     let bounds = crate::result_tools::image_bounds(window)?;
     *lock(&state.result_resize) = Some(crate::result_resize::ResizeGesture {
         #[cfg(windows)]
@@ -411,7 +422,7 @@ pub fn begin_result_resize(
         frame_id: frame.id,
         bounds,
         current: bounds,
-        cursor: (cursor.x, cursor.y),
+        cursor,
         direction,
         scale,
         layout,
@@ -421,7 +432,14 @@ pub fn begin_result_resize(
     Ok(())
 }
 
-pub fn update_result_resize(window: &tauri::WebviewWindow, finish: bool) -> Result<Option<Rect>> {
+pub fn update_result_resize(
+    window: &tauri::WebviewWindow,
+    finish: bool,
+    dx: Option<f64>,
+    dy: Option<f64>,
+) -> Result<Option<Rect>> {
+    #[cfg(not(target_os = "linux"))]
+    let _ = (dx, dy);
     let state = window.state::<AppState>();
     if finish {
         let bounds = lock(&state.result_resize)
@@ -437,12 +455,26 @@ pub fn update_result_resize(window: &tauri::WebviewWindow, finish: bool) -> Resu
         *lock(&state.result_resize) = None;
         return Ok(None);
     }
-    let cursor = window.cursor_position().map_err(|_| window_error())?;
+    #[cfg(target_os = "linux")]
+    let (delta_x, delta_y) = if screentrans_platform::is_wayland() {
+        (
+            dx.unwrap_or(0.0) * gesture.scale,
+            dy.unwrap_or(0.0) * gesture.scale,
+        )
+    } else {
+        let cursor = window.cursor_position().map_err(|_| window_error())?;
+        (cursor.x - gesture.cursor.0, cursor.y - gesture.cursor.1)
+    };
+    #[cfg(not(target_os = "linux"))]
+    let (delta_x, delta_y) = {
+        let cursor = window.cursor_position().map_err(|_| window_error())?;
+        (cursor.x - gesture.cursor.0, cursor.y - gesture.cursor.1)
+    };
     let bounds = crate::result_resize::resize(
         gesture.bounds,
         gesture.direction,
-        cursor.x - gesture.cursor.0,
-        cursor.y - gesture.cursor.1,
+        delta_x,
+        delta_y,
         gesture.scale,
     );
     let mut layout = gesture.layout.clone();
@@ -497,6 +529,10 @@ pub(crate) fn set_client_rect(window: &tauri::WebviewWindow, bounds: Rect) -> Re
                 bounds.height.round() as u32,
             ))
             .map_err(|_| window_error())?;
+        #[cfg(target_os = "linux")]
+        if screentrans_platform::is_wayland() {
+            return Ok(());
+        }
         let inner = window.inner_position().map_err(|_| window_error())?;
         let outer = window.outer_position().map_err(|_| window_error())?;
         window
@@ -716,7 +752,7 @@ pub fn show_result(app: &AppHandle, frame: &FrameMetadata) -> Result<()> {
             .transparent(true)
             .shadow(false)
             .always_on_top(true)
-            .resizable(false)
+            .resizable(cfg!(target_os = "linux"))
             .skip_taskbar(true)
             .build()
             .map_err(|_| window_error())?,
@@ -724,7 +760,9 @@ pub fn show_result(app: &AppHandle, frame: &FrameMetadata) -> Result<()> {
     lock(&app.state::<AppState>().window_lifecycle).forget("result");
     let _ = window.hide();
     let _ = crate::result_tools::hide(app);
-    let _ = crate::result_tools::prepare(app)?;
+    if !screentrans_platform::is_wayland() {
+        let _ = crate::result_tools::prepare(app)?;
+    }
     *lock(&app.state::<AppState>().result_frame_id) = frame.id.clone();
     let overlay = lock(&app.state::<AppState>().capabilities).overlay;
     let mut layout = if let Some(bounds) = frame.screen_bounds.filter(|_| overlay) {

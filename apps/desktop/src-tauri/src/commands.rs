@@ -66,14 +66,19 @@ pub async fn begin_result_resize(
 }
 
 #[tauri::command]
-pub async fn update_result_resize(window: WebviewWindow, finish: bool) -> Result<Option<Rect>> {
+pub async fn update_result_resize(
+    window: WebviewWindow,
+    finish: bool,
+    dx: Option<f64>,
+    dy: Option<f64>,
+) -> Result<Option<Rect>> {
     if window.label() != "result" {
         return Err(AppError::new(
             ErrorCode::PermissionDenied,
             "请在截图窗口调整大小",
         ));
     }
-    windows::update_result_resize(&window, finish)
+    windows::update_result_resize(&window, finish, dx, dy)
 }
 
 #[tauri::command]
