@@ -129,10 +129,10 @@ jobs:
             bundles: appimage,deb
           - os: macos-15
             target: x86_64-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
           - os: macos-15
             target: aarch64-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:

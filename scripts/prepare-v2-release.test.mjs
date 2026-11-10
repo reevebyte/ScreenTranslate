@@ -62,11 +62,11 @@ test('Tauri receives the explicit release tag so updater URLs never fall back to
  );
  assert.match(
   workflow,
-  /target: x86_64-apple-darwin\r?\n            bundles: dmg/
+  /target: x86_64-apple-darwin\r?\n            bundles: app,dmg/
  );
  assert.match(
   workflow,
-  /target: aarch64-apple-darwin\r?\n            bundles: dmg/
+  /target: aarch64-apple-darwin\r?\n            bundles: app,dmg/
  );
  assert.match(action,/--bundles \$\{\{ matrix\.bundles \}\}/);
 });
