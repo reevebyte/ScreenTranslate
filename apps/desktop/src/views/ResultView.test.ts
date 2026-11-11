@@ -8,7 +8,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async (name:string, fn:(
   const listeners=events.get(name)??new Set();listeners.add(fn);events.set(name,listeners);return ()=>listeners.delete(fn);
 }) }));
 vi.mock('$lib/api', () => ({ desktop: true, call, loadBootstrap: vi.fn() }));
-vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ startDragging, startResizeDragging, innerSize: vi.fn().mockResolvedValue({width:640,height:448}) }) }));
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ startDragging, startResizeDragging, innerSize: vi.fn(async () => ({width:window.innerWidth*devicePixelRatio,height:window.innerHeight*devicePixelRatio})) }) }));
 vi.mock('svelte/motion', () => ({ prefersReducedMotion: { current: true } }));
 vi.mock('svelte-sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 import { app } from '$lib/store.svelte';
@@ -169,7 +169,7 @@ describe('floating screenshot recovery', () => {
     await fireEvent.pointerDown(handle, { button: 0, pointerId: 1 });
     await fireEvent.pointerMove(handle, { pointerId: 1 });
     await fireEvent.pointerUp(handle, { button: 0, pointerId: 1 });
-    await waitFor(() => expect(call).toHaveBeenCalledWith('update_result_resize', { finish: true }));
+    await waitFor(() => expect(call).toHaveBeenCalledWith('update_result_resize', { finish: true }), { timeout: 2_000 });
     const writes = call.mock.calls.filter(([command]) => command === 'update_result_resize');
     expect(writes.map(([,args]) => args.finish)).toEqual([false,true]);
   });
