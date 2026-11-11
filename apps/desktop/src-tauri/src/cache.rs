@@ -1,8 +1,10 @@
-use image::RgbaImage;
+use image::{
+    ExtendedColorType, ImageEncoder, RgbaImage,
+    codecs::png::{CompressionType, FilterType, PngEncoder},
+};
 use screentrans_core::{AppError, CaptureFrame, ErrorCode, FrameMetadata, Rect, Result};
 use std::{
     collections::{HashMap, VecDeque},
-    io::Cursor,
     sync::Arc,
 };
 
@@ -14,20 +16,34 @@ pub struct RenderedImage {
 
 impl RenderedImage {
     pub fn encode(image: RgbaImage) -> Result<Self> {
-        let mut cursor = Cursor::new(Vec::new());
-        image
-            .write_to(&mut cursor, image::ImageFormat::Png)
-            .map_err(|_| AppError::new(ErrorCode::Internal, "图像编码失败"))?;
         Ok(Self {
-            png: cursor.into_inner(),
+            png: encode_png(&image)?,
         })
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PreviewFormat {
+    #[cfg(windows)]
+    Bmp,
+    Png,
+}
+
+impl PreviewFormat {
+    fn content_type(self) -> &'static str {
+        match self {
+            #[cfg(windows)]
+            Self::Bmp => "image/bmp",
+            Self::Png => "image/png",
+        }
     }
 }
 
 pub struct CachedFrame {
     pub metadata: FrameMetadata,
     pub image: Option<Arc<RgbaImage>>,
-    pub png: Arc<Vec<u8>>,
+    preview: Arc<Vec<u8>>,
+    preview_format: PreviewFormat,
 }
 
 #[derive(Default)]
@@ -49,13 +65,8 @@ impl FrameCache {
                 "图像过大或为空，请缩小截图范围",
             ));
         }
-        let mut cursor = Cursor::new(Vec::new());
-        frame
-            .image
-            .write_to(&mut cursor, image::ImageFormat::Png)
-            .map_err(|_| AppError::new(ErrorCode::Internal, "图像编码失败"))?;
-        let png = cursor.into_inner();
-        let cost = png.len() + frame.image.as_raw().len();
+        let (preview, preview_format) = encode_screen_preview(&frame.image)?;
+        let cost = preview.len() + frame.image.as_raw().len();
         if cost > CACHE_LIMIT {
             return Err(AppError::new(
                 ErrorCode::InvalidInput,
@@ -94,7 +105,8 @@ impl FrameCache {
             CachedFrame {
                 metadata: metadata.clone(),
                 image: Some(Arc::new(frame.image)),
-                png: Arc::new(png),
+                preview: Arc::new(preview),
+                preview_format,
             },
         );
         self.order.push_back(metadata.id.clone());
@@ -105,7 +117,8 @@ impl FrameCache {
     pub fn insert_derived(&mut self, parent_id: &str, rendered: RenderedImage) -> Result<String> {
         let metadata = self.metadata(parent_id)?;
         let RenderedImage { png } = rendered;
-        let cost = png.len();
+        let preview = Arc::new(png);
+        let cost = preview.len();
         let old_id = self
             .frames
             .get(parent_id)
@@ -114,7 +127,7 @@ impl FrameCache {
             .as_ref()
             .and_then(|id| self.frames.get(id))
             .map_or(0, |frame| {
-                frame.png.len() + frame.image.as_ref().map_or(0, |image| image.as_raw().len())
+                frame.preview.len() + frame.image.as_ref().map_or(0, |image| image.as_raw().len())
             });
         if self.bytes - old_cost + cost > CACHE_LIMIT {
             return Err(AppError::new(
@@ -139,7 +152,8 @@ impl FrameCache {
                     clean_id: None,
                 },
                 image: None,
-                png: Arc::new(png),
+                preview,
+                preview_format: PreviewFormat::Png,
             },
         );
         self.order.push_back(derived_id.clone());
@@ -156,8 +170,16 @@ impl FrameCache {
             .and_then(|frame| frame.image.clone())
             .ok_or_else(missing)
     }
+    pub fn preview(&self, id: &str) -> Option<(Arc<Vec<u8>>, &'static str)> {
+        self.frames
+            .get(id)
+            .map(|frame| (frame.preview.clone(), frame.preview_format.content_type()))
+    }
+    #[cfg(test)]
     pub fn png(&self, id: &str) -> Option<Arc<Vec<u8>>> {
-        self.frames.get(id).map(|frame| frame.png.clone())
+        self.frames.get(id).and_then(|frame| {
+            matches!(frame.preview_format, PreviewFormat::Png).then(|| frame.preview.clone())
+        })
     }
     pub fn metadata(&self, id: &str) -> Result<FrameMetadata> {
         self.frames
@@ -168,7 +190,7 @@ impl FrameCache {
     pub fn remove(&mut self, id: &str) {
         if let Some(frame) = self.frames.remove(id) {
             self.bytes -=
-                frame.png.len() + frame.image.as_ref().map_or(0, |image| image.as_raw().len());
+                frame.preview.len() + frame.image.as_ref().map_or(0, |image| image.as_raw().len());
         }
         self.order.retain(|entry| entry != id);
     }
@@ -206,9 +228,103 @@ fn missing() -> AppError {
     AppError::new(ErrorCode::InvalidInput, "截图已释放，请重新截图")
 }
 
+fn encode_png(image: &RgbaImage) -> Result<Vec<u8>> {
+    let mut png = Vec::new();
+    PngEncoder::new_with_quality(&mut png, CompressionType::Fast, FilterType::NoFilter)
+        .write_image(
+            image.as_raw(),
+            image.width(),
+            image.height(),
+            ExtendedColorType::Rgba8,
+        )
+        .map_err(|_| AppError::new(ErrorCode::Internal, "图像编码失败"))?;
+    Ok(png)
+}
+
+fn encode_screen_preview(image: &RgbaImage) -> Result<(Vec<u8>, PreviewFormat)> {
+    #[cfg(windows)]
+    {
+        Ok((encode_bmp(image), PreviewFormat::Bmp))
+    }
+    #[cfg(not(windows))]
+    {
+        Ok((encode_png(image)?, PreviewFormat::Png))
+    }
+}
+
+#[cfg(windows)]
+fn encode_bmp(image: &RgbaImage) -> Vec<u8> {
+    const FILE_HEADER_BYTES: u32 = 14;
+    const DIB_HEADER_BYTES: u32 = 40;
+    const PIXEL_OFFSET: u32 = FILE_HEADER_BYTES + DIB_HEADER_BYTES;
+
+    let width = image.width();
+    let height = image.height();
+    let row_bytes = width.saturating_mul(3);
+    let row_stride = row_bytes.saturating_add(3) & !3;
+    let row_padding = row_stride.saturating_sub(row_bytes);
+    let pixel_bytes = row_stride.saturating_mul(height);
+    let file_bytes = PIXEL_OFFSET.saturating_add(pixel_bytes);
+    let mut bmp = Vec::with_capacity(file_bytes as usize);
+    bmp.extend_from_slice(b"BM");
+    bmp.extend_from_slice(&file_bytes.to_le_bytes());
+    bmp.extend_from_slice(&[0; 4]);
+    bmp.extend_from_slice(&PIXEL_OFFSET.to_le_bytes());
+    bmp.extend_from_slice(&DIB_HEADER_BYTES.to_le_bytes());
+    bmp.extend_from_slice(&(width as i32).to_le_bytes());
+    bmp.extend_from_slice(&(height as i32).to_le_bytes());
+    bmp.extend_from_slice(&1_u16.to_le_bytes());
+    bmp.extend_from_slice(&24_u16.to_le_bytes());
+    bmp.extend_from_slice(&0_u32.to_le_bytes());
+    bmp.extend_from_slice(&pixel_bytes.to_le_bytes());
+    bmp.extend_from_slice(&0_i32.to_le_bytes());
+    bmp.extend_from_slice(&0_i32.to_le_bytes());
+    bmp.extend_from_slice(&0_u32.to_le_bytes());
+    bmp.extend_from_slice(&0_u32.to_le_bytes());
+    for row in image.rows().rev() {
+        for pixel in row {
+            bmp.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
+        }
+        bmp.extend(std::iter::repeat_n(0, row_padding as usize));
+    }
+    bmp
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_screen_preview_is_a_valid_browser_bmp() {
+        let mut cache = FrameCache::default();
+        let frame = cache
+            .insert(
+                CaptureFrame {
+                    image: RgbaImage::new(3, 2),
+                    screen_bounds: None,
+                    scale_factor: 1.0,
+                },
+                &[],
+            )
+            .unwrap();
+        let (preview, content_type) = cache.preview(&frame.id).unwrap();
+
+        assert_eq!(content_type, "image/bmp");
+        assert_eq!(&preview[..2], b"BM");
+        assert_eq!(
+            u32::from_le_bytes(preview[2..6].try_into().unwrap()) as usize,
+            preview.len()
+        );
+        assert_eq!(u32::from_le_bytes(preview[10..14].try_into().unwrap()), 54);
+        assert_eq!(u32::from_le_bytes(preview[14..18].try_into().unwrap()), 40);
+        assert_eq!(u32::from_le_bytes(preview[18..22].try_into().unwrap()), 3);
+        assert_eq!(u32::from_le_bytes(preview[22..26].try_into().unwrap()), 2);
+        assert_eq!(u16::from_le_bytes(preview[28..30].try_into().unwrap()), 24);
+        // Two rows are padded from 9 to 12 bytes per row in 24-bit BMP data.
+        assert_eq!(preview.len(), 54 + 24);
+    }
+
     #[test]
     fn repeated_rendering_replaces_previous_image_without_growing_cache() {
         let mut cache = FrameCache::default();
@@ -262,11 +378,10 @@ mod tests {
             assert!(cache.png(&clean).is_some());
             assert!(cache.image(&frame.id).is_ok());
             assert!(cache.image(&clean).is_err());
+            let (frame_preview, _) = cache.preview(&frame.id).unwrap();
             assert_eq!(
                 cache.bytes,
-                640 * 360 * 4
-                    + cache.png(&frame.id).unwrap().len()
-                    + cache.png(&clean).unwrap().len()
+                640 * 360 * 4 + frame_preview.len() + cache.png(&clean).unwrap().len()
             );
         }
     }

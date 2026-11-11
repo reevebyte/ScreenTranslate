@@ -4,6 +4,12 @@ allowBuilds:
   edgedriver: false
   esbuild: true
   geckodriver: false
+overrides:
+  '@puppeteer/browsers': 3.2.7
+  basic-ftp: 6.2.6
+  glob: 14.0.2
+  minimatch: 11.0.1
+  serialize-javascript: 7.1.4
 minimumReleaseAgeExclude:
   - '@wdio/native-core@1.3.1'
   - '@wdio/native-spy@1.4.1'
@@ -11,3 +17,4 @@ minimumReleaseAgeExclude:
   - '@wdio/native-utils@2.8.1'
   - '@wdio/tauri-plugin@1.5.1'
   - '@wdio/tauri-service@1.5.1'
+  - '@puppeteer/browsers@3.2.7'

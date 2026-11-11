@@ -186,9 +186,12 @@ pub async fn json_response(
 }
 
 pub(crate) async fn response_bytes(
-    mut response: Response,
+    response: Response,
     stop: &CancellationToken,
 ) -> Result<Vec<u8>> {
+    const RESPONSE_LIMIT: usize = 4 * 1024 * 1024;
+    const ERROR_DETAIL_LIMIT: usize = 64 * 1024;
+
     let status = response.status();
     if !status.is_success() {
         let code = match status.as_u16() {
@@ -202,8 +205,7 @@ pub(crate) async fn response_bytes(
             _ => "服务暂时无法处理请求，请检查配置或稍后重试",
         };
         let err_detail = if code == ErrorCode::Network {
-            response
-                .bytes()
+            read_limited_response(response, stop, ERROR_DETAIL_LIMIT)
                 .await
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
@@ -224,10 +226,17 @@ pub(crate) async fn response_bytes(
         };
         return Err(AppError::new(code, msg).action("providers"));
     }
-    const LIMIT: usize = 4 * 1024 * 1024;
+    read_limited_response(response, stop, RESPONSE_LIMIT).await
+}
+
+async fn read_limited_response(
+    mut response: Response,
+    stop: &CancellationToken,
+    limit: usize,
+) -> Result<Vec<u8>> {
     if response
         .content_length()
-        .is_some_and(|len| len > LIMIT as u64)
+        .is_some_and(|len| len > limit as u64)
     {
         return Err(AppError::new(ErrorCode::InvalidResponse, "服务响应过大"));
     }
@@ -238,7 +247,7 @@ pub(crate) async fn response_bytes(
             chunk = response.chunk() => chunk.map_err(|_| AppError::new(ErrorCode::Network, "服务连接在接收数据时中断"))?,
         };
         let Some(chunk) = chunk else { break };
-        if bytes.len() + chunk.len() > LIMIT {
+        if bytes.len() + chunk.len() > limit {
             return Err(AppError::new(ErrorCode::InvalidResponse, "服务响应过大"));
         }
         bytes.extend_from_slice(&chunk);
@@ -436,6 +445,26 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.code, ErrorCode::Network);
         assert!(!error.message.contains("private-path"));
+    }
+
+    #[tokio::test]
+    async fn oversized_error_details_are_ignored() {
+        let server = MockServer::start().await;
+        let oversized_detail = format!(
+            r#"{{"message":"{}"}}"#,
+            "untrusted-error-detail".repeat(4 * 1024)
+        );
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(500).set_body_string(oversized_detail))
+            .mount(&server)
+            .await;
+        let client = Client::builder().build().unwrap();
+        let response = client.get(server.uri()).send().await.unwrap();
+        let error = response_bytes(response, &CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::Network);
+        assert!(!error.message.contains("untrusted-error-detail"));
     }
 
     #[test]

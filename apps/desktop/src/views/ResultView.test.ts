@@ -256,6 +256,26 @@ describe('floating screenshot recovery', () => {
     await waitFor(() => expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(false));
   });
 
+  it('starts the next Wayland drag even when the compositor swallowed the previous release', async () => {
+    app.data!.capabilities.wayland = true;
+    const view = render(ResultView, { floating: true });
+    const image = view.getByAltText('截图原文');
+    await waitFor(() => expect(events.get('result-drag-ended')?.size).toBe(1));
+
+    await fireEvent.pointerDown(image, { button: 0, pointerId: 1 });
+    await waitFor(() => expect(call.mock.calls.filter(([command]) => command === 'begin_result_drag')).toHaveLength(1));
+    expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(true);
+
+    // No pointerup or result-drag-ended event here: native Wayland move grabs can
+    // consume both. The next physical press is enough proof that the old gesture ended.
+    await fireEvent.pointerDown(image, { button: 0, pointerId: 1 });
+    await waitFor(() => expect(call.mock.calls.filter(([command]) => command === 'begin_result_drag')).toHaveLength(2));
+    expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(true);
+
+    broadcast('result-drag-ended','test-frame');
+    await waitFor(() => expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(false));
+  });
+
   it('uses native resize dragging on Wayland instead of pointer deltas', async () => {
     app.data!.capabilities.wayland = true;
     const view = render(ResultView, { floating: true });

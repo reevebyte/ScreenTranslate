@@ -423,10 +423,13 @@ import { onMount, onDestroy, tick } from 'svelte';
   }
 
   function dragWindow(event: PointerEvent) {
-    if (!floating || !desktop || event.button !== 0 || imageDragging || resizing) return;
+    if (!floating || !desktop || event.button !== 0 || resizing || (!isWayland && imageDragging)) return;
     const target = event.target;
     if (target instanceof Element && target.closest('button:not(.hud-grip), input, textarea')) return;
     event.preventDefault();
+    // A new pointerdown proves the previous physical press ended. Wayland can
+    // deliver that release to the compositor's move grab instead of the WebView,
+    // so treating the stale flag as a blocker would consume one full click.
     imageDragging = true;
     void (async () => {
       try {

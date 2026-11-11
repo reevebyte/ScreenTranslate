@@ -9,6 +9,17 @@ export default defineConfig({
   resolve: { alias: { $lib: fileURLToPath(new URL('./src/lib', import.meta.url)) } },
   clearScreen: false,
   server: { port: 1420, strictPort: true, watch: { ignored: ['**/src-tauri/**'] } },
-  build: { target: ['es2022', 'safari16.4'], sourcemap: false, cssCodeSplit: true, manifest: true },
+  build: {
+    target: ['es2022', 'safari16.4'],
+    sourcemap: false,
+    cssCodeSplit: true,
+    manifest: true,
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        selection: fileURLToPath(new URL('./selection.html', import.meta.url)),
+      },
+    },
+  },
   test: { environment: 'jsdom', setupFiles: ['./tests/setup.ts'], include: ['src/**/*.test.ts'] },
 });

@@ -1,6 +1,10 @@
 [workspace]
 members = ["crates/core", "crates/platform", "apps/desktop/src-tauri"]
+exclude = ["vendor/zip-4-compat"]
 resolver = "2"
+
+[patch.crates-io]
+zip = { path = "vendor/zip-4-compat" }
 
 [workspace.package]
 version = "2.0.34"

@@ -54,8 +54,8 @@ pub fn run() {
         .register_uri_scheme_protocol("frame", |context, request| {
             let id = request.uri().path().trim_start_matches('/');
             let state = context.app_handle().state::<AppState>();
-            let png = if id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-                lock(&state.frames).png(id)
+            let preview = if id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+                lock(&state.frames).preview(id)
             } else {
                 None
             };
@@ -72,17 +72,17 @@ pub fn run() {
                     | "http://127.0.0.1:1420"
                     | "http://localhost:1420"
             );
-            match png {
-                Some(png) => {
+            match preview {
+                Some((bytes, content_type)) => {
                     let mut response = tauri::http::Response::builder()
                         .status(200)
-                        .header("Content-Type", "image/png")
+                        .header("Content-Type", content_type)
                         .header("Cache-Control", "no-store")
                         .header("Vary", "Origin");
                     if trusted_origin {
                         response = response.header("Access-Control-Allow-Origin", origin);
                     }
-                    response.body(png.as_ref().clone()).unwrap()
+                    response.body(bytes.as_ref().clone()).unwrap()
                 }
                 None => tauri::http::Response::builder()
                     .status(404)
@@ -205,7 +205,8 @@ pub fn run() {
             let background = arguments.iter().any(|arg| arg == "--background")
                 && lock(&state.capabilities).tray
                 && lock(&state.config).onboarding_complete;
-            if arguments.iter().any(|arg| arg == "--capture") {
+            let capture_requested = arguments.iter().any(|arg| arg == "--capture");
+            if capture_requested {
                 windows::begin_capture(handle.clone(), None);
             } else if arguments.iter().any(|arg| arg == "--quick") {
                 let _ = windows::toggle_quick(&handle);
@@ -217,6 +218,9 @@ pub fn run() {
                 let _ = windows::ensure_main(&handle);
             }
             let _ = windows::ensure_quick(&handle);
+            if !capture_requested {
+                windows::prewarm_selection(&handle);
+            }
             windows::reap_hidden_windows(handle);
             Ok(())
         });

@@ -5,6 +5,8 @@
   import { call } from '$lib/api';
   import { frameUrl, errorMessage } from '$lib/utils';
   import type { FrameMetadata, Rect } from '$lib/generated';
+  import { listen } from '@tauri-apps/api/event';
+  import { isTauri } from '@tauri-apps/api/core';
   let frame = $state<FrameMetadata | null>(null);
   let anchor = $state<{ x: number; y: number } | null>(null);
   let selection = $state<Rect | null>(null);
@@ -12,7 +14,48 @@
   let submitting = $state(false);
   let surface: HTMLDivElement;
   let width = $state(0); let height = $state(0);
-  onMount(() => { void call<FrameMetadata>('selection_frame').then(value => frame = value).catch(reason => { error = errorMessage(reason); imageReady(); }); });
+  function useFrame(value: FrameMetadata | null) {
+    frame = value;
+    error = '';
+    anchor = null;
+    selection = null;
+    submitting = false;
+  }
+  function useTheme(value: string) {
+    const dark = value === 'dark'
+      || (value === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.classList.toggle('dark', dark);
+  }
+  onMount(() => {
+    let disposed = false;
+    let stopListening: (() => void) | undefined;
+    let stopThemeListening: (() => void) | undefined;
+    void call<FrameMetadata>('selection_frame')
+      .then(value => { if (!disposed) useFrame(value); })
+      .catch(reason => {
+        if (disposed) return;
+        error = errorMessage(reason);
+        imageReady(null);
+      });
+    if (isTauri()) {
+      void listen<FrameMetadata>('selection-frame', ({ payload }) => {
+        if (!disposed) useFrame(payload);
+      }).then(stop => {
+        if (disposed) stop();
+        else stopListening = stop;
+      }).catch(() => {});
+      void listen<string>('selection-theme', ({ payload }) => useTheme(payload))
+        .then(stop => {
+          if (disposed) stop();
+          else stopThemeListening = stop;
+        }).catch(() => {});
+    }
+    return () => {
+      disposed = true;
+      stopListening?.();
+      stopThemeListening?.();
+    };
+  });
   function down(event: PointerEvent) {
     if (event.button !== 0 || submitting || !frame || !width || !height) return;
     anchor = { x: event.clientX, y: event.clientY };
@@ -35,9 +78,9 @@
   }
   function cancel() { void call('cancel_capture'); }
   function reset() { anchor = null; if (!submitting) selection = null; }
-  async function imageReady() {
+  async function imageReady(frameId = frame?.id ?? null) {
     await tick();
-    await call('window_ready', { frameId: frame?.id ?? null }).catch(() => {});
+    await call('window_ready', { frameId }).catch(() => {});
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     void call('selection_presented').catch(() => {});
   }
@@ -46,7 +89,7 @@
 <svelte:window onkeydown={event => { if (event.key === 'Escape') cancel(); }}/>
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="capture-surface" bind:this={surface} bind:clientWidth={width} bind:clientHeight={height} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={reset} onlostpointercapture={() => { if (anchor) reset(); }} oncontextmenu={event => { event.preventDefault(); cancel(); }}>
-  {#if frame}<img class="capture-background" src={frameUrl(frame.id)} alt={t("待框选的屏幕图像")} draggable="false" onload={imageReady} onerror={() => { error = t("截图读取失败，请重新截图"); imageReady(); }}/>{/if}
+  {#if frame}{@const frameId = frame.id}<img class="capture-background" src={frameUrl(frameId)} alt={t("待框选的屏幕图像")} draggable="false" onload={() => imageReady(frameId)} onerror={() => { error = t("截图读取失败，请重新截图"); imageReady(frameId); }}/>{/if}
   {#if selection && selection.width > 0}
     <div class="selection-rect" style:left={`${selection.x}px`} style:top={`${selection.y}px`} style:width={`${selection.width}px`} style:height={`${selection.height}px`}><span class="selection-dimensions">{Math.round(selection.width * (frame?.width ?? width) / width)} × {Math.round(selection.height * (frame?.height ?? height) / height)}</span><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i><i class="corner tm"></i><i class="corner rm"></i><i class="corner bm"></i><i class="corner lm"></i></div>
   {:else}<div class="capture-shade"></div>{/if}

@@ -89,6 +89,12 @@ pub fn window_ready(window: &tauri::WebviewWindow, frame_id: Option<&str>) -> Re
             return Ok(());
         }
     }
+    if window.label().starts_with("selection-") {
+        let current = lock(&state.selections).get(window.label()).cloned();
+        if current.as_deref() != frame_id {
+            return Ok(());
+        }
+    }
     let pending = lock(&window.state::<AppState>().window_lifecycle).loaded(window.label());
     if window.label() == "result-tools"
         && (lock(&state.result_toolbar).suppressed()
@@ -652,7 +658,14 @@ pub(crate) fn builder<'a>(
     let mut builder = WebviewWindowBuilder::new(
         app,
         label,
-        WebviewUrl::App(format!("index.html?window={query}").into()),
+        WebviewUrl::App(
+            if label.starts_with("selection-") {
+                format!("selection.html?{query}")
+            } else {
+                format!("index.html?window={query}")
+            }
+            .into(),
+        ),
     )
     .title(match label {
         "result" => "ScreenTranslate · 截图",
@@ -680,6 +693,33 @@ pub(crate) fn builder<'a>(
         builder = builder.background_color(tauri::window::Color(0, 0, 0, 0));
     }
     builder
+}
+
+fn selection_window(app: &AppHandle, label: &str) -> Result<tauri::WebviewWindow> {
+    let theme = lock(&app.state::<AppState>().config).appearance.theme;
+    let theme_name = match theme {
+        screentrans_core::config::Theme::Dark => "dark",
+        screentrans_core::config::Theme::Light => "light",
+        screentrans_core::config::Theme::System => "system",
+    };
+    builder(app, label, &format!("selection&theme={theme_name}"))
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .resizable(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .build()
+        .map_err(|_| window_error())
+}
+
+pub fn prewarm_selection(app: &AppHandle) {
+    #[cfg(not(windows))]
+    let _ = app;
+    #[cfg(windows)]
+    if app.get_webview_window("selection-0").is_none() {
+        let _ = selection_window(app, "selection-0");
+    }
 }
 
 pub fn ensure_main(app: &AppHandle) -> Result<tauri::WebviewWindow> {
@@ -836,10 +876,14 @@ pub fn toggle_result(app: &AppHandle) -> Result<()> {
     }
 }
 
-fn close_selections(app: &AppHandle) {
+fn retire_selections(app: &AppHandle) {
     for (label, window) in app.webview_windows() {
         if label.starts_with("selection-") {
+            #[cfg(not(windows))]
             lock(&app.state::<AppState>().window_lifecycle).forget(&label);
+            #[cfg(windows)]
+            let _ = window.hide();
+            #[cfg(not(windows))]
             let _ = window.destroy();
         }
     }
@@ -857,7 +901,7 @@ pub fn cancel_capture(app: &AppHandle, restore: bool) {
         lock(&state.window_lifecycle).forget("result");
     }
     state.jobs.cancel("capture");
-    close_selections(app);
+    retire_selections(app);
     let frames: Vec<_> = lock(&state.selections)
         .drain()
         .map(|(_, frame)| frame)
@@ -965,6 +1009,44 @@ fn hide_tray_overflow_if_still_open() {
     }
 }
 
+#[cfg(windows)]
+fn tray_overflow_visible() -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowExW, IsWindowVisible};
+    use windows::core::w;
+
+    unsafe {
+        for class_name in [
+            w!("TopLevelWindowForOverflowXamlIsland"),
+            w!("NotifyIconOverflowWindow"),
+        ] {
+            let mut current = HWND::default();
+            while let Ok(next) = FindWindowExW(HWND::default(), current, class_name, None) {
+                if next.0.is_null() {
+                    break;
+                }
+                current = next;
+                if IsWindowVisible(next).as_bool() {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+#[cfg(windows)]
+async fn wait_for_tray_overflow_to_close() {
+    // Only the overflow flyout needs time to finish its close animation.
+    // Waiting only while that window exists keeps the normal tray path immediate.
+    let deadline = Instant::now() + Duration::from_millis(160);
+    while tray_overflow_visible() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(12)).await;
+    }
+    hide_tray_overflow_if_still_open();
+    flush_compositor();
+}
+
 pub fn begin_capture(app: AppHandle, monitor: Option<String>) {
     begin_capture_with_source(app, monitor, false);
 }
@@ -1059,7 +1141,9 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
         let _ = window.hide();
     }
     #[cfg(windows)]
-    let had_popup = dismiss_transient_popups(from_tray) || from_tray;
+    let overflow_visible = from_tray && tray_overflow_visible();
+    #[cfg(windows)]
+    let had_popup = dismiss_transient_popups(from_tray) || overflow_visible;
     #[cfg(windows)]
     if had_popup {
         flush_compositor();
@@ -1072,10 +1156,8 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
     tauri::async_runtime::spawn(async move {
         let result = async {
             #[cfg(windows)]
-            if had_popup && from_tray {
-                tokio::time::sleep(std::time::Duration::from_millis(160)).await;
-                hide_tray_overflow_if_still_open();
-                flush_compositor();
+            if overflow_visible {
+                wait_for_tray_overflow_to_close().await;
             }
 
             let state = app.state::<AppState>();
@@ -1108,31 +1190,45 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
             if monitors.is_empty() {
                 return Err(AppError::new(ErrorCode::InvalidInput, "没有可用的显示器"));
             }
-            let mut captures = Vec::new();
-            for info in monitors {
-                let frame = SystemCapture
-                    .capture(Some(info.id.clone()), ticket.stop.clone())
-                    .await?;
+            let mut captures: Vec<(usize, FrameMetadata)> = Vec::new();
+            // Start every screen together, then await in monitor order so the
+            // selected windows and frame cache remain deterministic.
+            let capture_tasks: Vec<_> = monitors
+                .into_iter()
+                .enumerate()
+                .map(|(index, info)| {
+                    let stop = ticket.stop.clone();
+                    tokio::spawn(async move {
+                        let frame = SystemCapture.capture(Some(info.id), stop).await;
+                        (index, frame)
+                    })
+                })
+                .collect();
+            for capture in capture_tasks {
+                let (index, frame) = capture
+                    .await
+                    .map_err(|_| AppError::new(ErrorCode::Internal, "截屏任务异常结束，请重试"))?;
+                let frame = frame?;
                 if !state.jobs.is_current("capture", &ticket) {
                     return Err(AppError::cancelled());
                 }
                 let mut protected: Vec<_> = captures
                     .iter()
-                    .map(|meta: &FrameMetadata| meta.id.clone())
+                    .map(|(_, meta): &(usize, FrameMetadata)| meta.id.clone())
                     .collect();
                 if let Some(previous) = lock(&state.sessions).visual.frame.as_ref() {
                     protected.push(previous.id.clone());
                 }
                 let metadata = lock(&state.frames).insert(frame, &protected)?;
-                captures.push(metadata);
+                captures.push((index, metadata));
             }
             {
                 let mut selections = lock(&state.selections);
-                for metadata in &captures {
-                    selections.insert(format!("selection-{}", metadata.id), metadata.id.clone());
+                for (index, metadata) in &captures {
+                    selections.insert(format!("selection-{index}"), metadata.id.clone());
                 }
             }
-            for metadata in captures {
+            for (index, metadata) in captures {
                 let theme = lock(&app.state::<AppState>().config).appearance.theme;
                 let theme_str = match theme {
                     screentrans_core::config::Theme::Dark => "dark",
@@ -1142,19 +1238,19 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
                 if !state.jobs.is_current("capture", &ticket) {
                     return Err(AppError::cancelled());
                 }
-                let label = format!("selection-{}", metadata.id);
-                let bounds = metadata.screen_bounds.unwrap();
+                let label = format!("selection-{index}");
+                let bounds = metadata.screen_bounds.ok_or_else(|| {
+                    AppError::new(ErrorCode::Internal, "截图显示器边界无效，请重试")
+                })?;
                 lock(&state.selections).insert(label.clone(), metadata.id.clone());
-                let query = format!("selection&theme={theme_str}");
-                let window = builder(&app, &label, &query)
-                    .decorations(false)
-                    .transparent(true)
-                    .shadow(false)
-                    .resizable(false)
-                    .always_on_top(true)
-                    .skip_taskbar(true)
-                    .build()
-                    .map_err(|_| window_error())?;
+                let window = if let Some(window) = app.get_webview_window(&label) {
+                    lock(&state.window_lifecycle).forget(&label);
+                    let _ = window.emit("selection-theme", theme_str);
+                    let _ = window.emit("selection-frame", metadata.clone());
+                    window
+                } else {
+                    selection_window(&app, &label)?
+                };
                 place_on_desktop(&window, bounds, &metadata)?;
                 request_show(&window)?;
             }
