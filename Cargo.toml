@@ -7,7 +7,7 @@ resolver = "2"
 zip = { path = "vendor/zip-4-compat" }
 
 [workspace.package]
-version = "2.0.34"
+version = "2.0.35"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT"
