@@ -47,7 +47,7 @@ pub async fn translate(
             };
             let mut body = json!({"text": texts, "target_lang": target});
             if !automatic {
-                body["source_lang"] = input.source.to_uppercase().into();
+                body["source_lang"] = deepl_source(&input.source).into();
             }
             json_response(
                 backend
@@ -117,5 +117,25 @@ pub(crate) fn google_code(code: &str) -> &str {
         "zh-Hans" => "zh-CN",
         "zh-Hant" => "zh-TW",
         other => other,
+    }
+}
+
+/// DeepL source languages are base codes only ("ZH", "PT", "EN"); the
+/// regional and script variants are accepted as targets but rejected as
+/// `source_lang` with HTTP 400.
+fn deepl_source(code: &str) -> String {
+    code.split('-').next().unwrap_or(code).to_uppercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deepl_source_uses_the_base_language_code() {
+        assert_eq!(deepl_source("zh-Hans"), "ZH");
+        assert_eq!(deepl_source("zh-Hant"), "ZH");
+        assert_eq!(deepl_source("pt-BR"), "PT");
+        assert_eq!(deepl_source("en"), "EN");
     }
 }

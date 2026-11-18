@@ -22,7 +22,19 @@ pub fn dispatch(app: &AppHandle, action: &str) {
     }
 }
 
+/// Applies new hotkeys and stops at the first failure, so saving settings can
+/// roll back to the previous set.
 pub fn apply(app: &AppHandle, keys: &Hotkeys) -> Result<()> {
+    register(app, keys, false)
+}
+
+/// Startup variant: one taken or invalid key must not leave the others
+/// unregistered. Registers every usable key and reports the ones that failed.
+pub fn apply_at_startup(app: &AppHandle, keys: &Hotkeys) -> Result<()> {
+    register(app, keys, true)
+}
+
+fn register(app: &AppHandle, keys: &Hotkeys, best_effort: bool) -> Result<()> {
     if cfg!(feature = "e2e") {
         return Ok(());
     }
@@ -43,32 +55,60 @@ pub fn apply(app: &AppHandle, keys: &Hotkeys) -> Result<()> {
         ("toggle", &keys.toggle),
         ("quick", &keys.quick),
     ];
-    let parsed: Vec<_> = entries
-        .into_iter()
-        .filter(|(_, value)| !value.is_empty())
-        .map(|(action, value)| {
-            value
-                .parse::<Shortcut>()
-                .map(|key| (action, key))
-                .map_err(|_| {
-                    AppError::new(ErrorCode::Configuration, format!("快捷键格式无效：{value}"))
-                        .action("hotkeys")
-                })
-        })
-        .collect::<Result<_>>()?;
+    let mut invalid = Vec::new();
+    let mut parsed = Vec::new();
+    for (action, value) in entries.into_iter().filter(|(_, value)| !value.is_empty()) {
+        match value.parse::<Shortcut>() {
+            Ok(key) => parsed.push((action, value, key)),
+            Err(_) if best_effort => invalid.push(value.as_str()),
+            Err(_) => {
+                return Err(AppError::new(
+                    ErrorCode::Configuration,
+                    format!("快捷键格式无效：{value}"),
+                )
+                .action("hotkeys"));
+            }
+        }
+    }
     app.global_shortcut()
         .unregister_all()
         .map_err(|_| shortcut_error())?;
-    for (action, shortcut) in parsed {
-        app.global_shortcut()
+    let mut taken = Vec::new();
+    for (action, value, shortcut) in parsed {
+        let registered = app
+            .global_shortcut()
             .on_shortcut(shortcut, move |app, _, event| {
                 if event.state == ShortcutState::Pressed {
                     dispatch(app, action);
                 }
-            })
-            .map_err(|_| shortcut_error())?;
+            });
+        if registered.is_err() {
+            if !best_effort {
+                return Err(shortcut_error());
+            }
+            taken.push(value.as_str());
+        }
     }
-    Ok(())
+    startup_result(&invalid, &taken)
+}
+
+/// Names exactly which hotkeys could not be registered at startup.
+fn startup_result(invalid: &[&str], taken: &[&str]) -> Result<()> {
+    let mut problems = Vec::new();
+    if !taken.is_empty() {
+        problems.push(format!("快捷键 {} 已被其他程序占用", taken.join("、")));
+    }
+    if !invalid.is_empty() {
+        problems.push(format!("快捷键格式无效：{}", invalid.join("、")));
+    }
+    if problems.is_empty() {
+        return Ok(());
+    }
+    Err(AppError::new(
+        ErrorCode::Configuration,
+        format!("{}，请重新设置", problems.join("；")),
+    )
+    .action("hotkeys"))
 }
 
 #[cfg(target_os = "linux")]
@@ -355,5 +395,19 @@ mod tests {
                 "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/",
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::startup_result;
+
+    #[test]
+    fn startup_reports_each_hotkey_that_could_not_be_registered() {
+        assert!(startup_result(&[], &[]).is_ok());
+        let error = startup_result(&["Bad+Key"], &["Alt+Q", "Alt+W"]).unwrap_err();
+        assert!(error.message.contains("Alt+Q、Alt+W"));
+        assert!(error.message.contains("Bad+Key"));
+        assert_eq!(error.action.as_deref(), Some("hotkeys"));
     }
 }

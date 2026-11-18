@@ -153,6 +153,7 @@ pub fn run() {
             commands::nudge_result,
             commands::save_config,
             commands::set_dirty,
+            commands::quit_app,
             commands::save_secret,
             commands::read_secret,
             commands::delete_secret,
@@ -185,7 +186,7 @@ pub fn run() {
             let state = handle.state::<AppState>();
             let keys = lock(&state.config).hotkeys.clone();
             if !cfg!(feature = "e2e")
-                && let Err(error) = shortcuts::apply(&handle, &keys)
+                && let Err(error) = shortcuts::apply_at_startup(&handle, &keys)
             {
                 state.warning(&handle, error.message);
             }
@@ -283,10 +284,7 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             "main" => {
                 let _ = windows::show_main(app);
             }
-            "quit" => {
-                app.state::<AppState>().jobs.cancel_all();
-                app.exit(0);
-            }
+            "quit" => windows::request_quit(app),
             id => shortcuts::dispatch(app, id),
         });
     #[cfg(target_os = "macos")]

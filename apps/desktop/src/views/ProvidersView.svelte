@@ -3,7 +3,7 @@
   import { Globe2, LoaderCircle, PlugZap, ChevronDown } from '$lib/icons';
   import { toast } from 'svelte-sonner';
   import { onDestroy, untrack } from 'svelte';
-  import { app, saveConfig, previewConfig } from '$lib/store.svelte';
+  import { app, saveConfig, previewConfig, registerFlush } from '$lib/store.svelte';
   import { createAutosave } from '$lib/autosave';
   import { call } from '$lib/api';
   import { providers, providerInfo } from '$lib/providers';
@@ -34,7 +34,8 @@
   $effect(()=>{JSON.stringify(draft);if(!editing)untrack(queue);});
   let identity = $derived(JSON.stringify([selected, options.baseUrl, credentialVersion]));
   let testIdentity = $derived(JSON.stringify([identity, options]));
-  onDestroy(()=>{alive=false;testRequest++;queue();void writer.flush();});
+  const stopFlush=registerFlush(()=>save(false));
+  onDestroy(()=>{stopFlush();alive=false;testRequest++;queue();void writer.flush();});
   $effect(()=>{testIdentity;testRequest++;result=null;testing=false;});
   async function select(id:string){if(credentialField && !(await credentialField.flush()))return;selected=id as ProviderId;presetName='custom';}
   async function save(current=true){if(credentialField && !(await credentialField.flush()))return false;if(current)draft.provider=selected;queue();return writer.flush();}

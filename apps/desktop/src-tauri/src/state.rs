@@ -74,6 +74,11 @@ impl AppState {
         let config_path = directory.join("config.json");
         let config = Config::load(&config_path).unwrap_or_else(|error| {
             warnings.push(error.message);
+            // Defaults will be saved over this file on the next settings change.
+            if let Some(backup) = Config::back_up_unreadable(&config_path) {
+                let name = backup.file_name().unwrap_or_default().to_string_lossy();
+                warnings.push(format!("原配置已备份为 {name}，本次使用默认设置"));
+            }
             Config::default()
         });
         let legacy_path = if cfg!(windows) && !cfg!(feature = "e2e") {

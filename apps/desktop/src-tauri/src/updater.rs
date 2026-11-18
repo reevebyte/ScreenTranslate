@@ -313,17 +313,29 @@ fn install_package(update: &Update, bytes: &[u8]) -> Result<()> {
 fn install_linux_deb(update: &Update, bytes: &[u8]) -> Result<()> {
     use std::{
         io::Write,
-        os::unix::fs::PermissionsExt,
         process::{Command, Stdio},
     };
     update
         .verify(bytes)
         .map_err(|_| AppError::new(ErrorCode::InvalidResponse, "更新包签名校验失败，请重试"))?;
-    let pkg_path =
-        std::env::temp_dir().join(format!("screentranslate-update-{}.deb", update.version));
-    std::fs::write(&pkg_path, bytes)
-        .map_err(|_| AppError::new(ErrorCode::Internal, "无法写入临时更新包，请重试"))?;
-    let _ = std::fs::set_permissions(&pkg_path, std::fs::Permissions::from_mode(0o644));
+    // dpkg runs as root on this file after the signature check, so it must not
+    // live at a guessable shared /tmp path another user could pre-create or
+    // swap. A fresh 0700 directory owned by us keeps the verified bytes intact;
+    // it is removed when `directory` drops.
+    let write_error = || AppError::new(ErrorCode::Internal, "无法写入临时更新包，请重试");
+    let directory = tempfile::Builder::new()
+        .prefix("screentranslate-update-")
+        .tempdir()
+        .map_err(|_| write_error())?;
+    let pkg_path = directory
+        .path()
+        .join(format!("screentranslate-{}.deb", update.version));
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&pkg_path)
+        .and_then(|mut file| file.write_all(bytes).and_then(|_| file.sync_all()))
+        .map_err(|_| write_error())?;
 
     let run_result = (|| -> Result<()> {
         if let Ok(output) = Command::new("pkexec")
@@ -348,6 +360,19 @@ fn install_linux_deb(update: &Update, bytes: &[u8]) -> Result<()> {
                     ErrorCode::Internal,
                     "系统包管理器正被其他程序占用，请关闭软件中心或终端 apt 后重试",
                 ));
+            }
+            match pkexec_failure(output.status.code()) {
+                PkexecFailure::Cancelled => {
+                    return Err(AppError::new(
+                        ErrorCode::PermissionDenied,
+                        "已取消管理员密码验证",
+                    ));
+                }
+                PkexecFailure::InstallFailed => {
+                    return Err(AppError::new(ErrorCode::Internal, "更新包安装失败，请重试"));
+                }
+                // No polkit agent or not authorized: fall back to a password prompt.
+                PkexecFailure::Unavailable => {}
             }
         }
 
@@ -416,8 +441,30 @@ fn install_linux_deb(update: &Update, bytes: &[u8]) -> Result<()> {
         }
     })();
 
-    let _ = std::fs::remove_file(&pkg_path);
+    drop(directory);
     run_result
+}
+
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+#[derive(Debug, PartialEq, Eq)]
+enum PkexecFailure {
+    /// The user dismissed the authentication dialog.
+    Cancelled,
+    /// pkexec could not authorise at all (for example no polkit agent).
+    Unavailable,
+    /// Authorised, but dpkg itself failed; asking again would not help.
+    InstallFailed,
+}
+
+/// pkexec exits 126 when the dialog is dismissed and 127 when it cannot
+/// authorise; any other code is the elevated command's own exit status.
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+fn pkexec_failure(code: Option<i32>) -> PkexecFailure {
+    match code {
+        Some(126) => PkexecFailure::Cancelled,
+        Some(127) | None => PkexecFailure::Unavailable,
+        Some(_) => PkexecFailure::InstallFailed,
+    }
 }
 
 #[tauri::command]
@@ -493,5 +540,12 @@ mod tests {
         let sig_err = download_error(&tauri_plugin_updater::Error::MissingSignedVersion);
         assert_eq!(sig_err.code, ErrorCode::InvalidResponse);
         assert_eq!(sig_err.message, "更新包签名校验失败，请重试");
+    }
+    #[test]
+    fn only_retries_linux_install_when_pkexec_cannot_authorise() {
+        assert_eq!(pkexec_failure(Some(126)), PkexecFailure::Cancelled);
+        assert_eq!(pkexec_failure(Some(127)), PkexecFailure::Unavailable);
+        assert_eq!(pkexec_failure(None), PkexecFailure::Unavailable);
+        assert_eq!(pkexec_failure(Some(1)), PkexecFailure::InstallFailed);
     }
 }

@@ -3,7 +3,7 @@ import { previewBootstrap } from './preview';
 
 vi.mock('./api', () => ({ desktop: false, call: vi.fn(), loadBootstrap: vi.fn() }));
 vi.mock('svelte-sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
-import { app, applySession, editText } from './store.svelte';
+import { app, applySession, editText, registerFlush, flushPendingEdits } from './store.svelte';
 
 beforeEach(() => { app.data = previewBootstrap(); app.input = ''; app.source = 'auto'; app.target = 'auto'; });
 
@@ -35,5 +35,29 @@ describe('cross-window session synchronization', () => {
     applySession({ ...app.data!.visual, revision: 9, output: 'visual output' });
     expect(app.input).toBe('keep this');
     expect(app.data!.visual.output).toBe('visual output');
+  });
+});
+
+describe('saving before quit', () => {
+  it('blurs the focused field so it queues its edit, then runs every registered flush', async () => {
+    const order: string[] = [];
+    const input = document.createElement('input');
+    input.addEventListener('blur', () => order.push('blur'));
+    document.body.append(input);
+    input.focus();
+    const stop = registerFlush(async () => { order.push('flush'); });
+    const removed = vi.fn(async () => {});
+    registerFlush(removed)();
+    await flushPendingEdits();
+    expect(order).toEqual(['blur', 'flush']);
+    expect(removed).not.toHaveBeenCalled();
+    stop();
+    input.remove();
+  });
+
+  it('still finishes when a flush fails', async () => {
+    const stop = registerFlush(() => Promise.reject(new Error('disk full')));
+    await expect(flushPendingEdits()).resolves.toBeUndefined();
+    stop();
   });
 });

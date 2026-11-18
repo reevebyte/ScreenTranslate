@@ -592,6 +592,14 @@ pub async fn save_config(app: AppHandle, window: WebviewWindow, config: Config) 
     Ok(config)
 }
 
+/// Sent by the main window once it saved pending edits after `app-quit-requested`.
+#[tauri::command]
+pub async fn quit_app(app: AppHandle, window: WebviewWindow) -> Result<()> {
+    main_only(&window)?;
+    windows::quit(&app);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn set_dirty(app: AppHandle, window: WebviewWindow, dirty: bool) -> Result<()> {
     let state = app.state::<AppState>();

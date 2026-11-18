@@ -6,7 +6,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { Toaster } from 'svelte-sonner';
   import { LoaderCircle, Languages, Image, SlidersHorizontal, Settings2, Keyboard, PanelsTopLeft, Download, X } from '$lib/icons';
-  import { app, initialize, applyAppearance, type Route } from '$lib/store.svelte';
+  import { app, initialize, applyAppearance, flushPendingEdits, type Route } from '$lib/store.svelte';
   import { call, desktop } from '$lib/api';
   import Brand from '$lib/components/Brand.svelte';
   import Button from '$lib/components/ui/button.svelte';
@@ -46,6 +46,11 @@
     let cleanup: (() => void) | undefined;
     let navigateCleanup: (() => void) | undefined;
     let disposed = false;
+    let quitCleanup: (() => void) | undefined;
+    if (desktop && mode === 'main') void listen('app-quit-requested', async () => {
+      await flushPendingEdits();
+      void call('quit_app').catch(() => {});
+    }).then(fn => { if (disposed) fn(); else quitCleanup = fn; });
     if (desktop) void listen<string>('navigate', ({ payload }) => { if (payload === 'ocr') { app.servicesTab = 'ocr'; app.route = 'providers'; } else if (nav.some(item => item.route === payload)) { if (payload === 'providers') app.servicesTab = 'translation'; app.route = payload as Route; } }).then(fn => { if (disposed) fn(); else navigateCleanup = fn; });
     void initialize().then(async fn => {
       if (disposed) fn(); else cleanup = fn;
@@ -68,7 +73,7 @@
     const media = matchMedia('(prefers-color-scheme: dark)');
     const themeChange = () => { if (app.data) applyAppearance(app.data.config); };
     media.addEventListener('change', themeChange);
-    return () => { disposed = true; cleanup?.(); navigateCleanup?.(); media.removeEventListener('change', themeChange); };
+    return () => { disposed = true; cleanup?.(); navigateCleanup?.(); quitCleanup?.(); media.removeEventListener('change', themeChange); };
   });
   function keydown(event: KeyboardEvent) {
     if (mode === 'main' && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); app.commandOpen = !app.commandOpen; }

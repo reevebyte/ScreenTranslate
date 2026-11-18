@@ -1,6 +1,7 @@
 import { t } from './i18n.svelte';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { toast } from 'svelte-sonner';
+import { tick } from 'svelte';
 import { call, desktop, loadBootstrap } from './api';
 import { errorMessage } from './utils';
 import { actionPalette } from './appearance';
@@ -109,6 +110,21 @@ export async function copy(text: string) {
   if (!text) return false;
   try { await call('copy_text', { text }); return true; }
   catch (error) { toast.error(errorMessage(error)); return false; }
+}
+
+const flushers = new Set<() => Promise<unknown>>();
+/** Settings views register how to persist edits still being typed or debounced. */
+export function registerFlush(flush: () => Promise<unknown>): () => void {
+  flushers.add(flush);
+  return () => { flushers.delete(flush); };
+}
+/** Saves every pending settings edit; the app calls this before quitting. */
+export async function flushPendingEdits() {
+  // Text fields only queue their edit when they lose focus.
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  await tick();
+  await Promise.allSettled([...flushers].map(flush => flush()));
+  await configQueue.catch(() => {});
 }
 
 export async function saveConfig(config: Config, options: { quiet?: boolean } = {}): Promise<boolean> {

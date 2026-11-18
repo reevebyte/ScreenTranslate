@@ -48,8 +48,11 @@ test('metadata-only retry skips builds but still runs the guarded metadata job',
 });
 
 test('Tauri receives the explicit release tag so updater URLs never fall back to latest',()=>{
- const action=workflow.match(/- uses: tauri-apps\/tauri-action@v0[\s\S]*?(?=\r?\n  manifests:)/)?.[0];
+ const action=workflow.match(/- uses: tauri-apps\/tauri-action@[0-9a-f]{40} # v0[\s\S]*?(?=\r?\n  manifests:)/)?.[0];
  assert.ok(action,'Missing Tauri release action');
+ // The updater signing key is visible only to the step that signs.
+ assert.match(action,/TAURI_SIGNING_PRIVATE_KEY: \$\{\{ secrets\.TAURI_SIGNING_PRIVATE_KEY \}\}/);
+ assert.equal(workflow.match(/^\s+TAURI_SIGNING_PRIVATE_KEY:/gm)?.length,1);
  assert.match(action,/releaseId: \$\{\{ needs\.prepare\.outputs\.release_id \}\}/);
  assert.match(action,/tagName: \$\{\{ env\.RELEASE_TAG \}\}/);
  assert.match(

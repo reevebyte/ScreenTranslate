@@ -335,9 +335,27 @@ impl Config {
         if config.ocr.defaults_version == 0 {
             config.ocr.engine = OcrEngine::Youdao;
             config.ocr.defaults_version = 1;
-            config.save(path)?;
+            // Best effort: failing to persist the migration must not discard
+            // a valid configuration; it is simply migrated again next time.
+            let _ = config.save(path);
         }
         Ok(config)
+    }
+
+    /// Copies a configuration file that could not be loaded next to itself as
+    /// `config.broken-<unix seconds>.json`, so running on defaults and saving
+    /// later cannot destroy the user's only copy. Returns the backup path.
+    pub fn back_up_unreadable(path: &Path) -> Option<std::path::PathBuf> {
+        if !path.is_file() {
+            return None;
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        let stem = path.file_stem()?.to_string_lossy();
+        let backup = path.with_file_name(format!("{stem}.broken-{stamp}.json"));
+        fs::copy(path, &backup).ok()?;
+        Some(backup)
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
@@ -521,6 +539,28 @@ pub fn import_legacy(bytes: &[u8]) -> Result<LegacyImport> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unreadable_config_is_backed_up_before_defaults_can_replace_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.json");
+        assert!(Config::back_up_unreadable(&path).is_none());
+        fs::write(&path, b"{ damaged").unwrap();
+        assert!(Config::load(&path).is_err());
+        let backup = Config::back_up_unreadable(&path).unwrap();
+        assert_eq!(backup.parent(), path.parent());
+        assert!(
+            backup
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("config.broken-")
+        );
+        assert_eq!(fs::read(&backup).unwrap(), b"{ damaged");
+        // Saving defaults afterwards leaves the backup untouched.
+        Config::default().save(&path).unwrap();
+        assert_eq!(fs::read(&backup).unwrap(), b"{ damaged");
+    }
 
     #[test]
     fn new_cloud_default_is_applied_once_and_later_local_choice_survives() {

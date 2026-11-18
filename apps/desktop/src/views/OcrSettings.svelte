@@ -2,7 +2,7 @@
   import { t } from '$lib/i18n.svelte';
   import { onDestroy, untrack } from 'svelte';
   import { Globe, Monitor, ScanLine, RefreshCw, ArrowUpRight, ChevronDown } from '$lib/icons';
-  import { app, previewConfig, saveConfig, refreshCapabilities, act } from '$lib/store.svelte';
+  import { app, previewConfig, saveConfig, refreshCapabilities, act, registerFlush } from '$lib/store.svelte';
   import { call } from '$lib/api';
   import { createAutosave } from '$lib/autosave';
   import type { Config } from '$lib/generated';
@@ -22,7 +22,12 @@
   const autosave = createAutosave<Config>(config => saveConfig(config, { quiet: true }));
   function queue() { const json = JSON.stringify(draft); if (json === last) return; last = json; const snapshot = structuredClone($state.snapshot(draft)); previewConfig(snapshot); autosave.schedule(snapshot); }
   $effect(() => { JSON.stringify(draft); if (!editingText) untrack(queue); });
-  onDestroy(() => { queue(); void autosave.flush(); });
+  const stopFlush = registerFlush(async () => {
+    if (credentialField && !(await credentialField.flush())) return false;
+    queue();
+    return autosave.flush();
+  });
+  onDestroy(() => { stopFlush(); queue(); void autosave.flush(); });
   const engines = $derived([
     ['youdao',t("有道 OCR")],
     ['system',app.data?.capabilities.platform === 'macos' ? 'Apple Vision' : app.data?.capabilities.platform === 'linux' ? 'Tesseract' : 'Windows OCR'],

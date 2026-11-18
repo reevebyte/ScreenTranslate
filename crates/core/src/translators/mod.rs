@@ -160,16 +160,23 @@ pub fn validate_batch(
     if output.len() != request.items.len() {
         return Err(invalid());
     }
-    request
+    let mut results = request
         .items
         .iter()
-        .map(|item| {
-            output
-                .remove(&item.id)
-                .filter(|v| !v.text.trim().is_empty())
-                .ok_or_else(invalid)
-        })
-        .collect()
+        .map(|item| output.remove(&item.id).ok_or_else(invalid))
+        .collect::<Result<Vec<_>>>()?;
+    // A wholly empty reply is broken, but a model may legitimately return
+    // nothing for a block such as "—" or an emoji. Keep that block's source
+    // text instead of failing the other translations in the batch.
+    if results.iter().all(|item| item.text.trim().is_empty()) {
+        return Err(invalid());
+    }
+    for (result, item) in results.iter_mut().zip(&request.items) {
+        if result.text.trim().is_empty() {
+            result.text = item.text.clone();
+        }
+    }
+    Ok(results)
 }
 
 pub async fn json_response(
@@ -480,5 +487,22 @@ mod tests {
             .is_err()
         );
         assert!(validate_batch(&request(), Vec::new()).is_err());
+    }
+
+    #[test]
+    fn one_empty_translation_keeps_its_source_but_an_all_empty_reply_fails() {
+        let mut batch = request();
+        batch.items.push(TranslationItem {
+            id: "b".into(),
+            text: "—".into(),
+        });
+        let item = |id: &str, text: &str| TranslatedItem {
+            id: id.into(),
+            text: text.into(),
+        };
+        let results = validate_batch(&batch, vec![item("b", " "), item("a", "你好")]).unwrap();
+        assert_eq!(results[0].text, "你好");
+        assert_eq!(results[1].text, "—");
+        assert!(validate_batch(&batch, vec![item("a", ""), item("b", "")]).is_err());
     }
 }

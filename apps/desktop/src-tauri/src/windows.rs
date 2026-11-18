@@ -284,7 +284,12 @@ fn caption_color(window: &tauri::WebviewWindow, theme: screentrans_core::config:
         let (dark, background, text) = caption_palette(theme);
         unsafe {
             let hwnd = windows::Win32::Foundation::HWND(handle.0);
-            crate::update_caption::refresh(handle.0, background, text);
+            // The update caption button's state is UI-thread only (Cells,
+            // subclass data), but this runs from async commands too.
+            let raw = handle.0 as isize;
+            let _ = window.run_on_main_thread(move || {
+                crate::update_caption::refresh(raw as *mut std::ffi::c_void, background, text)
+            });
             use windows::Win32::Graphics::Gdi::{DeleteObject, HBRUSH};
             use windows::Win32::UI::WindowsAndMessaging::{GCLP_HBRBACKGROUND, SetClassLongPtrW};
             let old = SetClassLongPtrW(hwnd, GCLP_HBRBACKGROUND, 0);
@@ -1297,6 +1302,9 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
                     .collect();
                 if let Some(previous) = lock(&state.sessions).visual.frame.as_ref() {
                     protected.push(previous.id.clone());
+                    // The result window shows the rendered layer; keep it too
+                    // so cancelling this capture leaves that result intact.
+                    protected.extend(previous.clean_id.clone());
                 }
                 let metadata = lock(&state.frames).insert(frame, &protected)?;
                 captures.push((index, metadata));
@@ -1392,6 +1400,30 @@ pub fn accept_selection(app: &AppHandle, label: &str, rect: Rect) -> Result<()> 
     Ok(())
 }
 
+/// Upper bound for the main window to persist pending settings edits on quit.
+const QUIT_FLUSH_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// Quits after giving the main window a moment to save settings that are
+/// still being typed or debounced; otherwise those edits would be lost.
+pub fn request_quit(app: &AppHandle) {
+    if app.get_webview_window("main").is_none()
+        || app.emit_to("main", "app-quit-requested", ()).is_err()
+    {
+        quit(app);
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(QUIT_FLUSH_TIMEOUT).await;
+        quit(&app);
+    });
+}
+
+pub fn quit(app: &AppHandle) {
+    app.state::<AppState>().jobs.cancel_all();
+    app.exit(0);
+}
+
 pub fn close_requested(window: &tauri::Window, api: &tauri::CloseRequestApi) {
     let app = window.app_handle();
     let Some(state) = app.try_state::<AppState>() else {
@@ -1408,8 +1440,9 @@ pub fn close_requested(window: &tauri::Window, api: &tauri::CloseRequestApi) {
             screentrans_platform::hide_dock_icon();
         }
         "main" => {
-            state.jobs.cancel_all();
-            app.exit(0);
+            api.prevent_close();
+            let _ = window.hide();
+            request_quit(app);
         }
         "result" | "result-tools" => {
             api.prevent_close();

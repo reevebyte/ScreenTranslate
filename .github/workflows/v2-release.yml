@@ -52,7 +52,7 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
       - run: node scripts/check-v2-version.mjs
@@ -136,8 +136,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       SCREENTRANS_UPDATE_PUBLIC_KEY: ${{ vars.SCREENTRANS_UPDATE_PUBLIC_KEY }}
     steps:
       - name: Preserve source line endings on Windows
@@ -161,17 +159,17 @@ jobs:
           for file in tauri-v2.mjs tauri-build-output.mjs clean-v2-builds.mjs check-v2-version.mjs; do
             cp ".release-driver/scripts/$file" "scripts/$file"
           done
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: '11.7.0'
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: '1.95.0'
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Linux dependencies
         if: runner.os == 'Linux'
         run: bash scripts/install-linux-deps.sh
@@ -193,9 +191,12 @@ jobs:
               https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64 \
               -o ~/.cache/tauri/AppRun-x86_64 && chmod +x ~/.cache/tauri/AppRun-x86_64 && break || sleep 3
           done
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # Only the signing step sees the updater key, not dependency installs or tests.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: "-"
         with:
           projectPath: apps/desktop
@@ -232,7 +233,7 @@ jobs:
           persist-credentials: false
       - name: Use the corrected metadata driver for an existing tag
         run: cp .release-driver/scripts/v2-release-manifests.mjs scripts/v2-release-manifests.mjs
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
       - name: Validate and write signed update metadata

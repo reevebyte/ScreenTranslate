@@ -42,6 +42,27 @@ impl JobRegistry {
                 .is_some_and(|current| current.id == ticket.id)
     }
 
+    /// Marks a lane's job as done without cancelling it, so the lane reads as
+    /// idle. Ignored if a newer job already owns the lane.
+    pub fn finish(&self, lane: &str, ticket: &JobTicket) {
+        let mut lanes = self.lanes.lock().unwrap_or_else(|e| e.into_inner());
+        if lanes
+            .get(lane)
+            .is_some_and(|current| current.id == ticket.id)
+        {
+            lanes.remove(lane);
+        }
+    }
+
+    /// True while a job that has neither finished nor been cancelled owns the lane.
+    pub fn is_running(&self, lane: &str) -> bool {
+        self.lanes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(lane)
+            .is_some_and(|current| !current.stop.is_cancelled())
+    }
+
     pub fn cancel(&self, lane: &str) {
         if let Some(ticket) = self
             .lanes
@@ -90,6 +111,21 @@ mod tests {
         assert!(registry.is_current("text", &newer));
         registry.cancel("text");
         assert!(!registry.is_current("text", &newer));
+    }
+
+    #[test]
+    fn finishing_frees_the_lane_but_never_removes_a_newer_job() {
+        let registry = JobRegistry::default();
+        let first = registry.begin("visual");
+        assert!(registry.is_running("visual"));
+        let second = registry.begin("visual");
+        registry.finish("visual", &first);
+        assert!(registry.is_running("visual"));
+        assert!(!second.stop.is_cancelled());
+        registry.finish("visual", &second);
+        assert!(!registry.is_running("visual"));
+        assert!(!second.stop.is_cancelled());
+        assert!(!registry.is_running("never-started"));
     }
 
     #[test]

@@ -21,8 +21,13 @@ export function updateBlockReason() {
   if (app.data && [app.data.text.job.stage,app.data.visual.job.stage].some(stage=>['capturing','recognizing','translating'].includes(stage))) return t('请等待截图或翻译完成，再安装更新');
   return '';
 }
-export async function checkUpdate(manual = false) {
-  if (operation || updates.stage === 'ready') return;
+let inflightCheck: Promise<void> | undefined;
+export function checkUpdate(manual = false): Promise<void> {
+  if (operation || updates.stage === 'ready') return Promise.resolve();
+  inflightCheck = runCheck(manual).finally(() => { inflightCheck = undefined; });
+  return inflightCheck;
+}
+async function runCheck(manual: boolean) {
   operation = true;
   updates.stage = 'checking'; updates.error = ''; updates.upToDateNotice = false;
   try {
@@ -32,7 +37,9 @@ export async function checkUpdate(manual = false) {
     if (manual && updates.stage === 'current') showUpToDateNotice();
   } catch(error) {
     const msg = errorMessage(error);
-    if (manual && msg.includes('尚未发布可用更新')) {
+    // Match the backend's own text: errorMessage() has already localized `msg`.
+    const raw = error && typeof error === 'object' && 'message' in error ? String(error.message) : String(error);
+    if (manual && raw.includes('尚未发布可用更新')) {
       updates.stage = 'current';
       showUpToDateNotice();
     } else {
@@ -69,7 +76,8 @@ export async function consumeUpdateRequest() {
   try {
     const source = await call<string|null>('take_update_request');
     if (!source) return;
-    if (!updates.version) await checkUpdate();
+    // Wait for a check that is already running; otherwise this click would be lost.
+    if (!updates.version) await (inflightCheck ?? checkUpdate());
     if (updateBlockReason()) { updates.error=updateBlockReason(); app.route='settings';app.settingsTab='about';return; }
     if (source === 'tray') {
       if (updates.stage === 'available' || updates.stage === 'error') await downloadUpdate();
@@ -79,6 +87,8 @@ export async function consumeUpdateRequest() {
       else if (updates.stage === 'ready') await installUpdate();
     } else if (updates.stage === 'ready') updates.confirm = true;
     else if (updates.stage === 'available' || updates.stage === 'error') await downloadUpdate();
+  } catch {
+    // The request could not be read; the next click asks again.
   } finally { consuming = false; }
 }
 export function syncUpdateUi() {

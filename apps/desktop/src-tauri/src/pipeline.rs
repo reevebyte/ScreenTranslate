@@ -167,7 +167,10 @@ pub fn start_visual(app: AppHandle, metadata: FrameMetadata, recognize: bool) {
             ))
         });
         let state = app.state::<AppState>();
-        if !state.jobs.is_current("visual", &ticket) {
+        let current = state.jobs.is_current("visual", &ticket);
+        // Block corrections are refused while this job runs; allow them now.
+        state.jobs.finish("visual", &ticket);
+        if !current {
             return;
         }
         {
@@ -375,10 +378,17 @@ fn begin_block_edit(
         .iter_mut()
         .find(|block| block.id == id)
         .ok_or_else(|| AppError::new(ErrorCode::InvalidInput, "文本块已更新，请重新选择"))?;
+    // Cancelling the capture's job here would drop every block it had not
+    // translated yet while reporting Complete, so wait for it to finish.
+    if jobs.is_running("visual") {
+        return Err(AppError::new(
+            ErrorCode::InvalidInput,
+            "正在识别或翻译，完成后再修改",
+        ));
+    }
     let visual_revision = sessions.visual.revision;
     let lane = format!("block:{visual_revision}:{id}");
     let ticket = jobs.begin(&lane);
-    jobs.cancel("visual");
     block.revision += 1;
     block.text = text.into();
     block.target_language = target.into();
@@ -497,13 +507,9 @@ mod tests {
         assert!(sessions.visual.blocks.is_empty());
     }
 
-    #[test]
-    fn valid_correction_belongs_to_the_locked_capture_revision() {
-        let jobs = JobRegistry::default();
-        let active = jobs.begin("visual");
-        let text = jobs.begin("text");
+    fn one_block_session(revision: u32) -> Sessions {
         let mut sessions = Sessions::default();
-        sessions.visual.revision = 7;
+        sessions.visual.revision = revision;
         sessions.visual.blocks = layout::group_lines(vec![OcrLine {
             text: "before".into(),
             bounds: Rect {
@@ -514,6 +520,28 @@ mod tests {
             },
             confidence: None,
         }]);
+        sessions
+    }
+
+    #[test]
+    fn correction_waits_for_the_capture_translation_instead_of_cancelling_it() {
+        let jobs = JobRegistry::default();
+        let active = jobs.begin("visual");
+        let mut sessions = one_block_session(3);
+        sessions.visual.job.stage = JobStage::Translating;
+
+        assert!(begin_block_edit(&mut sessions, &jobs, "block-0", "corrected", "en").is_err());
+        assert!(jobs.is_current("visual", &active));
+        assert_eq!(sessions.visual.blocks[0].text, "before");
+    }
+
+    #[test]
+    fn valid_correction_belongs_to_the_locked_capture_revision() {
+        let jobs = JobRegistry::default();
+        let active = jobs.begin("visual");
+        jobs.finish("visual", &active);
+        let text = jobs.begin("text");
+        let mut sessions = one_block_session(7);
         let old_revision = sessions.visual.blocks[0].revision;
         let (visual_revision, lane, ticket, revision) =
             begin_block_edit(&mut sessions, &jobs, "block-0", "corrected", "en").unwrap();
@@ -524,7 +552,7 @@ mod tests {
         assert_eq!(sessions.visual.blocks[0].text, "corrected");
         assert_eq!(sessions.visual.blocks[0].target_language, "en");
         assert_eq!(sessions.visual.job.stage, JobStage::Translating);
-        assert!(!jobs.is_current("visual", &active));
+        assert!(!active.stop.is_cancelled());
         assert!(jobs.is_current("text", &text));
         assert!(jobs.is_current(&lane, &ticket));
     }

@@ -5,7 +5,7 @@
   import { onDestroy, untrack } from 'svelte';
   import { Check, Palette, LoaderCircle, Monitor, Moon, Sun, Globe, Languages, ArrowRightLeft, PanelTop, Copy, Import, RotateCcw, TextScan, Plus, Minus } from '$lib/icons';
   import { toast } from 'svelte-sonner';
-  import { app, saveConfig, previewConfig } from '$lib/store.svelte';
+  import { app, saveConfig, previewConfig, registerFlush } from '$lib/store.svelte';
   import { call, loadBootstrap } from '$lib/api';
   import { createAutosave } from '$lib/autosave';
   import { errorMessage, languageOptions } from '$lib/utils';
@@ -36,7 +36,8 @@
     autosave.schedule(config);
   }
   $effect(() => { JSON.stringify(draft); untrack(queueDraft); });
-  onDestroy(() => { queueDraft(); void autosave.flush(); });
+  const stopFlush = registerFlush(() => { queueDraft(); return autosave.flush(); });
+  onDestroy(() => { stopFlush(); queueDraft(); void autosave.flush(); });
   function retrySave() { autosave.schedule(structuredClone($state.snapshot(draft))); void autosave.flush(); }
   async function importOld() {
     importing = true;
