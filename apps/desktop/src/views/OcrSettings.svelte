@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '$lib/i18n.svelte';
   import { onDestroy, untrack } from 'svelte';
-  import { Globe, Monitor, ScanLine, RefreshCw, ArrowUpRight, ChevronDown } from '$lib/icons';
+  import { Globe, Monitor, ScanLine, RefreshCw, ArrowUpRight, ChevronDown, Check } from '$lib/icons';
   import { app, previewConfig, saveConfig, refreshCapabilities, act, registerFlush } from '$lib/store.svelte';
   import { call } from '$lib/api';
   import { createAutosave } from '$lib/autosave';
@@ -69,5 +69,5 @@
             <div class="service-disclosure"><Globe size={16}/><span>{t("选区截图发送至 Azure。")}</span></div></div>
         {/if}
 <div class="ocr-processing-option"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><ScanLine size={16}/></span><label for="ocr-upscale">{t("放大小图后识别")}</label></div><Switch id="ocr-upscale" bind:checked={draft.ocr.upscale}/></div>{/snippet}
-  {#snippet footer()}<Button disabled={selected===draft.ocr.engine || (selected==='custom' && (!draft.ocr.custom.endpoint.trim() || (draft.ocr.custom.protocol==='openai' && !draft.ocr.custom.model.trim())))} onclick={activate}>{selected===draft.ocr.engine?t("正在使用"):t("设为当前")}</Button>{/snippet}
+  {#snippet footer()}{#if selected===draft.ocr.engine}<span class="service-current"><Check size={16}/>{t("当前使用中")}</span>{:else}<Button disabled={(selected==='custom' && (!draft.ocr.custom.endpoint.trim() || (draft.ocr.custom.protocol==='openai' && !draft.ocr.custom.model.trim())))} onclick={activate}>{t("设为当前")}</Button>{/if}{/snippet}
 </ServiceBrowser></div>

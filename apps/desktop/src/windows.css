@@ -445,6 +445,8 @@
   gap: 8px;
 }
 
+.capture-empty-hint { display:flex; align-items:center; gap:4px; margin:0; color:var(--muted); font-size:var(--text-small); }
+
 .capture-surface {
   position: relative;
   width: 100%;

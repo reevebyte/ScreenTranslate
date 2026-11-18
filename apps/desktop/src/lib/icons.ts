@@ -52,3 +52,4 @@ export { default as ChevronDownIcon } from './components/icons/ChevronDownIcon.s
 export { default as CheckIcon } from './components/icons/CheckIcon.svelte';
 export { default as Move } from './components/icons/Move.svelte';
 export { default as LoaderCircle } from 'phosphor-svelte/lib/SpinnerGap';
+export { default as TextSize } from 'phosphor-svelte/lib/TextAa';

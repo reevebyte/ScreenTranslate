@@ -119,7 +119,7 @@
   "Vision 密钥": "Vision API key",
   "选区截图发送至 Azure。": "Selected image is sent to Azure.",
   "放大小图后识别": "Upscale small images",
-  "正在使用": "In use",
+  "当前使用中": "Current service",
   "设为当前": "Use service",
   "有道 OCR": "Youdao OCR",
   "自定义 OCR": "Custom OCR",
@@ -128,7 +128,7 @@
   "云端": "Cloud",
   "翻译服务": "Translation service",
   "非官方接口": "Unofficial service",
-  "识别后的文字发送至": "Recognized text is sent to",
+  "识别后的文字发送至 {0}。": "Recognized text is sent to {0}.",
   "· 可选": "· Optional",
   "输入模型 ID": "Enter a model ID",
   "服务预设": "Service preset",
@@ -245,7 +245,6 @@
   "未检测到旧版设置": "No legacy settings found",
   "导入": "Import",
   "恢复默认设置": "Restore defaults",
-  "保留已存密钥": "Keep saved API keys",
   "恢复": "Restore",
   "替换当前设置并导入密钥，原文件保留。加密密钥需使用原 Windows 账户。": "Replace current settings and import API keys. The original file is kept. Encrypted keys require the original Windows account.",
   "通用": "General",
@@ -337,5 +336,8 @@
   "稍后": "Later",
   "关闭": "Close",
   "查看": "View",
-  "正在识别或翻译，完成后再修改": "Still recognizing or translating. Edit after it finishes."
+  "正在识别或翻译，完成后再修改": "Still recognizing or translating. Edit after it finishes.",
+  "系统托盘不可用": "The system tray is unavailable",
+  "所有设置将恢复为默认值，已保存的密钥会保留。": "All settings return to their defaults. Saved keys are kept.",
+  "或按": "or press"
 }

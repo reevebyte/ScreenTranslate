@@ -400,11 +400,26 @@
   margin-top: 12px;
 }
 
+/* A labelled group starts a new section: give its heading room from the card above. */
+.preference-card + .preference-group,
+.preference-group + .preference-group:has(> h3) {
+  margin-top: 20px;
+}
+
+/* Outline actions inside a card would otherwise match the card surface. */
+.setting-row .button-outline {
+  background: var(--surface-muted);
+}
+
+.setting-row .button-outline:hover:not(:disabled) {
+  background: var(--border);
+}
+
 .preference-group > h3 {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 6px;
+  margin: 0 4px 8px;
   color: var(--secondary);
   font-size: var(--text-small);
   font-weight: 500;
@@ -784,12 +799,13 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding:6px 10px;
+  padding:4px 6px;
   border-radius:var(--radius-pill);
   background:var(--surface-muted);
 }
 
-.shortcut-chord kbd { border:0; background:transparent; padding:0 2px; }
+/* Separate keycaps read faster than "Ctrl Alt Q" as plain words. */
+.shortcut-chord kbd { border:0; background:var(--surface); color:var(--foreground); padding:0 7px; }
 
 .shortcut-binding .shortcut-key {
   position: absolute;
@@ -995,17 +1011,18 @@ button.about-resource:hover { background: var(--surface-muted); }
 /* The service directory and editor remain independent scroll surfaces. */
 .service-content { flex:1; min-height:0; container:service-area / inline-size; overflow:hidden; padding:0; }
 .service-layout { display:flex; flex-direction:column; gap:12px; height:100%; min-height:0; }
-.service-browser { display:grid; grid-template-columns:12rem minmax(0,1fr); gap:16px; flex:1; min-height:0; height:100%; }
+.service-browser { display:grid; grid-template-columns:13rem minmax(0,1fr); gap:16px; flex:1; min-height:0; height:100%; }
 .service-list { position:relative; isolation:isolate; overflow-y:auto; padding:12px 8px; border-radius:var(--radius-surface); background:var(--surface); scrollbar-width:thin; }
 .service-list-group + .service-list-group { margin-top:20px; }
 .service-list-group h2 { padding:0 8px 8px; font-size:var(--text-small); font-weight:500; color:var(--muted); }
 .service-list-item { position:relative; display:flex; align-items:center; gap:8px; width:100%; padding:10px 10px; min-height:var(--control-height); text-align:left; font-size:var(--text-ui); border-radius:var(--radius-pill); color:var(--secondary); transition:color var(--motion-fast),background-color var(--motion-fast); }
 .service-item-icon { width:28px; height:28px; display:grid; place-items:center; flex-shrink:0; border-radius:50%; background:var(--surface-muted); transition:background-color var(--motion-fast); }
 .service-list-item[aria-pressed="true"] .service-item-icon { background:var(--surface); }
-.service-name { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* Long names ("Microsoft 移动接口") wrap to two lines instead of losing their distinguishing word. */
+.service-name { flex:1; min-width:0; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-clamp:2; overflow:hidden; line-height:1.3; word-break:keep-all; overflow-wrap:break-word; }
 .service-list-item:hover { background:var(--surface-muted); }
 .service-list-item[aria-pressed="true"] { color:var(--foreground); font-weight:500; transition:none; }
-.service-in-use { color:var(--secondary); }
+.service-in-use { flex-shrink:0; width:6px; height:6px; margin-right:4px; border-radius:50%; background:var(--success); }
 .service-detail { display:flex; flex-direction:column; min-width:0; min-height:0; border:0; border-radius:var(--radius-surface); background:var(--surface); overflow:hidden; }
 .service-detail-heading { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; padding:var(--panel-inset); flex-shrink:0; }
 .service-heading-text { display:flex; flex-direction:column; gap:4px; min-width:0; }
@@ -1019,6 +1036,8 @@ button.about-resource:hover { background: var(--surface-muted); }
 .service-feedback { display:flex; align-items:center; flex:1; min-height:1.428571rem; min-width:0; }
 .service-buttons { display:flex; justify-content:flex-end; flex-shrink:0; flex-wrap:wrap; gap:8px; margin-left:auto; }
 .service-buttons .button-outline { background:var(--surface-muted); }
+/* The selected service is already current: a quiet status, not a disabled primary button. */
+.service-current { display:inline-flex; align-items:center; gap:6px; min-height:var(--control-height); padding:0 12px; color:var(--success); font-size:var(--text-ui); font-weight:500; }
 .connection-status { display:flex; align-items:center; gap:6px; max-width:100%; padding:0; font-size:var(--text-small); text-align:left; }
 .connection-status > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .connection-details { max-width:min(420px,calc(100vw - 32px)); overflow-wrap:anywhere; }

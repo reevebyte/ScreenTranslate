@@ -24,7 +24,7 @@ import { onMount, onDestroy, tick } from 'svelte';
   } from '$lib/icons';
   import { app, act, copy, recover } from '$lib/store.svelte';
   import { call } from '$lib/api';
-  import { frameUrl, languageOptions } from '$lib/utils';
+  import { frameUrl, languageOptions, formatHotkeyParts } from '$lib/utils';
   import { fitOverlayText, sourceFontSize } from '$lib/overlay-layout';
   import Button from '$lib/components/ui/button.svelte';
   import Choice from '$lib/components/ui/choice.svelte';
@@ -151,6 +151,7 @@ import { onMount, onDestroy, tick } from 'svelte';
   });
   let selected = $derived(session?.blocks.find(block => block.id === selectedId));
   let busy = $derived(['recognizing', 'translating'].includes(session?.job?.stage ?? 'idle'));
+  let captureKeys = $derived(formatHotkeyParts(app.data?.config.hotkeys.capture, app.data?.capabilities.platform === 'macos'));
   let progress = $derived(session?.job?.stage === 'recognizing' ? t("识别中") : t("翻译中"));
   let scale = $derived(
     floating
@@ -516,6 +517,7 @@ import { onMount, onDestroy, tick } from 'svelte';
           {t("打开图片")}
         </Button>
       </div>
+      {#if captureKeys.length}<p class="capture-empty-hint"><span>{t("或按")}</span>{#each captureKeys as key}<kbd>{key}</kbd>{/each}</p>{/if}
     </div>
   {:else if floating}
     <div class="floating-shell" class:controls-above={controlsAbove} class:image-align-left={imageAlignLeft} bind:clientWidth={width} bind:clientHeight={height}>

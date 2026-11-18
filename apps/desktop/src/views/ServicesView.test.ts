@@ -117,3 +117,16 @@ it('does not show a previous service test result after switching to another serv
   expect(view.queryByRole('button',{name:/连接成功/})).toBeNull();
   expect((view.getByRole('button',{name:'测试连接'}) as HTMLButtonElement).disabled).toBe(false);
 });
+
+it('shows the current service as a status instead of a disabled button', async () => {
+  const view = render(ServicesView);
+  const current = app.data!.config.provider;
+  const entry = view.getAllByRole('button').find(node => node.getAttribute('aria-pressed') === 'true');
+  expect(entry).toBeTruthy();
+  expect(view.getByText('当前使用中')).toBeTruthy();
+  expect(view.queryByRole('button', { name: '设为当前' })).toBeNull();
+  const other = view.getAllByRole('button').find(node => node.classList.contains('service-list-item') && node.getAttribute('aria-pressed') === 'false');
+  await fireEvent.click(other!);
+  expect(view.getByRole('button', { name: '设为当前' })).toBeTruthy();
+  expect(app.data!.config.provider).toBe(current);
+});

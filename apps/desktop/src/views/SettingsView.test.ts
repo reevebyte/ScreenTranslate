@@ -28,6 +28,20 @@ describe('automatic preferences', () => {
     view.unmount();
     await waitFor(() => expect(call).toHaveBeenCalledWith('save_config', { config: expect.objectContaining({ appearance: expect.objectContaining({ autoCopy: true }) }) }));
   });
+  it('asks before restoring defaults and keeps settings when cancelled', async () => {
+    app.data!.config.autoTranslate = false;
+    const view = render(SettingsView);
+    await fireEvent.click(view.getByRole('button', { name: '恢复' }));
+    const dialog = await view.findByRole('dialog');
+    expect(dialog.textContent).toContain('已保存的密钥会保留');
+    await fireEvent.click(view.getByRole('button', { name: '取消' }));
+    await waitFor(() => expect(view.queryByRole('dialog')).toBeNull());
+    expect((view.getByLabelText('输入后自动翻译') as HTMLElement).getAttribute('data-state')).toBe('unchecked');
+    await fireEvent.click(view.getByRole('button', { name: '恢复' }));
+    const confirm = (await view.findByRole('dialog')).querySelector('.dialog-actions button:last-child') as HTMLElement;
+    await fireEvent.click(confirm);
+    await waitFor(() => expect((view.getByLabelText('输入后自动翻译') as HTMLElement).getAttribute('data-state')).toBe('checked'));
+  });
   it('keeps automatic update checks connected to the saved preference in the centered about page', async () => {
     const view = render(SettingsView);
     await fireEvent.click(view.getByRole('tab', { name: '关于' }));

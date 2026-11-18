@@ -365,7 +365,8 @@ input[type="checkbox"], input[type="range"] {
   width: 1.285714rem;
   height: 1.285714rem;
   border-radius: 50%;
-  background: var(--foreground);
+  /* Off stays quiet in both themes; only "on" uses the high-contrast action colours. */
+  background: var(--surface);
   translate: .214286rem 0;
   transition: translate var(--motion-standard) var(--ease), background-color var(--motion-fast);
 }

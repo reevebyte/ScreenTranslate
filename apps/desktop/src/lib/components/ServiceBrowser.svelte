@@ -2,7 +2,6 @@
   import { t } from '$lib/i18n.svelte';
   import type { Snippet } from 'svelte';
   import { prefersReducedMotion } from 'svelte/motion';
-  import { Check } from '$lib/icons';
   import type { ProviderBrand } from '$lib/provider-brand';
   import ProviderIcon from './ProviderIcon.svelte';
   import Choice from './ui/choice.svelte';
@@ -30,7 +29,7 @@
     {#each groups as group}
       <div class="service-list-group"><h2>{group}</h2>
         {#each entries.filter(item=>item.group===group) as item}
-          <button class="service-list-item" title={t(item.name)} aria-label={t(item.name)} aria-pressed={item.id===selected} onclick={()=>onselect(item.id)}><span class="service-item-icon" aria-hidden="true"><ProviderIcon brand={item.icon}/></span><span class="service-name">{t(item.name)}</span>{#if item.current}<Check size={14} class="service-in-use"/><span class="sr-only">{t("使用中")}</span>{/if}</button>
+          <button class="service-list-item" title={t(item.name)} aria-label={t(item.name)} aria-pressed={item.id===selected} onclick={()=>onselect(item.id)}><span class="service-item-icon" aria-hidden="true"><ProviderIcon brand={item.icon}/></span><span class="service-name">{t(item.name)}</span>{#if item.current}<span class="service-in-use" aria-hidden="true"></span><span class="sr-only">{t("使用中")}</span>{/if}</button>
         {/each}
       </div>
     {/each}
