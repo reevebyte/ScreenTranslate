@@ -29,6 +29,9 @@ pub struct WindowLifecycle {
 }
 
 impl WindowLifecycle {
+    // Only Windows reuses (and so retires) selection windows; other platforms
+    // destroy them, so this is unused there.
+    #[cfg_attr(not(windows), allow(dead_code))]
     fn begin_retire(&mut self, label: &str) -> u64 {
         self.next_retire += 1;
         self.retiring.insert(label.into(), self.next_retire);
