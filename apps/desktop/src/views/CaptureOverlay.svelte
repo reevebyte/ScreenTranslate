@@ -26,34 +26,38 @@
       || (value === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.classList.toggle('dark', dark);
   }
+  function nextPaint() {
+    return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }
+  // The reused window is about to be hidden. WebView2 does not repaint hidden
+  // windows, so paint an empty frame first; otherwise the next capture shows
+  // this screenshot for a frame before its own.
+  async function retire(token: number) {
+    useFrame(null);
+    await tick();
+    await nextPaint();
+    void call('selection_cleared', { token }).catch(() => {});
+  }
   onMount(() => {
     let disposed = false;
-    let stopListening: (() => void) | undefined;
-    let stopThemeListening: (() => void) | undefined;
+    const stops: (() => void)[] = [];
+    function subscribe<T>(event: string, handler: (payload: T) => void) {
+      void listen<T>(event, ({ payload }) => { if (!disposed) handler(payload); })
+        .then(stop => { if (disposed) stop(); else stops.push(stop); })
+        .catch(() => {});
+    }
+    // A prewarmed window has no selection yet and stays idle (renders nothing).
     void call<FrameMetadata>('selection_frame')
       .then(value => { if (!disposed) useFrame(value); })
-      .catch(reason => {
-        if (disposed) return;
-        error = errorMessage(reason);
-        imageReady(null);
-      });
+      .catch(() => { if (!disposed) imageReady(null); });
     if (isTauri()) {
-      void listen<FrameMetadata>('selection-frame', ({ payload }) => {
-        if (!disposed) useFrame(payload);
-      }).then(stop => {
-        if (disposed) stop();
-        else stopListening = stop;
-      }).catch(() => {});
-      void listen<string>('selection-theme', ({ payload }) => useTheme(payload))
-        .then(stop => {
-          if (disposed) stop();
-          else stopThemeListening = stop;
-        }).catch(() => {});
+      subscribe<FrameMetadata>('selection-frame', useFrame);
+      subscribe<string>('selection-theme', useTheme);
+      subscribe<number>('selection-retire', token => void retire(token));
     }
     return () => {
       disposed = true;
-      stopListening?.();
-      stopThemeListening?.();
+      for (const stop of stops) stop();
     };
   });
   function down(event: PointerEvent) {
@@ -81,7 +85,7 @@
   async function imageReady(frameId = frame?.id ?? null) {
     await tick();
     await call('window_ready', { frameId }).catch(() => {});
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await nextPaint();
     void call('selection_presented').catch(() => {});
   }
 </script>
@@ -89,10 +93,12 @@
 <svelte:window onkeydown={event => { if (event.key === 'Escape') cancel(); }}/>
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="capture-surface" bind:this={surface} bind:clientWidth={width} bind:clientHeight={height} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={reset} onlostpointercapture={() => { if (anchor) reset(); }} oncontextmenu={event => { event.preventDefault(); cancel(); }}>
-  {#if frame}{@const frameId = frame.id}<img class="capture-background" src={frameUrl(frameId)} alt={t("待框选的屏幕图像")} draggable="false" onload={() => imageReady(frameId)} onerror={() => { error = t("截图读取失败，请重新截图"); imageReady(frameId); }}/>{/if}
+  <!-- Without a frame the window is idle or retiring and must paint nothing. -->
+  {#if frame}{@const frameId = frame.id}<img class="capture-background" src={frameUrl(frameId)} alt={t("待框选的屏幕图像")} draggable="false" onload={() => imageReady(frameId)} onerror={() => { error = t("截图读取失败，请重新截图"); imageReady(frameId); }}/>
   {#if selection && selection.width > 0}
     <div class="selection-rect" style:left={`${selection.x}px`} style:top={`${selection.y}px`} style:width={`${selection.width}px`} style:height={`${selection.height}px`}><span class="selection-dimensions">{Math.round(selection.width * (frame?.width ?? width) / width)} × {Math.round(selection.height * (frame?.height ?? height) / height)}</span><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i><i class="corner tm"></i><i class="corner rm"></i><i class="corner bm"></i><i class="corner lm"></i></div>
   {:else}<div class="capture-shade"></div>{/if}
   <div class="capture-guide"><ScanLine size={16}/><span>{submitting ? t("正在识别…") : t("拖动选择区域")}</span><span class="capture-guide-divider" aria-hidden="true"></span><kbd>Esc</kbd><span class="capture-guide-cancel">{t("取消")}</span></div>
   {#if error}<div class="capture-error">{error}<button onclick={cancel}>{t("返回")}</button></div>{/if}
+  {/if}
 </div>

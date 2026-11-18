@@ -150,12 +150,9 @@ pub fn start_visual(app: AppHandle, metadata: FrameMetadata, recognize: bool) {
     state.publish_visual(&app);
     if let Err(e) = windows::show_result(&app, &metadata) {
         tracing::error!("show_result failed: {e:?}");
-        if app
-            .get_webview_window("main")
-            .is_some_and(|w| w.is_visible().unwrap_or(false))
-        {
-            let _ = windows::show_main(&app);
-        }
+        // Without a result window nothing would retire the frozen selection
+        // overlay; end the capture (same as Esc) and report the failure.
+        windows::abort_capture(&app, e);
     }
     tauri::async_runtime::spawn(async move {
         let outcome = tokio::time::timeout(

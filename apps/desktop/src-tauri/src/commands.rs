@@ -109,6 +109,12 @@ pub async fn selection_presented(window: WebviewWindow) -> Result<()> {
 }
 
 #[tauri::command]
+pub async fn selection_cleared(window: WebviewWindow, token: u64) -> Result<()> {
+    windows::finish_selection_retire(window.app_handle(), window.label(), token);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn bootstrap(app: AppHandle) -> Result<Bootstrap> {
     Ok(app.state::<AppState>().bootstrap())
 }
@@ -255,11 +261,22 @@ pub async fn cancel_capture(app: AppHandle) -> Result<()> {
 #[tauri::command]
 pub async fn selection_frame(app: AppHandle, window: WebviewWindow) -> Result<FrameMetadata> {
     let state = app.state::<AppState>();
+    // An unassigned window (the prewarmed one) simply stays idle.
     let id = lock(&state.selections)
         .get(window.label())
         .cloned()
         .ok_or_else(|| AppError::new(ErrorCode::InvalidInput, "选区已过期"))?;
-    lock(&state.frames).metadata(&id)
+    let metadata = lock(&state.frames).metadata(&id);
+    // An assigned window without its frame could never be revealed, so the
+    // capture would silently do nothing. End it and say why.
+    if let Err(error) = &metadata {
+        // Release the lock before cancelling; cancel_capture takes it again.
+        let still_current = lock(&state.selections).get(window.label()) == Some(&id);
+        if still_current {
+            windows::abort_capture(&app, error.clone());
+        }
+    }
+    metadata
 }
 
 #[tauri::command]

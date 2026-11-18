@@ -1,11 +1,27 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { render, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
-const { call } = vi.hoisted(() => ({ call: vi.fn() }));
+const { call, handlers } = vi.hoisted(() => ({
+  call: vi.fn(),
+  handlers: new Map<string, (event: { payload: unknown }) => void>(),
+}));
 vi.mock('$lib/api', () => ({ call }));
+vi.mock('@tauri-apps/api/core', async original => ({
+  ...(await original<typeof import('@tauri-apps/api/core')>()),
+  isTauri: () => true,
+}));
+vi.mock('@tauri-apps/api/event', () => ({
+  emit: vi.fn(async () => {}),
+  listen: vi.fn(async (event: string, handler: (event: { payload: unknown }) => void) => {
+    handlers.set(event, handler);
+    return () => handlers.delete(event);
+  }),
+}));
 import CaptureOverlay from './CaptureOverlay.svelte';
 
 beforeEach(() => {
   call.mockReset();
+  handlers.clear();
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0));
   call.mockImplementation(async command => command === 'selection_frame'
     ? { id: 'screen', width: 2000, height: 1200, scaleFactor: 2, screenBounds: null, cleanId: null }
     : undefined);
@@ -49,5 +65,25 @@ describe('screenshot selection', () => {
     await fireEvent.pointerUp(surface, { pointerId: 2, clientX: 200, clientY: 150 });
     expect(call.mock.calls.some(([name]) => name === 'select_region')).toBe(false);
     expect(view.container.querySelector('.selection-rect')).toBeNull();
+  });
+
+  it('paints an empty frame before the reused window is hidden', async () => {
+    const view = render(CaptureOverlay);
+    await waitFor(() => expect(view.queryByAltText('待框选的屏幕图像')).toBeTruthy());
+    await waitFor(() => expect(handlers.has('selection-retire')).toBe(true));
+    handlers.get('selection-retire')!({ payload: 7 });
+    await waitFor(() => expect(call).toHaveBeenCalledWith('selection_cleared', { token: 7 }));
+    expect(view.queryByAltText('待框选的屏幕图像')).toBeNull();
+    expect(view.container.querySelector('.capture-guide')).toBeNull();
+    expect(view.container.querySelector('.capture-shade')).toBeNull();
+  });
+
+  it('keeps a prewarmed window without a selection blank', async () => {
+    call.mockImplementation(async command => {
+      if (command === 'selection_frame') throw new Error('选区已过期');
+    });
+    const view = render(CaptureOverlay);
+    await waitFor(() => expect(call).toHaveBeenCalledWith('window_ready', { frameId: null }));
+    expect(view.container.querySelector('.capture-surface')!.children).toHaveLength(0);
   });
 });

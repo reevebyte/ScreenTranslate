@@ -23,9 +23,24 @@ pub struct WindowLifecycle {
     ready: HashSet<String>,
     pending: HashSet<String>,
     painted: HashSet<String>,
+    // Selection windows waiting to paint a cleared frame before hiding.
+    retiring: HashMap<String, u64>,
+    next_retire: u64,
 }
 
 impl WindowLifecycle {
+    fn begin_retire(&mut self, label: &str) -> u64 {
+        self.next_retire += 1;
+        self.retiring.insert(label.into(), self.next_retire);
+        self.next_retire
+    }
+    fn finish_retire(&mut self, label: &str, token: u64) -> bool {
+        if self.retiring.get(label) == Some(&token) {
+            self.retiring.remove(label);
+            return true;
+        }
+        false
+    }
     fn request(&mut self, label: &str) -> bool {
         if self.ready.contains(label) {
             return true;
@@ -41,6 +56,7 @@ impl WindowLifecycle {
         self.ready.remove(label);
         self.pending.remove(label);
         self.painted.remove(label);
+        self.retiring.remove(label);
     }
 }
 
@@ -876,32 +892,91 @@ pub fn toggle_result(app: &AppHandle) -> Result<()> {
     }
 }
 
-fn retire_selections(app: &AppHandle) {
+/// Upper bound for a visible selection window to paint its cleared frame.
+#[cfg(windows)]
+const SELECTION_CLEAR_TIMEOUT: Duration = Duration::from_millis(250);
+
+fn retire_selections(app: &AppHandle, clear_first: bool) {
     for (label, window) in app.webview_windows() {
-        if label.starts_with("selection-") {
-            #[cfg(not(windows))]
-            lock(&app.state::<AppState>().window_lifecycle).forget(&label);
-            #[cfg(windows)]
+        if !label.starts_with("selection-") {
+            continue;
+        }
+        #[cfg(windows)]
+        {
+            // WebView2 does not paint while its window is hidden, so a reused
+            // selection window would show its previous screenshot for a frame
+            // on the next capture. Paint an empty frame before hiding. Capture
+            // start passes `clear_first = false` so the overlay is hidden
+            // before the screen is read.
+            if clear_first && window.is_visible().unwrap_or(false) {
+                let token = lock(&app.state::<AppState>().window_lifecycle).begin_retire(&label);
+                if window
+                    .emit_to(label.as_str(), "selection-retire", token)
+                    .is_ok()
+                {
+                    let app = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(SELECTION_CLEAR_TIMEOUT).await;
+                        finish_selection_retire(&app, &label, token);
+                    });
+                    continue;
+                }
+            }
+            lock(&app.state::<AppState>().window_lifecycle)
+                .retiring
+                .remove(&label);
             let _ = window.hide();
-            #[cfg(not(windows))]
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = clear_first;
+            lock(&app.state::<AppState>().window_lifecycle).forget(&label);
             let _ = window.destroy();
         }
     }
 }
 
+/// Hides a retiring selection window once it painted the cleared frame, or
+/// when the fallback timeout fires. Stale tokens are ignored.
+pub fn finish_selection_retire(app: &AppHandle, label: &str, token: u64) {
+    let finished = lock(&app.state::<AppState>().window_lifecycle).finish_retire(label, token);
+    if finished && let Some(window) = app.get_webview_window(label) {
+        let _ = window.hide();
+    }
+}
+
 pub fn cancel_capture(app: &AppHandle, restore: bool) {
+    cancel_capture_with(app, restore, true);
+}
+
+/// True while a capture overlay is assigned a frame or still on screen (for
+/// example frozen while its selection is recognised). Windows keeps hidden,
+/// reusable selection windows alive, so their mere existence is not enough.
+fn selection_in_use(app: &AppHandle) -> bool {
     let state = app.state::<AppState>();
-    if restore
-        && app
-            .webview_windows()
-            .keys()
-            .any(|label| label.starts_with("selection-"))
-    {
+    if !lock(&state.selections).is_empty() {
+        return true;
+    }
+    let retiring: Vec<String> = lock(&state.window_lifecycle)
+        .retiring
+        .keys()
+        .cloned()
+        .collect();
+    app.webview_windows().iter().any(|(label, window)| {
+        label.starts_with("selection-")
+            && !retiring.contains(label)
+            && window.is_visible().unwrap_or(false)
+    })
+}
+
+fn cancel_capture_with(app: &AppHandle, restore: bool, clear_selections: bool) {
+    let state = app.state::<AppState>();
+    if restore && selection_in_use(app) {
         state.jobs.cancel("visual");
         lock(&state.window_lifecycle).forget("result");
     }
     state.jobs.cancel("capture");
-    retire_selections(app);
+    retire_selections(app, clear_selections);
     let frames: Vec<_> = lock(&state.selections)
         .drain()
         .map(|(_, frame)| frame)
@@ -1117,7 +1192,8 @@ async fn recover_wayland_clipboard_capture(
 }
 
 pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_tray: bool) {
-    cancel_capture(&app, true);
+    // Hide any overlay now: it must not appear in the screenshot taken next.
+    cancel_capture_with(&app, true, false);
     let state = app.state::<AppState>();
     let ticket = state.jobs.begin("capture");
     // Capture exactly what is visible. Hiding or capture-excluding the main
@@ -1245,8 +1321,9 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
                 lock(&state.selections).insert(label.clone(), metadata.id.clone());
                 let window = if let Some(window) = app.get_webview_window(&label) {
                     lock(&state.window_lifecycle).forget(&label);
-                    let _ = window.emit("selection-theme", theme_str);
-                    let _ = window.emit("selection-frame", metadata.clone());
+                    // `emit` would broadcast to every monitor's overlay.
+                    let _ = window.emit_to(label.as_str(), "selection-theme", theme_str);
+                    let _ = window.emit_to(label.as_str(), "selection-frame", metadata.clone());
                     window
                 } else {
                     selection_window(&app, &label)?
@@ -1263,16 +1340,22 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
         {
             // A late OS/portal error from an abandoned capture must not tear
             // down selection windows that belong to its replacement.
-            cancel_capture(&app, true);
-            if app
-                .get_webview_window("main")
-                .is_some_and(|w| w.is_visible().unwrap_or(false))
-            {
-                let _ = show_main(&app);
-            }
-            let _ = app.emit("app-error", error);
+            abort_capture(&app, error);
         }
     });
+}
+
+/// Ends the current capture and reports why, instead of leaving overlays
+/// hidden or frozen with no feedback.
+pub fn abort_capture(app: &AppHandle, error: AppError) {
+    cancel_capture(app, true);
+    if app
+        .get_webview_window("main")
+        .is_some_and(|w| w.is_visible().unwrap_or(false))
+    {
+        let _ = show_main(app);
+    }
+    let _ = app.emit("app-error", error);
 }
 
 pub fn accept_selection(app: &AppHandle, label: &str, rect: Rect) -> Result<()> {
@@ -1388,6 +1471,22 @@ mod tests {
         assert!(!lifecycle.loaded("result"));
         lifecycle.forget("result");
         assert!(!lifecycle.request("result"));
+    }
+
+    #[test]
+    fn selection_retire_hides_once_and_ignores_stale_or_reused_tokens() {
+        let mut lifecycle = WindowLifecycle::default();
+        let first = lifecycle.begin_retire("selection-0");
+        // A newer retire supersedes the older paint acknowledgement.
+        let second = lifecycle.begin_retire("selection-0");
+        assert!(!lifecycle.finish_retire("selection-0", first));
+        assert!(lifecycle.finish_retire("selection-0", second));
+        // The fallback timeout after the acknowledgement is a no-op.
+        assert!(!lifecycle.finish_retire("selection-0", second));
+        // Reusing the window for a new capture cancels the pending hide.
+        let pending = lifecycle.begin_retire("selection-0");
+        lifecycle.forget("selection-0");
+        assert!(!lifecycle.finish_retire("selection-0", pending));
     }
 
     #[test]

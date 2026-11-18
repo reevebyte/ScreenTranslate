@@ -122,6 +122,7 @@ pub fn run() {
             commands::window_ready,
             commands::result_presented,
             commands::selection_presented,
+            commands::selection_cleared,
             commands::refresh_capabilities,
             commands::preview_theme,
             commands::set_text,
