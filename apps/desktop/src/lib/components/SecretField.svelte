@@ -58,5 +58,5 @@
     <button type="button" class="icon-button" disabled={loading} aria-label={visible ? t("隐藏{0}",label) : t("查看{0}",label)} onclick={toggle}>{#if loading}<LoaderCircle size={17} class="spin"/>{:else if visible}<EyeOff size={17}/>{:else}<Eye size={17}/>{/if}</button>
     {#if exists}<button type="button" class="icon-button" aria-label={t("删除{0}",label)} disabled={saving} onclick={remove}><Trash2 size={16}/></button>{/if}
   </div>
-  {#if error}<div class="autosave-error" role="alert"><span>{error}</span><button onclick={() => draft ? flush() : toggle()}>{t("重试")}</button></div>{/if}
+  {#if error}<div class="field-error" role="alert"><span>{error}</span><button onclick={() => draft ? flush() : toggle()}>{t("重试")}</button></div>{/if}
 </div>

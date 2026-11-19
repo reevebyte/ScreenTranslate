@@ -226,6 +226,7 @@ pub async fn shortcuts(
         ("capture", "截图翻译", hotkeys.capture),
         ("toggle", "显示或隐藏译文", hotkeys.toggle),
         ("quick", "快速文字翻译", hotkeys.quick),
+        ("search", "快速查找", hotkeys.search),
     ];
     let shortcuts: Vec<_> = entries
         .iter()

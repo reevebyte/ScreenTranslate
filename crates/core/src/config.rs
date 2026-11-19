@@ -166,6 +166,24 @@ pub struct Hotkeys {
     pub capture: String,
     pub toggle: String,
     pub quick: String,
+    /// Opens the main window's quick search (command palette).
+    pub search: String,
+}
+
+impl Hotkeys {
+    /// Quick search was added later with a default of Ctrl+Alt+K. A user who
+    /// already bound that key elsewhere keeps their binding; the new action
+    /// starts unassigned instead of making the whole configuration invalid.
+    pub fn drop_conflicting_search(&mut self) {
+        let search = &self.search;
+        if !search.is_empty()
+            && [&self.capture, &self.toggle, &self.quick]
+                .iter()
+                .any(|key| key.eq_ignore_ascii_case(search))
+        {
+            self.search.clear();
+        }
+    }
 }
 
 impl Default for Hotkeys {
@@ -174,6 +192,7 @@ impl Default for Hotkeys {
             capture: "Ctrl+Alt+Q".into(),
             toggle: "Ctrl+Alt+W".into(),
             quick: "Ctrl+Alt+Space".into(),
+            search: "Ctrl+Alt+K".into(),
         }
     }
 }
@@ -277,6 +296,7 @@ impl Config {
             &self.hotkeys.capture,
             &self.hotkeys.toggle,
             &self.hotkeys.quick,
+            &self.hotkeys.search,
         ];
         for (i, key) in keys.iter().enumerate() {
             if !key.is_empty()
@@ -284,7 +304,11 @@ impl Config {
                     .iter()
                     .any(|prior| prior.eq_ignore_ascii_case(key))
             {
-                return Err(invalid("三个全局快捷键不能重复"));
+                return Err(AppError::new(
+                    ErrorCode::Configuration,
+                    format!("快捷键 {key} 已用于其他操作"),
+                )
+                .action("hotkeys"));
             }
         }
         if self.ocr.languages.is_empty() || self.ocr.languages.len() > 16 {
@@ -331,6 +355,7 @@ impl Config {
                 .entry(id)
                 .or_insert_with(|| provider_defaults(id));
         }
+        config.hotkeys.drop_conflicting_search();
         config.validate()?;
         if config.ocr.defaults_version == 0 {
             config.ocr.engine = OcrEngine::Youdao;
@@ -528,6 +553,8 @@ pub fn import_legacy(bytes: &[u8]) -> Result<LegacyImport> {
     if let Some(v) = string("/ocr/azure_vision/key").filter(|v| !v.is_empty()) {
         secrets.insert("azure_ocr".into(), v);
     }
+    // Legacy versions had no quick search; keep an imported binding of the same key.
+    config.hotkeys.drop_conflicting_search();
     config.validate()?;
     Ok(LegacyImport {
         config,
@@ -539,6 +566,30 @@ pub fn import_legacy(bytes: &[u8]) -> Result<LegacyImport> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upgrading_keeps_a_custom_binding_that_matches_the_new_search_default() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.json");
+        let mut old = serde_json::to_value(Config::default()).unwrap();
+        old["hotkeys"]["quick"] = serde_json::json!("Ctrl+Alt+K");
+        old["hotkeys"].as_object_mut().unwrap().remove("search");
+        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.hotkeys.quick, "Ctrl+Alt+K");
+        assert_eq!(config.hotkeys.search, "");
+        // A fresh configuration still gets the default.
+        assert_eq!(Hotkeys::default().search, "Ctrl+Alt+K");
+    }
+
+    #[test]
+    fn duplicate_hotkeys_are_reported_as_a_hotkey_error() {
+        let mut config = Config::default();
+        config.hotkeys.search = config.hotkeys.capture.clone();
+        let error = config.validate().unwrap_err();
+        assert_eq!(error.action.as_deref(), Some("hotkeys"));
+        assert!(error.message.contains("Ctrl+Alt+Q"));
+    }
 
     #[test]
     fn unreadable_config_is_backed_up_before_defaults_can_replace_it() {

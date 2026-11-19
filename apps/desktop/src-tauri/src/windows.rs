@@ -779,6 +779,13 @@ pub fn ensure_quick(app: &AppHandle) -> Result<tauri::WebviewWindow> {
     Ok(window)
 }
 
+/// Global quick-search hotkey: bring up the main window and open its command palette.
+pub fn open_search(app: &AppHandle) {
+    if show_main(app).is_ok() {
+        let _ = app.emit_to("main", "open-command-palette", ());
+    }
+}
+
 pub fn show_main(app: &AppHandle) -> Result<()> {
     #[cfg(target_os = "macos")]
     screentrans_platform::activate_app();

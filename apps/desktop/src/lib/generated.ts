@@ -51,7 +51,11 @@ export type OcrConfig = {
  */
 defaultsVersion: number, engine: OcrEngine, languages: Array<string>, azureEndpoint: string, upscale: boolean, custom: CustomOcrConfig, };
 
-export type Hotkeys = { capture: string, toggle: string, quick: string, };
+export type Hotkeys = { capture: string, toggle: string, quick: string, 
+/**
+ * Opens the main window's quick search (command palette).
+ */
+search: string, };
 
 export type Appearance = { theme: Theme, accent: string, fontScale: number, autoCopy: boolean, closeToTray: boolean, };
 

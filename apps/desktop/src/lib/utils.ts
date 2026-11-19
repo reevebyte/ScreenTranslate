@@ -9,8 +9,6 @@ export type WithElementRef<T, U extends HTMLElement = HTMLElement> = T & { ref?:
 
 export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
-export const modifierLabel = /Mac/.test(navigator.userAgent) ? '⌘' : 'Ctrl';
-
 export function formatHotkeyPart(part: string, isMac: boolean): string {
   if (!isMac) return part;
   switch (part) {
@@ -50,7 +48,6 @@ export const languages = [
 
 export const languageOptions = () => languages.map(([code,label]) => [code,t(label)] as const);
 
-export const languageName = (value: string) => t(languages.find(([code]) => code === value)?.[1] ?? value);
 
 export function errorMessage(error: unknown): string {
   if (error && typeof error === 'object' && 'message' in error) return t(String(error.message));

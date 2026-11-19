@@ -50,6 +50,5 @@ export { default as BrandHandle } from './components/icons/BrandHandle.svelte';
 export { default as Globe2 } from './components/icons/Globe2.svelte';
 export { default as ChevronDownIcon } from './components/icons/ChevronDownIcon.svelte';
 export { default as CheckIcon } from './components/icons/CheckIcon.svelte';
-export { default as Move } from './components/icons/Move.svelte';
 export { default as LoaderCircle } from 'phosphor-svelte/lib/SpinnerGap';
 export { default as TextSize } from 'phosphor-svelte/lib/TextAa';

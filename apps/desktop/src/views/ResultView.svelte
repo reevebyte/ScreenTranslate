@@ -20,7 +20,7 @@ import { onMount, onDestroy, tick } from 'svelte';
     ArrowUpRight,
     LoaderCircle,
     Eye, FolderOpen,
-    Check, ArrowRightLeft,
+    Check, ArrowRightLeft, Languages,
   } from '$lib/icons';
   import { app, act, copy, recover } from '$lib/store.svelte';
   import { call } from '$lib/api';
@@ -730,20 +730,35 @@ import { onMount, onDestroy, tick } from 'svelte';
     <div class="block-editor-heading"><Dialog.Title>{t("校对文字")}</Dialog.Title><button class="icon-button" aria-label={t("关闭校对")} onclick={() => selectedId = ''}><X size={20}/></button></div>
     <div class="block-editor-actions">
       <Choice id="block-language" class="field" label={t("目标语言")} value={draftTarget} options={languageOptions().map(([code,name]) => [code,code === 'auto' ? t("智能互译") : name])} onchange={value => draftTarget=value}/>
-      <Button size="sm" disabled={!draftText.trim() || blockBusy} onclick={retranslateBlock}>{#if blockBusy}<LoaderCircle size={16} class="spin"/>{:else}<RotateCcw size={16}/>{/if}{t("重译此块")}</Button>
+      <Button size="sm" class="block-retranslate" disabled={!draftText.trim() || blockBusy} onclick={retranslateBlock}>{#if blockBusy}<LoaderCircle size={16} class="spin"/>{:else}<RotateCcw size={16}/>{/if}{t("重译此块")}</Button>
     </div>
     {#if compactEditor}
       <Tabs.Root bind:value={editorTab} class="correction-tabs"><Tabs.List class="editor-pane-tabs" aria-label={t("校对内容")}><Tabs.Trigger value="source">{t("原文")}</Tabs.Trigger><Tabs.Trigger value="target">{t("译文")}</Tabs.Trigger></Tabs.List><Tabs.Content value="source">{@render correctionSource()}</Tabs.Content><Tabs.Content value="target">{@render correctionTarget()}</Tabs.Content></Tabs.Root>
     {:else}<div class="block-editor-fields">{@render correctionSource()}{@render correctionTarget()}</div>{/if}
-    {#if edited || blockBusy}<div class="editor-pending" role="status">{blockBusy ? t("正在更新当前文字块…") : t("原文或语言已修改，译文待更新")}</div>{/if}
   </Dialog.Content></Dialog.Portal>
 </Dialog.Root>
 
 {#snippet correctionSource()}
-  <section class="correction-pane"><label for="block-source">{t("识别原文")}</label><textarea id="block-source" class="field block-source" bind:value={draftText} onkeydown={event => {if((event.ctrlKey||event.metaKey) && event.key === 'Enter' && !event.isComposing){event.preventDefault();void retranslateBlock();}}}></textarea></section>
+  <section class="correction-card source" aria-labelledby="block-source-label">
+    <div class="correction-card-head">
+      <span class="correction-well" aria-hidden="true"><TextScan size={15}/></span>
+      <label id="block-source-label" for="block-source">{t("识别原文")}</label>
+      <span class="correction-status">{#if edited}<span class="correction-chip accent">{t("已修改")}</span>{/if}</span>
+    </div>
+    <textarea id="block-source" class="correction-body block-source" bind:value={draftText} onkeydown={event => {if((event.ctrlKey||event.metaKey) && event.key === 'Enter' && !event.isComposing){event.preventDefault();void retranslateBlock();}}}></textarea>
+  </section>
 {/snippet}
 {#snippet correctionTarget()}
-  <section class="correction-pane"><div class="correction-pane-heading"><span>{t("当前译文")}</span>{#if selected?.translation}<CopyButton text={selected!.translation} label={t("复制当前块译文")}/>{/if}</div><div class="block-translation" role="textbox" aria-label={t("当前译文")} aria-readonly="true" tabindex="0">{selected?.translation || t("等待翻译")}</div></section>
+  <section class="correction-card target" class:updating={blockBusy} aria-labelledby="block-target-label">
+    <div class="correction-card-head">
+      <span class="correction-well" aria-hidden="true"><Languages size={15}/></span>
+      <span id="block-target-label">{t("当前译文")}</span>
+      <!-- Status lives in the card header so the dialog never changes shape. -->
+      <span class="correction-status" role="status">{#if blockBusy}<span class="correction-chip"><LoaderCircle size={12} class="spin"/>{t("翻译中")}</span>{:else if edited}<span class="correction-chip">{t("待更新")}</span>{/if}</span>
+      {#if selected?.translation}<CopyButton variant="icon" text={selected!.translation} label={t("复制当前块译文")}/>{/if}
+    </div>
+    <div class="correction-body block-translation" role="textbox" aria-labelledby="block-target-label" aria-readonly="true" tabindex="0">{selected?.translation || t("等待翻译")}</div>
+  </section>
 {/snippet}
 
 {#snippet floatingToolbar()}

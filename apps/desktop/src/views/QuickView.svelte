@@ -6,7 +6,8 @@
     ArrowUpRight,
     CornerDownLeft,
     LoaderCircle,
-    Check
+    Check,
+    Maximize2
   } from '$lib/icons';
   import { onMount, onDestroy, tick } from 'svelte';
   import { Dialog, Tabs } from 'bits-ui';
@@ -83,7 +84,13 @@
       <Choice class="spotlight-lang-select" label={t("快速翻译目标语言")} value={app.target} options={languageOptions().map(([code,name]) => [code,code === 'auto' ? t("智能互译") : name])} onchange={value => editText(app.input,app.source,value)}/>
       <button class="quick-provider" onclick={() => act(call('navigate_main', { route: 'providers' }))}><ProviderIcon brand={providerBrand(app.data!.config.provider,app.data!.config.providers[app.data!.config.provider]?.baseUrl)}/><span>{t(providerInfo(app.data!.config.provider).name)}</span></button>
     </div>
-    <div class="spotlight-actions">{#if app.input || app.data?.text.output}<Button variant="ghost" size="sm" onclick={() => readingOpen = true}>{t("阅读")}</Button>{/if}<button class="spotlight-icon-btn" aria-label={t("打开完整窗口")} title={t("打开主窗口")} onclick={() => act(call('show_main'))}><ArrowUpRight size={18}/></button><button class="spotlight-icon-btn" aria-label={t("收起")} title={t("收起")} onclick={() => act(call('hide_window'))}><X size={18}/></button></div>
+    <!-- One primary action at the top, followed by the window controls as circular wells. -->
+    <div class="spotlight-actions">
+      <Button size="sm" class="quick-translate" disabled={!app.input.trim() || composing || app.data?.text.job.stage === 'translating'} onclick={submit}>{#if app.data?.text.job.stage === 'translating'}<LoaderCircle size={15} class="spin"/>{/if}{t("翻译")}<CornerDownLeft size={14}/></Button>
+      <span class="spotlight-divider" aria-hidden="true"></span>
+      <button class="spotlight-icon-btn" aria-label={t("打开完整窗口")} title={t("打开主窗口")} onclick={() => act(call('show_main'))}><ArrowUpRight size={16}/></button>
+      <button class="spotlight-icon-btn" aria-label={t("收起")} title={t("收起")} onclick={() => act(call('hide_window'))}><X size={16}/></button>
+    </div>
   </header>
   {#if compactReading}
     <Tabs.Root bind:value={activePane} class="quick-compact-panes">
@@ -95,10 +102,6 @@
     {@render sourceEditor()}
     {@render targetEditor()}
   {/if}
-  <footer class="spotlight-footer" data-tauri-drag-region>
-    <div>{#if app.data?.text.output}<button class="quick-copy" aria-label={t("复制译文")} onclick={() => handleCopy(app.data!.text.output)}>{#if copiedToast}<Check size={17}/>{:else}<Copy size={17}/>{/if}{#if !copiedToast}{t("复制")}{/if}</button>{/if}</div>
-    <Button disabled={!app.input.trim() || composing || app.data?.text.job.stage === 'translating'} onclick={submit}>{t("翻译")}<CornerDownLeft size={15}/></Button>
-  </footer>
 </div>
 
 
@@ -122,7 +125,8 @@
 {/snippet}
 {#snippet targetEditor()}
   <div class="spotlight-output-wrap" aria-live="polite">
-    {#if app.data?.text.output}<div class="spotlight-result"><p class="spotlight-result-text">{app.data.text.output}</p></div>
+    {#if app.data?.text.output}<div class="quick-output-tools"><button class="spotlight-icon-btn" aria-label={t("阅读")} title={t("原译对照")} onclick={() => readingOpen = true}><Maximize2 size={15}/></button><button class="spotlight-icon-btn" class:copied={copiedToast} aria-label={t("复制译文")} title={t("复制译文")} onclick={() => handleCopy(app.data!.text.output)}>{#if copiedToast}<Check size={15}/>{:else}<Copy size={15}/>{/if}</button></div>
+      <div class="spotlight-result"><p class="spotlight-result-text">{app.data.text.output}</p></div>
     {:else if app.data?.text.job.error}<div class="spotlight-error">{app.data.text.job.error.message}</div>
     {:else if app.data?.text.job.stage === 'translating'}<div class="spotlight-loading"><LoaderCircle size={18} class="spin"/><span>{t("正在翻译")}</span></div>
     {:else}<span class="quick-output-placeholder">{t("译文")}</span>{/if}

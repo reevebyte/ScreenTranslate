@@ -19,12 +19,15 @@ export const app = $state({
   configSaving: false,
   configPending: false,
   configError: '',
+  /** Backend `AppError.action` of the last failed save, e.g. "hotkeys". */
+  configErrorAction: '',
 });
 
 let configIntent = 0;
 let configWrites = 0;
 let configQueue: Promise<unknown> = Promise.resolve();
 let stagedConfig = false;
+let failedConfig: Config | undefined;
 
 function publishConfigActivity() {
   if (desktop) void call('set_dirty', { dirty: app.configPending || app.configSaving }).catch(() => {});
@@ -35,6 +38,7 @@ export function previewConfig(config: Config) {
   stagedConfig = true;
   app.configPending = true;
   app.configError = '';
+  app.configErrorAction = '';
   if (app.data) app.data.config = structuredClone($state.snapshot(config));
   applyAppearance(config);
   publishConfigActivity();
@@ -70,11 +74,13 @@ export async function initialize(): Promise<() => void> {
       cleanup.push(await listen<AppError>('app-error', ({ payload }) => {
         toast.error(payload.message, { action: payload.action ? { label: t('查看设置'), onClick: () => recover(payload.action!) } : undefined });
       }));
-      cleanup.push(await listen<string>('app-warning', ({ payload }) => toast.warning(payload)));
+      cleanup.push(await listen<string>('app-warning', ({ payload }) => showWarning(payload)));
       cleanup.push(await listen('capabilities-changed', () => { void refreshCapabilities(); }));
     }
     const data = await loadBootstrap();
     app.data = data;
+    // Warnings raised during startup were emitted before this window listened.
+    if ((new URLSearchParams(location.search).get('window') || 'main') === 'main') data.warnings.forEach(showWarning);
     if (['shortcuts', 'translate', 'capture', 'providers', 'settings', 'about'].includes(data.initialRoute)) app.route = data.initialRoute as Route;
     if (app.route === 'about') { app.route = 'settings'; app.settingsTab = 'about'; }
     if (data.initialRoute === 'ocr') { app.route = 'providers'; app.servicesTab = 'ocr'; }
@@ -127,6 +133,26 @@ export async function flushPendingEdits() {
   await configQueue.catch(() => {});
 }
 
+/** Saves the configuration that last failed again, from wherever its status is shown. */
+export async function retryConfigSave(): Promise<boolean> {
+  return failedConfig ? saveConfig(failedConfig, { quiet: true }) : true;
+}
+
+const SAVE_NOTICE = 'config-save';
+let saveNoticeShown = false;
+/** One replaceable notice per failure, with the reason and a retry; it fades like other notices. */
+function showSaveFailure(reason: string) {
+  saveNoticeShown = true;
+  toast.error(t('设置未保存'), { id: SAVE_NOTICE, description: reason, action: { label: t('重试'), onClick: () => { void retryConfigSave(); } } });
+}
+
+const shownWarnings = new Set<string>();
+function showWarning(message: string) {
+  if (shownWarnings.has(message)) return;
+  shownWarnings.add(message);
+  toast.warning(t(message));
+}
+
 export async function saveConfig(config: Config, options: { quiet?: boolean } = {}): Promise<boolean> {
   const snapshot = structuredClone($state.snapshot(config));
   const intent = ++configIntent;
@@ -141,13 +167,21 @@ export async function saveConfig(config: Config, options: { quiet?: boolean } = 
       if (intent === configIntent) {
         if (app.data) app.data.config = saved;
         app.configError = '';
+        app.configErrorAction = '';
+        failedConfig = undefined;
+        if (saveNoticeShown) { saveNoticeShown = false; toast.dismiss(SAVE_NOTICE); }
         app.configPending = false;
         applyAppearance(saved);
       }
       return true;
     } catch (error) {
-      if (intent === configIntent) app.configError = errorMessage(error);
-      if (!options.quiet) toast.error(errorMessage(error));
+      if (intent === configIntent) {
+        app.configError = errorMessage(error);
+        app.configErrorAction = (error && typeof error === 'object' && 'action' in error && typeof error.action === 'string') ? error.action : '';
+        failedConfig = snapshot;
+        // Hotkey conflicts are announced by the shortcuts page with the key that failed.
+        if (app.configErrorAction !== 'hotkeys') showSaveFailure(app.configError);
+      } else if (!options.quiet) toast.error(errorMessage(error));
       return false;
     } finally {
       configWrites--;

@@ -358,3 +358,35 @@ describe('floating screenshot recovery', () => {
     expect(layer.style.visibility).toBe('hidden');
   });
 });
+
+describe('proofreading dialog', () => {
+  function withBlock() {
+    const bounds = { x: 10, y: 10, width: 200, height: 40 };
+    app.data!.visual.job.stage = 'complete';
+    app.data!.visual.blocks = [{ id: 'block-0', bounds, sourceLines: [bounds], text: 'Hello world', translation: '你好，世界', targetLanguage: 'zh-Hans', confidence: null, revision: 0, backgroundColor: null, foregroundColor: null, fontSize: null, lineHeight: null }];
+  }
+
+  it('keeps edit and translation status in the card headers instead of a status line', async () => {
+    withBlock();
+    const view = render(ResultView);
+    await fireEvent.click(view.getByTitle('校对文字 (E)'));
+    const dialog = await view.findByRole('dialog');
+    const cards = dialog.querySelectorAll('.correction-card');
+    expect(cards).toHaveLength(2);
+    expect(dialog.querySelector('.correction-chip')).toBeNull();
+    expect(cards[1].querySelector('.copy-icon-well')?.getAttribute('aria-label')).toBe('复制当前块译文');
+
+    await fireEvent.input(view.getByRole('textbox', { name: '识别原文' }), { target: { value: 'Hello there' } });
+    expect([...dialog.querySelectorAll('.correction-chip')].map(chip => chip.textContent)).toEqual(['已修改', '待更新']);
+
+    await fireEvent.click(view.getByRole('button', { name: /重译此块/ }));
+    expect(call).toHaveBeenCalledWith('edit_block', { id: 'block-0', text: 'Hello there', target: 'zh-Hans' });
+    app.data!.visual.blocks = [{ ...app.data!.visual.blocks[0], text: 'Hello there', revision: 1 }];
+    app.data!.visual.job.stage = 'translating';
+    await tick();
+    expect(cards[1].querySelector('.correction-chip')?.textContent).toBe('翻译中');
+    expect(cards[1].classList.contains('updating')).toBe(true);
+    // The old bottom status line changed the dialog's rows and made it jump.
+    expect(dialog.querySelector('.editor-pending')).toBeNull();
+  });
+});

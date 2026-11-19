@@ -18,6 +18,7 @@ pub fn dispatch(app: &AppHandle, action: &str) {
         "toggle" => {
             let _ = windows::toggle_result(app);
         }
+        "search" => windows::open_search(app),
         _ => {}
     }
 }
@@ -54,6 +55,7 @@ fn register(app: &AppHandle, keys: &Hotkeys, best_effort: bool) -> Result<()> {
         ("capture", &keys.capture),
         ("toggle", &keys.toggle),
         ("quick", &keys.quick),
+        ("search", &keys.search),
     ];
     let mut invalid = Vec::new();
     let mut parsed = Vec::new();
@@ -124,6 +126,7 @@ fn gnome_bindings(keys: &Hotkeys) -> Result<Vec<GnomeBinding>> {
         ("capture", "ScreenTranslate 框选翻译", &keys.capture),
         ("toggle", "ScreenTranslate 收起显示", &keys.toggle),
         ("quick", "ScreenTranslate 快速文字翻译", &keys.quick),
+        ("search", "ScreenTranslate 快速查找", &keys.search),
     ]
     .into_iter()
     .filter(|(_, _, value)| !value.is_empty())
@@ -200,7 +203,7 @@ fn sync_gnome_shortcuts(bindings: &[GnomeBinding]) -> bool {
     let executable = shell_quote(&executable.to_string_lossy());
     const MEDIA_KEYS: &str = "org.gnome.settings-daemon.plugins.media-keys";
     const SLOT_ROOT: &str = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/";
-    let slots = ["capture", "toggle", "quick"]
+    let slots = ["capture", "toggle", "quick", "search"]
         .map(|action| format!("{SLOT_ROOT}screentranslate-{action}/"));
     let Some(mut paths) = gsettings_strings(MEDIA_KEYS, "custom-keybindings") else {
         return false;
@@ -214,6 +217,7 @@ fn sync_gnome_shortcuts(bindings: &[GnomeBinding]) -> bool {
         let argument = match binding.action {
             "capture" => "--capture",
             "toggle" => "--toggle-result",
+            "search" => "--search",
             _ => "--quick",
         };
         let command = format!("{executable} {argument}");

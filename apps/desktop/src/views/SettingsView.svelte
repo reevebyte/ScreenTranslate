@@ -38,7 +38,6 @@
   $effect(() => { JSON.stringify(draft); untrack(queueDraft); });
   const stopFlush = registerFlush(() => { queueDraft(); return autosave.flush(); });
   onDestroy(() => { stopFlush(); queueDraft(); void autosave.flush(); });
-  function retrySave() { autosave.schedule(structuredClone($state.snapshot(draft))); void autosave.flush(); }
   function resetDefaults() {
     // Stored keys live in the system vault and are not part of the config.
     draft = structuredClone(defaults) as Config;
@@ -61,8 +60,7 @@
   }
 </script>
 
-<div class="settings-layout settings-redesign">
-  {#if app.configError}<div class="autosave-error" role="alert"><span>{t("保存失败：")}{app.configError}</span><button onclick={retrySave}>{t("重试")}</button></div>{/if}
+<div class="settings-layout">
   <Tabs.Root bind:value={app.settingsTab} class="settings-tabs">
     <Tabs.List class="settings-tab-list" aria-label={t("设置分类")}><ActiveIndicator/>{#each tabs as [value,label]}<Tabs.Trigger {value} class="settings-tab">{label}</Tabs.Trigger>{/each}</Tabs.List>
     <Tabs.Content value="general" class="settings-panel">

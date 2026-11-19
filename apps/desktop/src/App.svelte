@@ -47,6 +47,9 @@
     let navigateCleanup: (() => void) | undefined;
     let disposed = false;
     let quitCleanup: (() => void) | undefined;
+    let searchCleanup: (() => void) | undefined;
+    // The global quick-search hotkey shows this window and asks it to open the palette.
+    if (desktop && mode === 'main') void listen('open-command-palette', () => { app.commandOpen = true; }).then(fn => { if (disposed) fn(); else searchCleanup = fn; });
     if (desktop && mode === 'main') void listen('app-quit-requested', async () => {
       await flushPendingEdits();
       void call('quit_app').catch(() => {});
@@ -73,7 +76,7 @@
     const media = matchMedia('(prefers-color-scheme: dark)');
     const themeChange = () => { if (app.data) applyAppearance(app.data.config); };
     media.addEventListener('change', themeChange);
-    return () => { disposed = true; cleanup?.(); navigateCleanup?.(); quitCleanup?.(); media.removeEventListener('change', themeChange); };
+    return () => { disposed = true; cleanup?.(); navigateCleanup?.(); quitCleanup?.(); searchCleanup?.(); media.removeEventListener('change', themeChange); };
   });
   function keydown(event: KeyboardEvent) {
     if (mode === 'main' && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); app.commandOpen = !app.commandOpen; }
@@ -126,5 +129,6 @@
   {#if app.commandOpen}{#await import('$lib/components/CommandPalette.svelte') then module}<module.default/>{/await}{/if}
   {#if welcome}{#await import('$lib/components/Onboarding.svelte') then module}<module.default bind:open={welcome}/>{/await}{/if}
 {/if}
-<Toaster position="bottom-center" offset="18px" visibleToasts={2} theme={app.data?.config.appearance.theme ?? 'system'} toastOptions={{duration:2600,classes:{toast:'app-toast',icon:'app-toast-icon',content:'app-toast-content',title:'app-toast-title',description:'app-toast-description',actionButton:'app-toast-action'}}}/>
+<!-- Main window: notices at the top-right, long enough to read the reason. Small windows keep the bottom-centre pill. -->
+<Toaster position={mode === 'main' ? 'top-right' : 'bottom-center'} offset={mode === 'main' ? '16px' : '18px'} visibleToasts={mode === 'main' ? 3 : 2} expand={mode === 'main'} theme={app.data?.config.appearance.theme ?? 'system'} toastOptions={{duration:mode === 'main' ? 4500 : 2600,classes:{toast:'app-toast',icon:'app-toast-icon',content:'app-toast-content',title:'app-toast-title',description:'app-toast-description',actionButton:'app-toast-action'}}}/>
 

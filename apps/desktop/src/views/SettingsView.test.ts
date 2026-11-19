@@ -5,7 +5,8 @@ import { previewBootstrap } from '$lib/preview';
 
 const { call } = vi.hoisted(() => ({ call: vi.fn() }));
 vi.mock('$lib/api', () => ({ desktop: true, call, loadBootstrap: vi.fn() }));
-vi.mock('svelte-sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
+const { toast } = vi.hoisted(() => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), dismiss: vi.fn() } }));
+vi.mock('svelte-sonner', () => ({ toast }));
 import { app, previewConfig, saveConfig } from '$lib/store.svelte';
 import SettingsView from './SettingsView.svelte';
 
@@ -77,9 +78,13 @@ describe('automatic preferences', () => {
     });
     const view = render(SettingsView);
     await fireEvent.click(view.getByLabelText('输入后自动翻译'));
-    await waitFor(() => expect(view.getByRole('alert').textContent).toContain('磁盘暂时不可用'));
-    await fireEvent.click(view.getByRole('button', { name: '重试' }));
-    await waitFor(() => expect(view.queryByRole('alert')).toBeNull());
+    // The shared notice states the reason and offers retry; the page itself shows no banner.
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('设置未保存', expect.objectContaining({ id: 'config-save', description: '磁盘暂时不可用' })));
+    expect(view.queryByRole('alert')).toBeNull();
+    const notice = toast.error.mock.calls.find(([title]) => title === '设置未保存')![1];
+    notice.action.onClick();
+    await waitFor(() => expect(toast.dismiss).toHaveBeenCalledWith('config-save'));
+    expect(toast.success).not.toHaveBeenCalled();
     expect(app.data!.config.autoTranslate).toBe(false);
     expect(attempts).toBe(2);
   });

@@ -707,9 +707,11 @@
   flex-shrink: 0;
 }
 
-.secret-control .autosave-error {
-  margin-top: 8px;
-}
+/* Field-level error: directly under the control it belongs to. */
+.field-error { display:flex; align-items:center; gap:8px; margin-top:8px; color:var(--danger); font-size:var(--text-small); }
+.field-error > span { flex:1; }
+.field-error button { color:inherit; text-decoration:underline; text-underline-offset:2px; }
+
 
 .service-disclosure {
   display: flex;
@@ -728,6 +730,9 @@
   height: 100%;
   overflow: hidden;
 }
+
+/* A rejected hotkey's row is outlined while its notice is shown. */
+.shortcut-action.conflict .shortcut-chord { box-shadow: inset 0 0 0 1px var(--danger); }
 
 .shortcut-cluster { display:flex; flex-direction:column; gap:16px; width:min(var(--content-width),100%); margin-block:auto; align-self:center; flex-shrink:0; }
 
@@ -1012,7 +1017,7 @@ button.about-resource:hover { background: var(--surface-muted); }
 .service-content { flex:1; min-height:0; container:service-area / inline-size; overflow:hidden; padding:0; }
 .service-layout { display:flex; flex-direction:column; gap:12px; height:100%; min-height:0; }
 .service-browser { display:grid; grid-template-columns:13rem minmax(0,1fr); gap:16px; flex:1; min-height:0; height:100%; }
-.service-list { position:relative; isolation:isolate; overflow-y:auto; padding:12px 8px; border-radius:var(--radius-surface); background:var(--surface); scrollbar-width:thin; }
+.service-list { position:relative; isolation:isolate; overflow-y:auto; padding:12px 8px; border-radius:var(--radius-surface); background:var(--surface); }
 .service-list-group + .service-list-group { margin-top:20px; }
 .service-list-group h2 { padding:0 8px 8px; font-size:var(--text-small); font-weight:500; color:var(--muted); }
 .service-list-item { position:relative; display:flex; align-items:center; gap:8px; width:100%; padding:10px 10px; min-height:var(--control-height); text-align:left; font-size:var(--text-ui); border-radius:var(--radius-pill); color:var(--secondary); transition:color var(--motion-fast),background-color var(--motion-fast); }

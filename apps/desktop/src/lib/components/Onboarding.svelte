@@ -30,7 +30,7 @@
       <Dialog.Description class="sr-only">{t("拖动中间分界线，对照查看原文与译文。")}</Dialog.Description>
       <div class="welcome-comparison">
         <div class="welcome-comparison-layer" aria-hidden="true" style:clip-path={`inset(0 0 0 ${comparison}%)`}>Read the world.</div>
-        <div class="welcome-comparison-layer translated" aria-hidden="true" style:clip-path={`inset(0 ${100-comparison}% 0 0)`}>读懂眼前的世界。</div>
+        <div class="welcome-comparison-layer translated" aria-hidden="true" style:clip-path={`inset(0 ${100-comparison}% 0 0)`}>{t("读懂眼前的世界。")}</div>
         <span class="welcome-comparison-divider" aria-hidden="true" style:left={`${comparison}%`}></span>
         <input class="comparison-slider welcome-comparison-slider" type="range" min="0" max="100" step="0.1" bind:value={comparison} aria-label={t("原文与译文分界")} aria-valuetext={t("中文 {0}%，英文 {1}%",Math.round(comparison),Math.round(100-comparison))}/>
         <i aria-hidden="true"></i><i aria-hidden="true"></i><i aria-hidden="true"></i><i aria-hidden="true"></i>

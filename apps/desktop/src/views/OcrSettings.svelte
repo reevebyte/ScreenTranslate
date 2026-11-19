@@ -43,7 +43,6 @@
 
 </script>
 <div class="service-layout" onfocusin={event=>{if(event.target instanceof HTMLInputElement)editingText=true;}} onfocusout={()=>{editingText=false;queue();}}>
-{#if app.configError}<div class="autosave-error" role="alert"><span>{app.configError}</span><button onclick={()=>{autosave.schedule(structuredClone($state.snapshot(draft)));void autosave.flush();}}>{t("重试")}</button></div>{/if}
 <ServiceBrowser {entries} {selected} onselect={select} title={t("文字识别服务")}>
   {#snippet header()}<span class="service-protocol">{selected==='system'?t("本机识别"):selected==='custom'?t("自定义接口"):selected==='youdao'?t("免密云端识别"):t("官方云端识别")}</span>{/snippet}
   {#snippet children()}

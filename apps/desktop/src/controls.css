@@ -106,7 +106,7 @@ button, input, textarea, select, a {
   border: 0;
 }
 
-.muted, .field-help {
+.muted {
   color: var(--muted);
   font-size: var(--text-small);
 }
@@ -236,11 +236,6 @@ kbd {
   font-weight: 500;
 }
 
-.field-help {
-  line-height: 1.6;
-  margin-top: 7px;
-}
-
 .checkbox-label {
   display: flex;
   align-items: center;
@@ -254,7 +249,7 @@ input[type="checkbox"], input[type="range"] {
   accent-color: var(--primary);
 }
 
-.text-action, .subtle-action, .text-link {
+.text-action, .text-link {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -264,7 +259,7 @@ input[type="checkbox"], input[type="range"] {
   font-size: var(--text-small);
 }
 
-.text-action:hover:not(:disabled), .subtle-action:hover {
+.text-action:hover:not(:disabled) {
   background: var(--surface-muted);
   color: var(--foreground);
 }
@@ -304,6 +299,7 @@ input[type="checkbox"], input[type="range"] {
 
 .choice-menu {
   z-index: 70;
+  transform-origin: var(--bits-select-content-transform-origin);
   min-width: max(160px,var(--bits-select-anchor-width,160px));
   max-height: min(350px,var(--bits-select-content-available-height,350px));
   overflow: hidden;
@@ -429,33 +425,20 @@ input[type="checkbox"], input[type="range"] {
   padding: 24px;
 }
 
-.autosave-error {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb,var(--danger) 35%,var(--border));
-  border-radius: var(--radius-control);
-  color: var(--danger);
-  background: var(--surface);
-  font-size: var(--text-small);
-}
-
-.autosave-error > span {
-  flex: 1;
-}
-
-.autosave-error button {
-  color: inherit;
-  text-decoration: underline;
-}
+/* Scrollbars that stay out of the way until the area is hovered, focused or scrolled. */
+.quiet-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+/* Keep the track clear of rounded corners so the thumb never pokes past them. */
+.quiet-scroll::-webkit-scrollbar-track { background: transparent; margin-block: 16px; }
+.quiet-scroll::-webkit-scrollbar-thumb { border: 1px solid transparent; border-radius: 3px; background: transparent; background-clip: padding-box; }
+.quiet-scroll.hovering::-webkit-scrollbar-thumb,
+.quiet-scroll:has(:focus-visible)::-webkit-scrollbar-thumb,
+.quiet-scroll.scrolling::-webkit-scrollbar-thumb { background: var(--border-strong); }
 
 
 .button:active:not(:disabled) { scale:.98; }
 .active-indicator { position:absolute; top:0; left:0; z-index:-1; pointer-events:none; border-radius:var(--radius-pill); background:var(--accent-bg); }
 .settings-tab-list > .active-indicator, .service-tab-list > .active-indicator { background:var(--surface); border-radius:var(--radius-pill); }
 .choice-menu[data-state="open"], .model-menu[data-state="open"] { animation:menu-arrive var(--motion-fast) var(--ease); }
-.choice-menu { transform-origin:var(--bits-select-content-transform-origin); }
 @keyframes menu-arrive { from { opacity:0; scale:.98; translate:0 -2px; } to { opacity:1; scale:1; translate:0 0; } }
 @media (prefers-reduced-motion:reduce) { .button:active:not(:disabled) { scale:1; } .rail-label, .sidebar-collapsed .rail-label { transform:none; transition-delay:0ms; } }
 

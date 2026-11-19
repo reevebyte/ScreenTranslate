@@ -74,7 +74,6 @@
   }
 </script>
 <div class="service-layout" onfocusin={event=>{if(event.target instanceof HTMLInputElement && event.target.type!=='checkbox')editing=true;}} onfocusout={()=>{editing=false;queue();}}>
-  {#if app.configError}<div class="autosave-error" role="alert"><span>{app.configError}</span><button onclick={()=>{writer.schedule(structuredClone($state.snapshot(draft)));void writer.flush();}}>{t("重试")}</button></div>{/if}
   <ServiceBrowser {entries} {selected} onselect={select} title={t("翻译服务")}>
     {#snippet header()}{#if info.unofficial}<span class="service-protocol">{t("非官方接口")}</span>{/if}{/snippet}
     {#snippet children()}
