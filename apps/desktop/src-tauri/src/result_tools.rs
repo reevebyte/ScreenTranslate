@@ -70,7 +70,10 @@ pub fn image_bounds(window: &WebviewWindow) -> Result<Rect> {
     }
     let scale = window.scale_factor().map_err(|_| windows::window_error())?;
     #[cfg(target_os = "linux")]
-    if screentrans_platform::is_wayland() && layout.image_width > 0.0 && layout.image_height > 0.0 {
+    if screentrans_platform::native_wayland_windows()
+        && layout.image_width > 0.0
+        && layout.image_height > 0.0
+    {
         return Ok(wayland_image_bounds(&layout, scale));
     }
     let pos = window
@@ -182,7 +185,7 @@ pub fn clamp_toolbar(app: &AppHandle) -> Result<()> {
     place(app, &tool, crate::result_toolbar::clamp(bounds, area))
 }
 pub fn sync(app: &AppHandle) -> Result<()> {
-    if screentrans_platform::is_wayland() {
+    if screentrans_platform::native_wayland_windows() {
         return Ok(());
     }
     let Some(image) = app.get_webview_window("result") else {
@@ -233,7 +236,7 @@ pub fn dock(app: &AppHandle, above: bool, align_left: bool) -> Result<windows::R
     let bar = lock(&state.result_toolbar).clone();
     result.controls_above = bar.above;
     result.toolbar_align_left = bar.align_left;
-    if screentrans_platform::is_wayland() {
+    if screentrans_platform::native_wayland_windows() {
         *lock(&state.result_layout) = result.clone();
         let _ = app.emit_to("result", "result-layout-changed", result.clone());
     } else {
@@ -261,7 +264,7 @@ pub fn begin_image_drag(app: &AppHandle) -> Result<()> {
         lock(&app.state::<AppState>().result_toolbar).image_moving = true;
     }
     #[cfg(target_os = "linux")]
-    if screentrans_platform::is_wayland() {
+    if screentrans_platform::native_wayland_windows() {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(Duration::from_secs(8)).await;
@@ -367,7 +370,7 @@ fn schedule_wayland_resize_finish(window: &tauri::Window) {
 pub async fn finish_image_drag(window: &WebviewWindow) -> Result<()> {
     let frame_id = lock(&window.state::<AppState>().result_frame_id).clone();
     #[cfg(target_os = "linux")]
-    if screentrans_platform::is_wayland() {
+    if screentrans_platform::native_wayland_windows() {
         if *lock(&window.state::<AppState>().result_frame_id) == frame_id {
             finish_wayland_drag_gesture(window.app_handle(), None);
         }
@@ -422,7 +425,7 @@ pub fn window_changed(window: &tauri::Window) {
     if label != "result" && label != "result-tools" {
         return;
     }
-    if screentrans_platform::is_wayland() {
+    if screentrans_platform::native_wayland_windows() {
         #[cfg(target_os = "linux")]
         if label == "result" {
             schedule_wayland_drag_finish(window);
@@ -477,7 +480,7 @@ pub fn window_resized(window: &tauri::Window) {
         return;
     }
     #[cfg(target_os = "linux")]
-    if screentrans_platform::is_wayland() {
+    if screentrans_platform::native_wayland_windows() {
         if label == "result" && lock(&window.state::<AppState>().result_resize).is_some() {
             schedule_wayland_resize_finish(window);
             return;

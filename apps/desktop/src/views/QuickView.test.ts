@@ -44,14 +44,11 @@ it('copies the translation with Ctrl+C outside the text editor', async () => {
   await waitFor(() => expect(call).toHaveBeenCalledWith('copy_text', { text: '译文' }));
 });
 
-it('reads both full texts without routing reading-dialog keys into translation shortcuts', async () => {
+it('keeps only the copy action on the translation without a separate reading dialog', () => {
   const view = render(QuickView);
-  await fireEvent.click(view.getByRole('button', { name: '阅读' }));
-  const dialog = view.getByRole('dialog', { name: '原译对照' });
-  expect(dialog.textContent).toContain('Selected source');
-  expect(dialog.textContent).toContain('译文');
-  await fireEvent.keyDown(dialog, { key: 'Escape' });
-  expect(call).not.toHaveBeenCalledWith('hide_window');
+  expect(view.queryByRole('button', { name: '阅读' })).toBeNull();
+  expect(view.getByRole('button', { name: '复制译文' })).toBeTruthy();
+  expect(view.queryByRole('dialog')).toBeNull();
 });
 
 it('uses readable tabs in a small large-font window and keeps tab Enter out of translation', async () => {

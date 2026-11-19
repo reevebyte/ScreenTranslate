@@ -27,7 +27,16 @@ export type JobStatus = { id: string, sessionId: string, revision: number, stage
 
 export type TranslationSession = { id: string, revision: number, clientId: string, clientRevision: number, input: string, output: string, source: string, target: string, frame: FrameMetadata | null, blocks: Array<TextBlock>, job: JobStatus, };
 
-export type PlatformCapabilities = { platform: string, wayland: boolean, screenshot: boolean, overlay: boolean, globalShortcuts: boolean, localOcr: boolean, ocrLanguages: Array<string>, tray: boolean, notes: Array<string>, };
+export type PlatformCapabilities = { platform: string, 
+/**
+ * The desktop session is Wayland (capture and hotkeys go through the portal).
+ */
+wayland: boolean, 
+/**
+ * Windows can be placed on screen. False only for native Wayland windows;
+ * on a Wayland session the app normally runs its windows through XWayland.
+ */
+windowPositioning: boolean, screenshot: boolean, overlay: boolean, globalShortcuts: boolean, localOcr: boolean, ocrLanguages: Array<string>, tray: boolean, notes: Array<string>, };
 
 export type TranslationItem = { id: string, text: string, };
 

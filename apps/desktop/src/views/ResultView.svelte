@@ -32,7 +32,8 @@ import { onMount, onDestroy, tick } from 'svelte';
   let { floating = false, toolsOnly = false }: { floating?: boolean; toolsOnly?: boolean } = $props();
   let session = $derived(app.data?.visual);
   let frame = $derived(session?.frame);
-  let isWayland = $derived(!!app.data?.capabilities.wayland);
+  // Native Wayland windows cannot be placed or moved by the app itself.
+  let isWayland = $derived(app.data?.capabilities.windowPositioning === false);
   let sourceText = $derived(extractedText(session));
   let original = $state(false);
   let holdingOriginal = $state(false);

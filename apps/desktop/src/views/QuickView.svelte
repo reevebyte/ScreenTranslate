@@ -6,11 +6,10 @@
     ArrowUpRight,
     CornerDownLeft,
     LoaderCircle,
-    Check,
-    Maximize2
+    Check
   } from '$lib/icons';
   import { onMount, onDestroy, tick } from 'svelte';
-  import { Dialog, Tabs } from 'bits-ui';
+  import { Tabs } from 'bits-ui';
   import { listen } from '@tauri-apps/api/event';
   import { app, act, editText, translateNow, copy } from '$lib/store.svelte';
   import { call, desktop } from '$lib/api';
@@ -24,7 +23,6 @@
   let textarea: HTMLTextAreaElement;
   let composing = $state(false);
   let copiedToast = $state(false);
-  let readingOpen = $state(false);
   let windowHeight = $state(320);
   let activePane = $state('source');
   let compactReading = $derived(windowHeight < 300 || ((app.data?.config.appearance.fontScale ?? 1) > 1.2 && windowHeight < 380));
@@ -56,7 +54,7 @@
   onDestroy(() => clearTimeout(copyTimer));
 
   function handleKeydown(event: KeyboardEvent) {
-    if (readingOpen || (event.target instanceof Element && event.target.closest('[role="dialog"]'))) return;
+    if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
     if (event.target instanceof Element && event.target.closest('[role="option"], [role="listbox"], [role="combobox"]')) return;
     if (event.key === 'Escape') {
       void act(call('hide_window'));
@@ -104,17 +102,6 @@
   {/if}
 </div>
 
-
-<Dialog.Root bind:open={readingOpen}>
-  <Dialog.Portal><Dialog.Overlay class="dialog-overlay"/><Dialog.Content class="reading-dialog quick-reading">
-    <div class="dialog-heading"><Dialog.Title>{t("原译对照")}</Dialog.Title><Dialog.Close class="icon-button" aria-label={t("关闭阅读")}><X size={18}/></Dialog.Close></div>
-    <Dialog.Description class="sr-only">{t("完整原文与译文，可滚动阅读和选择复制。")}</Dialog.Description>
-    <div class="reading-label">{t("原文")}</div><div class="reading-text">{app.input}</div>
-    <div class="reading-label">{t("译文")}</div><div class="reading-text">{app.data?.text.output || t("等待翻译")}</div>
-    <Button variant="outline" disabled={!app.data?.text.output} onclick={() => handleCopy(app.data!.text.output)}>{#if copiedToast}<Check size={17}/>{:else}{t("复制译文")}{/if}</Button>
-  </Dialog.Content></Dialog.Portal>
-</Dialog.Root>
-
 {#snippet sourceEditor()}
   <div class="spotlight-input-wrap">
     <textarea bind:this={textarea} class="spotlight-textarea" aria-label={t("快速翻译输入")} value={app.input} placeholder={t("输入或粘贴文字…")} spellcheck="false" rows="2"
@@ -125,7 +112,7 @@
 {/snippet}
 {#snippet targetEditor()}
   <div class="spotlight-output-wrap" aria-live="polite">
-    {#if app.data?.text.output}<div class="quick-output-tools"><button class="spotlight-icon-btn" aria-label={t("阅读")} title={t("原译对照")} onclick={() => readingOpen = true}><Maximize2 size={15}/></button><button class="spotlight-icon-btn" class:copied={copiedToast} aria-label={t("复制译文")} title={t("复制译文")} onclick={() => handleCopy(app.data!.text.output)}>{#if copiedToast}<Check size={15}/>{:else}<Copy size={15}/>{/if}</button></div>
+    {#if app.data?.text.output}<div class="quick-output-tools"><button class="spotlight-icon-btn" class:copied={copiedToast} aria-label={t("复制译文")} title={t("复制译文")} onclick={() => handleCopy(app.data!.text.output)}>{#if copiedToast}<Check size={15}/>{:else}<Copy size={15}/>{/if}</button></div>
       <div class="spotlight-result"><p class="spotlight-result-text">{app.data.text.output}</p></div>
     {:else if app.data?.text.job.error}<div class="spotlight-error">{app.data.text.job.error.message}</div>
     {:else if app.data?.text.job.stage === 'translating'}<div class="spotlight-loading"><LoaderCircle size={18} class="spin"/><span>{t("正在翻译")}</span></div>

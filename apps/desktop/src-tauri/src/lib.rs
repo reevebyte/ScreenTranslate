@@ -30,6 +30,17 @@ use tauri::{
 };
 
 pub fn run() {
+    // On a Wayland session run our windows through XWayland, as Electron-based
+    // screenshot tools do: XWayland windows can be placed over the captured
+    // text, moved freely and cover a monitor for selection. Capture and hotkeys
+    // still use the Wayland portal. Set SCREENTRANSLATE_NATIVE_WAYLAND=1 (or
+    // GDK_BACKEND) to keep native Wayland windows.
+    #[cfg(target_os = "linux")]
+    if screentrans_platform::prefer_xwayland() {
+        // SAFETY: called first in `run`, before GTK, Tauri or any other thread
+        // starts, so nothing else can read the environment concurrently.
+        unsafe { std::env::set_var("GDK_BACKEND", "x11") };
+    }
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, arguments, _| {
             if arguments.iter().any(|arg| arg == "--capture") {

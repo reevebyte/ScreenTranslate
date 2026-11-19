@@ -181,7 +181,11 @@ impl Default for TranslationSession {
 #[serde(rename_all = "camelCase")]
 pub struct PlatformCapabilities {
     pub platform: String,
+    /// The desktop session is Wayland (capture and hotkeys go through the portal).
     pub wayland: bool,
+    /// Windows can be placed on screen. False only for native Wayland windows;
+    /// on a Wayland session the app normally runs its windows through XWayland.
+    pub window_positioning: bool,
     pub screenshot: bool,
     pub overlay: bool,
     pub global_shortcuts: bool,

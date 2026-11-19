@@ -434,7 +434,7 @@ pub fn begin_result_resize(
     let layout = lock(&state.result_layout).clone();
     let scale = window.scale_factor().map_err(|_| window_error())?;
     #[cfg(target_os = "linux")]
-    let cursor = if screentrans_platform::is_wayland() {
+    let cursor = if screentrans_platform::native_wayland_windows() {
         (0.0, 0.0)
     } else {
         let cursor = window.cursor_position().map_err(|_| window_error())?;
@@ -494,7 +494,7 @@ pub fn update_result_resize(
         return Ok(None);
     }
     #[cfg(target_os = "linux")]
-    let (delta_x, delta_y) = if screentrans_platform::is_wayland() {
+    let (delta_x, delta_y) = if screentrans_platform::native_wayland_windows() {
         (
             dx.unwrap_or(0.0) * gesture.scale,
             dy.unwrap_or(0.0) * gesture.scale,
@@ -568,7 +568,7 @@ pub(crate) fn set_client_rect(window: &tauri::WebviewWindow, bounds: Rect) -> Re
             ))
             .map_err(|_| window_error())?;
         #[cfg(target_os = "linux")]
-        if screentrans_platform::is_wayland() {
+        if screentrans_platform::native_wayland_windows() {
             return Ok(());
         }
         let inner = window.inner_position().map_err(|_| window_error())?;
@@ -839,7 +839,7 @@ pub fn show_result(app: &AppHandle, frame: &FrameMetadata) -> Result<()> {
     lock(&app.state::<AppState>().window_lifecycle).forget("result");
     let _ = window.hide();
     let _ = crate::result_tools::hide(app);
-    if !screentrans_platform::is_wayland() {
+    if !screentrans_platform::native_wayland_windows() {
         let _ = crate::result_tools::prepare(app)?;
     }
     *lock(&app.state::<AppState>().result_frame_id) = frame.id.clone();
@@ -1206,6 +1206,30 @@ async fn recover_wayland_clipboard_capture(
     .flatten()
 }
 
+/// Capture through the compositor's own screenshot picker. Used when our
+/// windows cannot be placed (native Wayland) or the compositor refuses a
+/// silent screenshot; the result then opens in a centred window.
+async fn picker_capture(app: &AppHandle, ticket: &screentrans_core::jobs::JobTicket) -> Result<()> {
+    let state = app.state::<AppState>();
+    let before_clip = clipboard_image_digest(app.clone()).await;
+    let frame = match screentrans_platform::capture::picker_screenshot(ticket.stop.clone()).await {
+        Ok(frame) => frame,
+        Err(err) if err.code != ErrorCode::Cancelled => {
+            recover_wayland_clipboard_capture(app.clone(), before_clip)
+                .await
+                .ok_or(err)?
+        }
+        Err(err) => return Err(err),
+    };
+    if !state.jobs.is_current("capture", ticket) {
+        return Err(AppError::cancelled());
+    }
+    let metadata = lock(&state.frames).insert(frame, &[])?;
+    lock(&state.return_windows).clear();
+    pipeline::start_visual(app.clone(), metadata, true);
+    Ok(())
+}
+
 pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_tray: bool) {
     // Hide any overlay now: it must not appear in the screenshot taken next.
     cancel_capture_with(&app, true, false);
@@ -1224,7 +1248,7 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
         }
     }
     #[cfg(target_os = "linux")]
-    if lock(&state.capabilities).wayland
+    if !lock(&state.capabilities).window_positioning
         && let Some(window) = app.get_webview_window("main")
         && window.is_visible().unwrap_or(false)
     {
@@ -1252,25 +1276,8 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
             }
 
             let state = app.state::<AppState>();
-            let wayland = lock(&state.capabilities).wayland;
-            if wayland {
-                let before_clip = clipboard_image_digest(app.clone()).await;
-                let frame = match SystemCapture.capture(None, ticket.stop.clone()).await {
-                    Ok(frame) => frame,
-                    Err(err) if err.code != ErrorCode::Cancelled => {
-                        recover_wayland_clipboard_capture(app.clone(), before_clip)
-                            .await
-                            .ok_or(err)?
-                    }
-                    Err(err) => return Err(err),
-                };
-                if !state.jobs.is_current("capture", &ticket) {
-                    return Err(AppError::cancelled());
-                }
-                let metadata = lock(&state.frames).insert(frame, &[])?;
-                lock(&state.return_windows).clear();
-                pipeline::start_visual(app.clone(), metadata, true);
-                return Ok::<(), AppError>(());
+            if !lock(&state.capabilities).window_positioning {
+                return picker_capture(&app, &ticket).await;
             }
             let monitors = SystemCapture.monitors()?;
             *lock(&state.capture_layout) = monitors.clone();
@@ -1282,24 +1289,24 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
                 return Err(AppError::new(ErrorCode::InvalidInput, "没有可用的显示器"));
             }
             let mut captures: Vec<(usize, FrameMetadata)> = Vec::new();
-            // Start every screen together, then await in monitor order so the
-            // selected windows and frame cache remain deterministic.
-            let capture_tasks: Vec<_> = monitors
-                .into_iter()
-                .enumerate()
-                .map(|(index, info)| {
-                    let stop = ticket.stop.clone();
-                    tokio::spawn(async move {
-                        let frame = SystemCapture.capture(Some(info.id), stop).await;
-                        (index, frame)
-                    })
-                })
-                .collect();
-            for capture in capture_tasks {
-                let (index, frame) = capture
-                    .await
-                    .map_err(|_| AppError::new(ErrorCode::Internal, "截屏任务异常结束，请重试"))?;
-                let frame = frame?;
+            // Frames come back in monitor order so the selection windows and
+            // frame cache remain deterministic.
+            let frames = match SystemCapture
+                .capture_all(&monitors, ticket.stop.clone())
+                .await
+            {
+                Ok(frames) => frames,
+                // A Wayland compositor that refuses silent screenshots still
+                // offers its own picker; keep capture working through it.
+                #[cfg(target_os = "linux")]
+                Err(error)
+                    if error.code != ErrorCode::Cancelled && screentrans_platform::is_wayland() =>
+                {
+                    return picker_capture(&app, &ticket).await;
+                }
+                Err(error) => return Err(error),
+            };
+            for (index, frame) in frames.into_iter().enumerate() {
                 if !state.jobs.is_current("capture", &ticket) {
                     return Err(AppError::cancelled());
                 }
@@ -1347,6 +1354,12 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
                     selection_window(&app, &label)?
                 };
                 place_on_desktop(&window, bounds, &metadata)?;
+                // GNOME keeps its top bar above ordinary always-on-top
+                // windows; a fullscreen overlay covers the whole monitor.
+                #[cfg(target_os = "linux")]
+                if screentrans_platform::is_wayland() {
+                    let _ = window.set_fullscreen(true);
+                }
                 request_show(&window)?;
             }
             Ok(())

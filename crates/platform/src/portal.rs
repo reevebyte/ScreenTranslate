@@ -158,6 +158,58 @@ fn find_recent_screenshot(since: SystemTime) -> Option<image::RgbaImage> {
     decode_image_file(&path)
 }
 
+/// Silent whole-desktop capture, the way other screenshot tools work on
+/// Wayland: the compositor asks for permission at most once (GNOME offers to
+/// remember it) and the selection then happens in our own overlay.
+pub async fn desktop_screenshot(stop: CancellationToken) -> Result<image::RgbaImage> {
+    let started_at = SystemTime::now();
+    let request = Screenshot::request().interactive(false).modal(false).send();
+    let outcome = tokio::select! {
+        _ = stop.cancelled() => return Err(AppError::cancelled()),
+        response = request => response.and_then(|r| r.response()),
+    };
+    let uri = match outcome {
+        Ok(res) => res.uri().as_str().to_owned(),
+        Err(
+            ashpd::Error::Response(ResponseError::Cancelled)
+            | ashpd::Error::Portal(ashpd::PortalError::Cancelled(_)),
+        ) => return Err(AppError::cancelled()),
+        Err(_) => return Err(desktop_capture_error()),
+    };
+    tokio::task::spawn_blocking(move || {
+        let path = url::Url::parse(&uri)
+            .ok()
+            .and_then(|url| url.to_file_path().ok())
+            .or_else(|| uri.starts_with('/').then(|| PathBuf::from(&uri)))
+            .ok_or_else(desktop_capture_error)?;
+        for _ in 0..10 {
+            if let Some(decoded) = decode_image_file(&path) {
+                // The portal wrote this file for us; keep the user's Pictures
+                // folder free of capture leftovers.
+                let created_now = std::fs::metadata(&path)
+                    .and_then(|metadata| metadata.modified())
+                    .is_ok_and(|modified| modified + Duration::from_secs(2) >= started_at);
+                if created_now {
+                    let _ = std::fs::remove_file(&path);
+                }
+                return Ok(decoded);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        Err(desktop_capture_error())
+    })
+    .await
+    .map_err(|_| desktop_capture_error())?
+}
+
+fn desktop_capture_error() -> AppError {
+    AppError::new(
+        ErrorCode::PermissionDenied,
+        "系统未允许截图；请在系统弹出的截图授权中选择允许，或在系统设置的隐私权限中允许本应用截图",
+    )
+    .action("permissions")
+}
+
 pub async fn screenshot(stop: CancellationToken) -> Result<CaptureFrame> {
     let started_at = SystemTime::now();
     let request = Screenshot::request().interactive(true).send();

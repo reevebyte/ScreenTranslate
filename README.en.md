@@ -52,7 +52,7 @@ Native interactions have been verified on Windows. macOS and Linux builds are av
 
 ## Features
 
-- **Translate in place:** select screen text and view the translation at the same location. Compare, zoom, drag and correct recognized text.
+- **Translate in place:** select screen text and view the translation at the same location. Zoom, drag and correct recognized text.
 - **Side-by-side text:** read the source and translation together, edit the source, translate again or copy either pane.
 - **Quick translation:** bring up a compact window with a shortcut, then type or paste text.
 - **Choose your services:** configure translation and OCR separately, including OpenAI-compatible endpoints, dedicated translation APIs, local OCR and cloud OCR.

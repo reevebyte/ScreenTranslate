@@ -901,22 +901,6 @@
   font-weight: 600;
 }
 
-.reading-label {
-  color: var(--secondary);
-  font-size: var(--text-small);
-}
-
-.reading-text {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-block: 12px 20px;
-  font-size: var(--text-reading);
-  line-height: 1.75;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .dialog-actions {
   display: flex;
   justify-content: flex-end;

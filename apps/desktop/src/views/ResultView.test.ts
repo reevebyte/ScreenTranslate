@@ -243,6 +243,7 @@ describe('floating screenshot recovery', () => {
 
   it('keeps and hides the embedded toolbar through a Wayland image drag', async () => {
     app.data!.capabilities.wayland = true;
+    app.data!.capabilities.windowPositioning = false;
     const view = render(ResultView, { floating: true });
     await waitFor(() => expect(events.get('result-layout-changed')?.size).toBe(1));
     expect(view.container.querySelector('.floating-shell')?.contains(view.getByRole('toolbar', { name: '截图操作' }))).toBe(true);
@@ -258,6 +259,7 @@ describe('floating screenshot recovery', () => {
 
   it('starts the next Wayland drag even when the compositor swallowed the previous release', async () => {
     app.data!.capabilities.wayland = true;
+    app.data!.capabilities.windowPositioning = false;
     const view = render(ResultView, { floating: true });
     const image = view.getByAltText('截图原文');
     await waitFor(() => expect(events.get('result-drag-ended')?.size).toBe(1));
@@ -278,6 +280,7 @@ describe('floating screenshot recovery', () => {
 
   it('uses native resize dragging on Wayland instead of pointer deltas', async () => {
     app.data!.capabilities.wayland = true;
+    app.data!.capabilities.windowPositioning = false;
     const view = render(ResultView, { floating: true });
     const handle = view.getByRole('button', { name: '调整右边大小' });
     await fireEvent.pointerDown(handle, { button: 0, pointerId: 1, screenX: 100, screenY: 100 });

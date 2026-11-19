@@ -1064,7 +1064,7 @@ button.about-resource:hover { background: var(--surface-muted); }
 .model-input-brand { position:absolute; left:10px; top:50%; transform:translateY(-50%); pointer-events:none; }
 .model-picker.model-manual > input { padding-right:10px; }
 .model-picker-toggle { position:absolute; right:3px; top:50%; transform:translateY(-50%); width:calc(var(--control-height) - 6px); height:calc(var(--control-height) - 6px); }
-.model-menu { z-index:75; width:min(380px,calc(100vw - 32px)); max-height:min(360px,var(--bits-popover-content-available-height)); border:1px solid var(--border); border-radius:var(--radius-surface); background:var(--surface); color:var(--foreground); box-shadow:var(--shadow); overflow:hidden; transform-origin:var(--bits-popover-content-transform-origin); }
+.model-menu { z-index:75; width:var(--bits-popover-anchor-width,380px); max-width:calc(100vw - 32px); max-height:min(360px,var(--bits-popover-content-available-height)); border:1px solid var(--border); border-radius:var(--radius-surface); background:var(--surface); color:var(--foreground); box-shadow:var(--shadow); overflow:hidden; transform-origin:var(--bits-popover-content-transform-origin); }
 .model-command { display:flex; flex-direction:column; max-height:inherit; }
 .model-search { display:flex; align-items:center; gap:8px; padding:6px 8px 6px 12px; border-bottom:1px solid var(--border); color:var(--muted); }
 .model-search input { flex:1; width:100%; min-width:0; border:0; outline:none; padding:4px 0; background:transparent; color:var(--foreground); }

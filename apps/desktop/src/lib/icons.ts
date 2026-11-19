@@ -39,7 +39,6 @@ export { default as Import } from './components/icons/Import.svelte';
 export { default as Keyboard } from './components/icons/Keyboard.svelte';
 export { default as Image } from './components/icons/Image.svelte';
 export { default as PencilLine } from './components/icons/PencilLine.svelte';
-export { default as Maximize2 } from './components/icons/Maximize2.svelte';
 export { default as Columns2 } from './components/icons/Columns2.svelte';
 export { default as PanelsTopLeft } from './components/icons/PanelsTopLeft.svelte';
 export { default as Plus } from './components/icons/Plus.svelte';

@@ -15,6 +15,7 @@
   let loaded = $state(false);
   let error = $state('');
   let query = $state('');
+  let picker = $state<HTMLDivElement | null>(null);
   let generation = 0;
   let alive = true;
   $effect(() => {
@@ -44,13 +45,14 @@
   }
 </script>
 
-<div class="model-picker">
+<div class="model-picker" bind:this={picker}>
   <span class="model-input-brand"><ProviderIcon brand={modelBrand(value,brand)}/></span>
   <input {id} class="field" bind:value placeholder={t("输入模型 ID，或从列表选择")} spellcheck="false"/>
   <Popover.Root {open} onOpenChange={changeOpen}>
     <Popover.Trigger class="icon-button model-picker-toggle" aria-label={t("选择模型")} title={t("选择模型")}><ChevronDown size={16}/></Popover.Trigger>
     <Popover.Portal>
-      <Popover.Content class="model-menu" sideOffset={6} collisionPadding={12} align="end" aria-label={t("模型列表")}>
+      <!-- Anchor the list to the whole field so it shares its width and follows window resizes. -->
+      <Popover.Content class="model-menu" customAnchor={picker} sideOffset={6} collisionPadding={12} align="start" aria-label={t("模型列表")}>
         <Command.Root class="model-command">
           <div class="model-search"><Search size={16}/><Command.Input bind:value={query} placeholder={t("搜索模型…")} aria-label={t("搜索模型")}/><button class="icon-button" aria-label={t("刷新模型列表")} title={t("刷新模型列表")} disabled={loading} onclick={refresh}>{#if loading}<LoaderCircle size={16} class="spin"/>{:else}<RefreshCw size={16}/>{/if}</button></div>
           <Command.List class="model-list" aria-busy={loading}>

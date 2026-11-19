@@ -10,10 +10,38 @@ pub mod portal;
 
 use screentrans_core::PlatformCapabilities;
 
+/// The desktop session is Wayland. Screenshots and global hotkeys must then go
+/// through the compositor (portal, GNOME settings), even when our own windows
+/// run on XWayland.
 pub fn is_wayland() -> bool {
     cfg!(target_os = "linux")
         && std::env::var_os("WAYLAND_DISPLAY").is_some()
         && std::env::var("XDG_SESSION_TYPE").as_deref() != Ok("x11")
+}
+
+/// Opt-out for users who prefer native Wayland windows over XWayland.
+pub const NATIVE_WAYLAND_ENV: &str = "SCREENTRANSLATE_NATIVE_WAYLAND";
+
+/// Whether the app should switch GTK to XWayland before it starts. Like other
+/// screenshot tools, XWayland windows can be placed, kept on top and cover a
+/// monitor, which native Wayland windows cannot.
+pub fn prefer_xwayland() -> bool {
+    is_wayland()
+        && std::env::var_os("DISPLAY").is_some_and(|value| !value.is_empty())
+        && std::env::var_os("GDK_BACKEND").is_none()
+        && std::env::var(NATIVE_WAYLAND_ENV).as_deref() != Ok("1")
+}
+
+/// Our windows are native Wayland surfaces: the app cannot position them and
+/// has to fall back to the compositor's screenshot picker and centred results.
+pub fn native_wayland_windows() -> bool {
+    is_wayland()
+        && !std::env::var("GDK_BACKEND").is_ok_and(|backend| {
+            backend
+                .split(',')
+                .next()
+                .is_some_and(|first| first.trim() == "x11")
+        })
 }
 
 pub fn activate_app() {
@@ -56,10 +84,16 @@ pub fn configure_window(window_ptr: *mut std::ffi::c_void, theme: screentrans_co
 
 pub fn capabilities() -> PlatformCapabilities {
     let wayland = is_wayland();
+    let native_windows = native_wayland_windows();
     let mut notes = Vec::new();
-    if wayland {
+    if native_windows {
         notes.push(
-            "Wayland 使用系统截图选择器，译文在独立结果窗显示；快捷键由桌面 Portal 管理".into(),
+            "Wayland 原生窗口使用系统截图选择器，译文在独立结果窗显示；快捷键由桌面 Portal 管理"
+                .into(),
+        );
+    } else if wayland {
+        notes.push(
+            "Wayland 首次截图时系统可能询问一次截图权限，请选择允许并记住；快捷键由桌面 Portal 管理".into(),
         );
     }
     let (local_ocr, ocr_languages) = ocr::available_languages();
@@ -79,8 +113,9 @@ pub fn capabilities() -> PlatformCapabilities {
     PlatformCapabilities {
         platform: std::env::consts::OS.into(),
         wayland,
+        window_positioning: !native_windows,
         screenshot: true,
-        overlay: !wayland,
+        overlay: !native_windows,
         global_shortcuts: !wayland,
         local_ocr,
         ocr_languages,
