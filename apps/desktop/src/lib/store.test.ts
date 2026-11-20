@@ -3,7 +3,7 @@ import { previewBootstrap } from './preview';
 
 vi.mock('./api', () => ({ desktop: false, call: vi.fn(), loadBootstrap: vi.fn() }));
 vi.mock('svelte-sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }));
-import { app, applySession, editText, registerFlush, flushPendingEdits } from './store.svelte';
+import { app, applySession, editText, registerFlush, flushPendingEdits, recover } from './store.svelte';
 
 beforeEach(() => { app.data = previewBootstrap(); app.input = ''; app.source = 'auto'; app.target = 'auto'; });
 
@@ -59,5 +59,11 @@ describe('saving before quit', () => {
     const stop = registerFlush(() => Promise.reject(new Error('disk full')));
     await expect(flushPendingEdits()).resolves.toBeUndefined();
     stop();
+  });
+
+  it('routes hotkey recovery actions to the shortcuts page', () => {
+    app.route = 'translate';
+    recover('hotkeys');
+    expect(app.route).toBe('shortcuts');
   });
 });

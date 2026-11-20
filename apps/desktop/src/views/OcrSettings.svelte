@@ -63,7 +63,7 @@
             <div class="service-disclosure"><Globe size={16}/><span>{t("选区截图发送至填写的服务。")}</span></div>
           </div>
         {:else}
-          <div class="provider-form"><label class="field-label" for="azure-endpoint">{t("服务地址")}</label><input id="azure-endpoint" class="field" bind:value={draft.ocr.azureEndpoint} onfocus={() => editingText = true} onblur={() => editingText = false} placeholder={t("https://你的资源.cognitiveservices.azure.com")}/>
+          <div class="provider-form"><label class="field-label" for="azure-endpoint">{t("服务地址")}</label><input id="azure-endpoint" class="field" bind:value={draft.ocr.azureEndpoint} placeholder={t("https://你的资源.cognitiveservices.azure.com")}/>
             <label class="field-label" for="azure-key">{t("Vision 密钥")}</label><SecretField bind:this={credentialField} id="azure-key" name="azure_ocr" label={t("Vision 密钥")}/>
             <div class="service-disclosure"><Globe size={16}/><span>{t("选区截图发送至 Azure。")}</span></div></div>
         {/if}

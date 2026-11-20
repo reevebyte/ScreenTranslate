@@ -19,6 +19,8 @@ export const app = $state({
   configSaving: false,
   configPending: false,
   configError: '',
+  /** Raw unlocalized backend error message of the last failed save. */
+  configErrorRaw: '',
   /** Backend `AppError.action` of the last failed save, e.g. "hotkeys". */
   configErrorAction: '',
 });
@@ -38,6 +40,7 @@ export function previewConfig(config: Config) {
   stagedConfig = true;
   app.configPending = true;
   app.configError = '';
+  app.configErrorRaw = '';
   app.configErrorAction = '';
   if (app.data) app.data.config = structuredClone($state.snapshot(config));
   applyAppearance(config);
@@ -167,6 +170,7 @@ export async function saveConfig(config: Config, options: { quiet?: boolean } = 
       if (intent === configIntent) {
         if (app.data) app.data.config = saved;
         app.configError = '';
+        app.configErrorRaw = '';
         app.configErrorAction = '';
         failedConfig = undefined;
         if (saveNoticeShown) { saveNoticeShown = false; toast.dismiss(SAVE_NOTICE); }
@@ -177,6 +181,7 @@ export async function saveConfig(config: Config, options: { quiet?: boolean } = 
     } catch (error) {
       if (intent === configIntent) {
         app.configError = errorMessage(error);
+        app.configErrorRaw = error && typeof error === 'object' && 'message' in error ? String(error.message) : typeof error === 'string' ? error : '';
         app.configErrorAction = (error && typeof error === 'object' && 'action' in error && typeof error.action === 'string') ? error.action : '';
         failedConfig = snapshot;
         // Hotkey conflicts are announced by the shortcuts page with the key that failed.
@@ -237,12 +242,13 @@ export async function refreshCapabilities() {
 }
 
 export function recover(action: string) {
-  const route = action === 'ocr' ? 'ocr' : action === 'providers' ? 'providers' : 'settings';
+  const route = action === 'ocr' ? 'ocr' : action === 'providers' ? 'providers' : action === 'hotkeys' ? 'shortcuts' : 'settings';
   if (action === 'ocr') app.servicesTab = 'ocr';
   if (desktop && (new URLSearchParams(location.search).get('window') || 'main') !== 'main' && !['permissions', 'releases'].includes(action)) {
     void act(call('navigate_main', { route })); return;
   }
   if (action === 'providers' || action === 'ocr') app.route = 'providers';
+  else if (action === 'hotkeys') app.route = 'shortcuts';
   else if (action === 'releases') void act(call('open_help', { topic: 'releases' }));
   else if (action === 'permissions') void act(call('open_help', { topic: 'permissions' }));
   else app.route = 'settings';

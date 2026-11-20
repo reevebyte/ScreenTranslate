@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CheckIcon } from "$lib/icons";
+	import { Check } from "$lib/icons";
 	import { Select as SelectPrimitive } from "bits-ui";
 	import { cn, type WithoutChild } from "$lib/utils";
 
@@ -28,7 +28,7 @@
 	{#snippet children({ selected, highlighted })}
 		<span class="pointer-events-none absolute right-2 flex size-4 items-center justify-center">
 			{#if selected}
-				<CheckIcon class="pointer-events-none"/>
+				<Check class="pointer-events-none"/>
 			{/if}
 		</span>
 		<span class="flex flex-1 gap-2 shrink-0 whitespace-nowrap">

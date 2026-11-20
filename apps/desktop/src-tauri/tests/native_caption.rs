@@ -103,13 +103,13 @@ mod caption {
                 GetClientRect(hwnd, &mut before).unwrap();
                 let menu = GetSystemMenu(hwnd, false);
                 let menu_items = GetMenuItemCount(menu);
-                update(hwnd, true, true, CaptionMode::Download, None);
+                update(hwnd, true, true, CaptionMode::Download, None, false);
                 SendMessageW(button, BM_CLICK, WPARAM(0), LPARAM(0));
                 assert_eq!(count.get(), 1);
-                update(hwnd, true, false, CaptionMode::Restart, Some(100));
+                update(hwnd, true, false, CaptionMode::Restart, Some(100), false);
                 SendMessageW(button, BM_CLICK, WPARAM(0), LPARAM(0));
                 assert_eq!(count.get(), 1);
-                update(hwnd, true, true, CaptionMode::Downloading, Some(42));
+                update(hwnd, true, true, CaptionMode::Downloading, Some(42), false);
                 assert!(!state(hwnd).unwrap().enabled.get());
                 SendMessageW(button, BM_CLICK, WPARAM(0), LPARAM(0));
                 assert_eq!(count.get(), 1);
@@ -126,6 +126,12 @@ mod caption {
                 // Show only the off-screen fixture so a progress sync does not hide it as an inactive owner.
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
                 assert!(bounds(hwnd).is_some());
+                update(hwnd, true, true, CaptionMode::Download, None, false);
+                assert!(IsWindowVisible(button).as_bool());
+                let _ = ValidateRect(button, None);
+                update(hwnd, true, true, CaptionMode::Download, None, true);
+                assert!(state(hwnd).unwrap().english.get());
+                assert!(GetUpdateRect(button, None, false).as_bool());
                 // Close remains usable while the main download action is disabled.
                 let _ = SetWindowPos(
                     button,
@@ -140,14 +146,14 @@ mod caption {
                 SendMessageW(button, WM_MOUSEMOVE, WPARAM(0), point);
                 assert!(state(hwnd).unwrap().close_hover.get());
                 SendMessageW(button, WM_LBUTTONDOWN, WPARAM(0), point);
-                update(hwnd, true, false, CaptionMode::Downloading, Some(43));
+                update(hwnd, true, false, CaptionMode::Downloading, Some(43), false);
                 assert!(state(hwnd).unwrap().pressed.get());
                 assert!(state(hwnd).unwrap().close_pressed.get());
                 SendMessageW(button, WM_LBUTTONUP, WPARAM(0), point);
                 assert_eq!(dismissed.get(), 1);
                 assert_eq!(count.get(), 1);
                 assert!(!state(hwnd).unwrap().visible.get());
-                update(hwnd, false, false, CaptionMode::Download, None);
+                update(hwnd, false, false, CaptionMode::Download, None, false);
                 assert!(!IsWindowVisible(button).as_bool());
                 let mut after = RECT::default();
                 GetClientRect(hwnd, &mut after).unwrap();

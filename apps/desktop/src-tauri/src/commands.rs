@@ -10,7 +10,6 @@ use screentrans_core::{
     ports::TranslatorBackend,
     translators::HttpTranslator,
 };
-use std::collections::BTreeMap;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use tauri_plugin_autostart::ManagerExt;
 #[cfg(not(feature = "e2e"))]
@@ -543,10 +542,12 @@ fn save_configuration(app: &AppHandle, config: Config) -> Result<()> {
     }
     if let Err(error) = config.save(&state.config_path) {
         let _ = shortcuts::apply(app, &old.hotkeys);
-        if !cfg!(feature = "e2e") && old.autostart {
-            let _ = app.autolaunch().enable();
-        } else if !cfg!(feature = "e2e") {
-            let _ = app.autolaunch().disable();
+        if !cfg!(feature = "e2e") && config.autostart != old.autostart {
+            if old.autostart {
+                let _ = app.autolaunch().enable();
+            } else {
+                let _ = app.autolaunch().disable();
+            }
         }
         return Err(error);
     }
@@ -654,11 +655,6 @@ pub async fn delete_secret(app: AppHandle, window: WebviewWindow, name: String) 
     main_only(&window)?;
     valid_secret_name(&name)?;
     app.state::<AppState>().vault.delete(&name)
-}
-
-#[tauri::command]
-pub async fn credential_status(app: AppHandle) -> Result<BTreeMap<String, bool>> {
-    Ok(app.state::<AppState>().bootstrap().credentials)
 }
 
 #[tauri::command]
@@ -773,12 +769,14 @@ pub async fn open_image(app: AppHandle, fixture_path: Option<String>) -> Result<
     let path = if let Some(path) = fixture {
         path
     } else {
-        let selection = app
-            .dialog()
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        app.dialog()
             .file()
             .add_filter("图片", &["png", "jpg", "jpeg", "webp"])
-            .blocking_pick_file();
-        let Some(selection) = selection else {
+            .pick_file(move |selection| {
+                let _ = tx.send(selection);
+            });
+        let Some(selection) = rx.await.ok().flatten() else {
             return Ok(());
         };
         selection
@@ -848,7 +846,7 @@ pub async fn open_help(app: AppHandle, topic: String) -> Result<()> {
         "permissions" if cfg!(target_os = "linux") => {
             "https://flatpak.github.io/xdg-desktop-portal/docs/"
         }
-        "permissions" => "https://github.com/reevebyte/ScreenTranslate#文字识别",
+        "permissions" => "https://github.com/reevebyte/ScreenTranslate#快速开始",
         "ocr" if cfg!(windows) => "ms-settings:regionlanguage",
         "ocr" => "https://tesseract-ocr.github.io/tessdoc/Installation.html",
         "issues" => "https://github.com/reevebyte/ScreenTranslate/issues",
@@ -859,10 +857,4 @@ pub async fn open_help(app: AppHandle, topic: String) -> Result<()> {
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|_| AppError::new(ErrorCode::Internal, "无法打开系统设置或帮助页面"))
-}
-
-#[tauri::command]
-pub async fn quit(app: AppHandle) {
-    app.state::<AppState>().jobs.cancel_all();
-    app.exit(0);
 }

@@ -840,6 +840,7 @@ unsafe fn update(
     enabled: bool,
     mode: CaptionMode,
     progress: Option<u32>,
+    english: bool,
 ) {
     // SAFETY: Called on the owning UI thread; subclass state lives until WM_NCDESTROY.
     unsafe {
@@ -852,6 +853,7 @@ unsafe fn update(
             && action.enabled.get() == enabled
             && action.mode.get() == mode
             && action.progress.get() == progress
+            && action.english.get() == english
         {
             return;
         }
@@ -859,7 +861,8 @@ unsafe fn update(
         action.enabled.set(enabled);
         action.mode.set(mode);
         action.progress.set(progress);
-        let label = caption_label(mode, progress, action.english.get());
+        action.english.set(english);
+        let label = caption_label(mode, progress, english);
         let label: Vec<u16> = label.encode_utf16().chain(Some(0)).collect();
         let _ = SetWindowTextW(action.button.get(), windows::core::PCWSTR(label.as_ptr()));
         if !visible {
@@ -961,9 +964,15 @@ pub async fn set_update_caption(
                     }
                 }
                 action.version.replace(version);
-                action.english.set(english.unwrap_or(false));
             }
-            update(hwnd, visible, enabled, mode, progress);
+            update(
+                hwnd,
+                visible,
+                enabled,
+                mode,
+                progress,
+                english.unwrap_or(false),
+            );
         }
         Ok(())
     })

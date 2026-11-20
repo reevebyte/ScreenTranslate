@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '$lib/i18n.svelte';
   import { Command, Dialog } from 'bits-ui';
-  import { Search, ScanLine, Languages, ImagePlus, Settings2, PanelsTopLeft, Keyboard } from '$lib/icons';
+  import { Search, ScanLine, Languages, ImagePlus, Settings2, PanelsTopLeft, Keyboard, SlidersHorizontal } from '$lib/icons';
   import { app, act, type Route } from '$lib/store.svelte';
   import { call } from '$lib/api';
   import { formatHotkey } from '$lib/utils';
@@ -13,7 +13,7 @@
     { label: t("文字翻译"), keywords: ['translate', t("文字")], icon: Languages, action: () => navigate('translate'), shortcut: '' },
     { label: t("打开图片"), keywords: ['image', t("图片")], icon: ImagePlus, action: () => act(call('open_image')), shortcut: '' },
     { label: t("快速翻译框"), keywords: ['quick', t("浮窗")], icon: PanelsTopLeft, action: () => act(call('toggle_quick')), shortcut: app.data?.config.hotkeys.quick || '' },
-    { label: t("服务中心"), keywords: ['provider', 'api', t("模型"), 'OCR'], icon: Keyboard, action: () => navigate('providers'), shortcut: '' },
+    { label: t("服务中心"), keywords: ['provider', 'api', t("模型"), 'OCR'], icon: SlidersHorizontal, action: () => navigate('providers'), shortcut: '' },
     { label: t("快捷操作"), keywords: ['hotkeys', t("快捷键")], icon: Keyboard, action: () => navigate('shortcuts'), shortcut: '' },
     { label: t("设置"), keywords: ['settings', t("外观"), t("快捷键")], icon: Settings2, action: () => navigate('settings'), shortcut: '' },
   ]);

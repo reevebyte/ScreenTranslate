@@ -3,7 +3,7 @@
   import { onDestroy, untrack } from 'svelte';
   import { toast } from 'svelte-sonner';
   import { ScanLine, PanelTop, Languages, ArrowRight, Search } from '$lib/icons';
-  import { app, previewConfig, saveConfig, act } from '$lib/store.svelte';
+  import { app, previewConfig, saveConfig, act, registerFlush } from '$lib/store.svelte';
   import { call } from '$lib/api';
   import { createAutosave } from '$lib/autosave';
   import { formatHotkeyParts } from '$lib/utils';
@@ -31,8 +31,9 @@
       // Name the key in the shared notice, outline its row, and go back to the key that
       // still works so the rejected key is not carried into later saves.
       const keys = formatHotkeyParts(value.hotkeys[key], isMac).join(' + ');
-      const reason = app.configError.includes('已用于其他操作') ? t("{0} 已用于其他操作，已恢复原快捷键", keys)
-        : app.configError.includes('占用') ? t("{0} 已被其他程序占用，已恢复原快捷键", keys)
+      const rawError = app.configErrorRaw || app.configError;
+      const reason = rawError.includes('已用于其他操作') ? t("{0} 已用于其他操作，已恢复原快捷键", keys)
+        : rawError.includes('占用') ? t("{0} 已被其他程序占用，已恢复原快捷键", keys)
         : t("{0}；已恢复原快捷键", app.configError);
       toast.warning(reason, { id: `hotkey-${key}` });
       markConflict(key);
@@ -43,7 +44,8 @@
   const actions = $derived([ ['capture',t("框选翻译"),ScanLine,'begin_capture'], ['toggle',t("收起 / 显示"),PanelTop,'toggle_result'], ['quick',t("快速文字翻译"),Languages,'toggle_quick'], ['search',t("快速查找"),Search,''] ] as const);
   function queue() { const json = JSON.stringify(draft); if (json === last) return; last = json; const value = structuredClone($state.snapshot(draft)); previewConfig(value); writer.schedule(value); }
   $effect(() => { JSON.stringify(draft); untrack(queue); });
-  onDestroy(() => { Object.values(conflictTimers).forEach(clearTimeout); queue(); void writer.flush(); });
+  const stopFlush = registerFlush(() => { queue(); return writer.flush(); });
+  onDestroy(() => { stopFlush(); Object.values(conflictTimers).forEach(clearTimeout); queue(); void writer.flush(); });
   function record(event: KeyboardEvent, key: HotkeyName) {
     if (event.key === 'Tab') return;
     event.preventDefault();

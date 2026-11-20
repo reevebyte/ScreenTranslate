@@ -51,8 +51,8 @@
     // The global quick-search hotkey shows this window and asks it to open the palette.
     if (desktop && mode === 'main') void listen('open-command-palette', () => { app.commandOpen = true; }).then(fn => { if (disposed) fn(); else searchCleanup = fn; });
     if (desktop && mode === 'main') void listen('app-quit-requested', async () => {
-      await flushPendingEdits();
-      void call('quit_app').catch(() => {});
+      try { await flushPendingEdits(); }
+      finally { void call('quit_app').catch(() => {}); }
     }).then(fn => { if (disposed) fn(); else quitCleanup = fn; });
     if (desktop) void listen<string>('navigate', ({ payload }) => { if (payload === 'ocr') { app.servicesTab = 'ocr'; app.route = 'providers'; } else if (nav.some(item => item.route === payload)) { if (payload === 'providers') app.servicesTab = 'translation'; app.route = payload as Route; } }).then(fn => { if (disposed) fn(); else navigateCleanup = fn; });
     void initialize().then(async fn => {

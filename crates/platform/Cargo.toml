@@ -13,7 +13,6 @@ image.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 serde_json.workspace = true
-tracing.workspace = true
 xcap = "0.9.8"
 base64 = "0.22"
 md5 = "0.7"

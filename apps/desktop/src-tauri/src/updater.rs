@@ -12,6 +12,7 @@ pub struct PendingUpdate(Mutex<Pending>);
 struct Pending {
     update: Option<Update>,
     bytes: Option<Vec<u8>>,
+    downloading: bool,
 }
 
 pub fn public_key() -> &'static str {
@@ -192,9 +193,17 @@ fn download_error(error: &tauri_plugin_updater::Error) -> AppError {
 pub async fn check_update(app: AppHandle, window: WebviewWindow) -> Result<serde_json::Value> {
     authorize(window.label())?;
     let state = app.state::<PendingUpdate>();
-    let mut pending = state.0.lock().await;
-    if pending.bytes.is_some() {
-        return Ok(info(&pending));
+    {
+        let pending = state.0.lock().await;
+        if pending.downloading {
+            return Err(AppError::new(
+                ErrorCode::InvalidInput,
+                "更新正在下载中，请稍候",
+            ));
+        }
+        if pending.bytes.is_some() {
+            return Ok(info(&pending));
+        }
     }
     let detected = system_proxy();
     let candidates = proxy_candidates(detected.clone(), None);
@@ -233,24 +242,39 @@ pub async fn check_update(app: AppHandle, window: WebviewWindow) -> Result<serde
     if let Some(update) = update.as_mut() {
         update.timeout = Some(Duration::from_secs(600));
     }
-    pending.update = update;
+    let mut pending = state.0.lock().await;
+    if pending.bytes.is_none() && !pending.downloading {
+        pending.update = update;
+    }
     Ok(info(&pending))
 }
 #[tauri::command]
 pub async fn download_update(app: AppHandle, window: WebviewWindow, version: String) -> Result<()> {
     authorize(window.label())?;
     let state = app.state::<PendingUpdate>();
-    let mut pending = state.0.lock().await;
-    let update = pending
-        .update
-        .as_ref()
-        .filter(|update| update.version == version)
-        .ok_or_else(|| AppError::new(ErrorCode::InvalidInput, "更新版本已变化，请重新检查"))?;
-    if pending.bytes.is_some() {
-        return Ok(());
-    }
+    let update = {
+        let mut pending = state.0.lock().await;
+        let update = pending
+            .update
+            .as_ref()
+            .filter(|update| update.version == version)
+            .cloned()
+            .ok_or_else(|| AppError::new(ErrorCode::InvalidInput, "更新版本已变化，请重新检查"))?;
+        if pending.bytes.is_some() {
+            return Ok(());
+        }
+        if pending.downloading {
+            return Err(AppError::new(
+                ErrorCode::InvalidInput,
+                "更新正在下载中，请稍候",
+            ));
+        }
+        pending.downloading = true;
+        update
+    };
     let candidates = proxy_candidates(update.proxy.clone(), system_proxy());
     let mut last_error = None;
+    let mut downloaded_bytes = None;
     for candidate in candidates {
         let mut attempt = update.clone();
         attempt.timeout = Some(Duration::from_secs(600));
@@ -272,8 +296,8 @@ pub async fn download_update(app: AppHandle, window: WebviewWindow, version: Str
             .await
         {
             Ok(bytes) => {
-                pending.bytes = Some(bytes);
-                return Ok(());
+                downloaded_bytes = Some(bytes);
+                break;
             }
             Err(error) => {
                 let stop = is_signature_error(&error);
@@ -283,6 +307,18 @@ pub async fn download_update(app: AppHandle, window: WebviewWindow, version: Str
                 }
             }
         }
+    }
+    let mut pending = state.0.lock().await;
+    pending.downloading = false;
+    if let Some(bytes) = downloaded_bytes {
+        if pending
+            .update
+            .as_ref()
+            .is_some_and(|current| current.version == version)
+        {
+            pending.bytes = Some(bytes);
+        }
+        return Ok(());
     }
     Err(last_error.as_ref().map(download_error).unwrap_or_else(|| {
         AppError::new(ErrorCode::Network, "更新下载失败，请检查网络或代理后重试")
@@ -472,6 +508,12 @@ pub async fn install_update(app: AppHandle, window: WebviewWindow, version: Stri
     authorize(window.label())?;
     let pending_state = app.state::<PendingUpdate>();
     let pending = pending_state.0.lock().await;
+    if pending.downloading {
+        return Err(AppError::new(
+            ErrorCode::InvalidInput,
+            "更新正在下载中，请稍候",
+        ));
+    }
     {
         let state = app.state::<AppState>();
         let sessions = lock(&state.sessions);

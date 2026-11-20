@@ -290,12 +290,6 @@ fn caption_color(window: &tauri::WebviewWindow, theme: screentrans_core::config:
             let _ = window.run_on_main_thread(move || {
                 crate::update_caption::refresh(raw as *mut std::ffi::c_void, background, text)
             });
-            use windows::Win32::Graphics::Gdi::{DeleteObject, HBRUSH};
-            use windows::Win32::UI::WindowsAndMessaging::{GCLP_HBRBACKGROUND, SetClassLongPtrW};
-            let old = SetClassLongPtrW(hwnd, GCLP_HBRBACKGROUND, 0);
-            if old != 0 {
-                let _ = DeleteObject(HBRUSH(old as *mut _));
-            }
             let bg_color = if dark {
                 tauri::window::Color(0x1d, 0x1c, 0x20, 255)
             } else {
@@ -1011,18 +1005,54 @@ fn cancel_capture_with(app: &AppHandle, restore: bool, clear_selections: bool) {
     }
 }
 
+#[cfg(windows)]
+static RESTORE_SELECTION_FADE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 pub fn disable_selection_fade() {
     #[cfg(windows)]
     unsafe {
+        use std::sync::atomic::Ordering;
+        use windows::Win32::Foundation::BOOL;
         use windows::Win32::UI::WindowsAndMessaging::{
-            SPI_SETSELECTIONFADE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+            SPI_GETSELECTIONFADE, SPI_SETSELECTIONFADE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+            SystemParametersInfoW,
         };
-        let _ = SystemParametersInfoW(
-            SPI_SETSELECTIONFADE,
+        let mut enabled = BOOL(0);
+        if SystemParametersInfoW(
+            SPI_GETSELECTIONFADE,
             0,
-            Some(std::ptr::null_mut()),
+            Some(&mut enabled as *mut _ as _),
             SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-        );
+        )
+        .is_ok()
+            && enabled.as_bool()
+        {
+            RESTORE_SELECTION_FADE.store(true, Ordering::Relaxed);
+            let _ = SystemParametersInfoW(
+                SPI_SETSELECTIONFADE,
+                0,
+                Some(std::ptr::null_mut()),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            );
+        }
+    }
+}
+
+pub fn restore_selection_fade() {
+    #[cfg(windows)]
+    if RESTORE_SELECTION_FADE.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{
+                SPI_SETSELECTIONFADE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+            };
+            let _ = SystemParametersInfoW(
+                SPI_SETSELECTIONFADE,
+                0,
+                Some(std::ptr::without_provenance_mut(1)),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            );
+        }
     }
 }
 
@@ -1343,7 +1373,6 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
                 let bounds = metadata.screen_bounds.ok_or_else(|| {
                     AppError::new(ErrorCode::Internal, "截图显示器边界无效，请重试")
                 })?;
-                lock(&state.selections).insert(label.clone(), metadata.id.clone());
                 let window = if let Some(window) = app.get_webview_window(&label) {
                     lock(&state.window_lifecycle).forget(&label);
                     // `emit` would broadcast to every monitor's overlay.
@@ -1440,6 +1469,7 @@ pub fn request_quit(app: &AppHandle) {
 }
 
 pub fn quit(app: &AppHandle) {
+    restore_selection_fade();
     app.state::<AppState>().jobs.cancel_all();
     app.exit(0);
 }

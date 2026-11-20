@@ -34,4 +34,12 @@ describe('saved credentials', () => {
     await fireEvent.click(view.getByRole('button', { name: '查看Vision 密钥' }));
     expect((view.getByLabelText('Vision 密钥') as HTMLInputElement).value).toBe('fixture-replacement');
   });
+  it('allows clearing a revealed secret without snapping back to the stored value', async () => {
+    const view = render(SecretField, { name: 'azure_ocr', id: 'key', label: 'Vision 密钥' });
+    const input = view.getByLabelText('Vision 密钥') as HTMLInputElement;
+    await fireEvent.click(view.getByRole('button', { name: '查看Vision 密钥' }));
+    await waitFor(() => expect(input.value).toBe('fixture-existing-key'));
+    await fireEvent.input(input, { target: { value: '' } });
+    expect(input.value).toBe('');
+  });
 });

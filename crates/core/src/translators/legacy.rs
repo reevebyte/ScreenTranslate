@@ -4,7 +4,10 @@ use crate::{AppError, ErrorCode, Result, TranslatedItem, TranslationRequest, con
 use base64::Engine;
 use hmac::{Hmac, Mac};
 use serde_json::{Value, json};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    sync::OnceLock,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio_util::sync::CancellationToken;
 
 const AGENT: &str =
@@ -74,23 +77,41 @@ struct BingToken {
     iid: String,
 }
 fn bing_token(html: &str) -> Result<BingToken> {
-    fn capture(html: &str, pattern: &str, group: usize) -> Result<String> {
-        regex::Regex::new(pattern)
-            .unwrap()
-            .captures(html)
-            .and_then(|v| v.get(group))
-            .map(|v| v.as_str().to_owned())
-            .ok_or_else(invalid)
-    }
-    let pattern = r#"params_AbusePreventionHelper\s*=\s*\[\s*([^,\]]+)\s*,\s*"([^"]+)""#;
+    static PARAMS_RE: OnceLock<regex::Regex> = OnceLock::new();
+    static IG_RE: OnceLock<regex::Regex> = OnceLock::new();
+    static IID_RE: OnceLock<regex::Regex> = OnceLock::new();
+    let params_re = PARAMS_RE.get_or_init(|| {
+        regex::Regex::new(r#"params_AbusePreventionHelper\s*=\s*\[\s*([^,\]]+)\s*,\s*"([^"]+)""#)
+            .expect("valid Bing params regex")
+    });
+    let ig_re =
+        IG_RE.get_or_init(|| regex::Regex::new(r#"IG:\s*"([^"]+)""#).expect("valid Bing IG regex"));
+    let iid_re = IID_RE
+        .get_or_init(|| regex::Regex::new(r#"data-iid="([^"]+)""#).expect("valid Bing IID regex"));
+    let params = params_re.captures(html).ok_or_else(invalid)?;
+    let key = params
+        .get(1)
+        .ok_or_else(invalid)?
+        .as_str()
+        .trim()
+        .trim_matches('"')
+        .to_owned();
+    let token = params.get(2).ok_or_else(invalid)?.as_str().to_owned();
+    let ig = ig_re
+        .captures(html)
+        .and_then(|v| v.get(1))
+        .map(|v| v.as_str().to_owned())
+        .ok_or_else(invalid)?;
+    let iid = iid_re
+        .captures(html)
+        .and_then(|v| v.get(1))
+        .map(|v| v.as_str().to_owned())
+        .unwrap_or_else(|| "translator.5023".into());
     Ok(BingToken {
-        key: capture(html, pattern, 1)?
-            .trim()
-            .trim_matches('"')
-            .to_owned(),
-        token: capture(html, pattern, 2)?,
-        ig: capture(html, r#"IG:\s*"([^"]+)""#, 1)?,
-        iid: capture(html, r#"data-iid="([^"]+)""#, 1).unwrap_or_else(|_| "translator.5023".into()),
+        key,
+        token,
+        ig,
+        iid,
     })
 }
 fn parse_one(provider: ProviderId, value: &Value) -> Result<String> {

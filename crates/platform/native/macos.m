@@ -89,8 +89,15 @@ unsigned char *st_capture_display(uint32_t displayID, size_t *length, char **err
                 if (!selected) { dispatch_semaphore_signal(semaphore); return; }
                 SCContentFilter *filter = [[SCContentFilter alloc] initWithDisplay:selected excludingWindows:@[]];
                 SCStreamConfiguration *configuration = [SCStreamConfiguration new];
-                configuration.width = CGDisplayPixelsWide(displayID);
-                configuration.height = CGDisplayPixelsHigh(displayID);
+                CGDisplayModeRef displayMode = CGDisplayCopyDisplayMode(displayID);
+                if (displayMode) {
+                    configuration.width = CGDisplayModeGetPixelWidth(displayMode);
+                    configuration.height = CGDisplayModeGetPixelHeight(displayMode);
+                    CGDisplayModeRelease(displayMode);
+                } else {
+                    configuration.width = CGDisplayPixelsWide(displayID);
+                    configuration.height = CGDisplayPixelsHigh(displayID);
+                }
                 configuration.showsCursor = NO;
                 [SCScreenshotManager captureImageWithFilter:filter configuration:configuration
                     completionHandler:^(CGImageRef image, NSError *captureError) {
@@ -137,7 +144,9 @@ char *st_recognize(const unsigned char *png, size_t length, const char *language
         NSArray *supported = [request supportedRecognitionLanguagesAndReturnError:nil];
         NSMutableArray *filtered = [NSMutableArray array];
         for (NSString *language in languages) {
-            NSString *mapped = [language hasPrefix:@"zh-Hans"] ? @"zh-Hans" : language;
+            NSString *mapped = [language hasPrefix:@"zh-Hans"] ? @"zh-Hans"
+                             : [language hasPrefix:@"zh-Hant"] ? @"zh-Hant"
+                             : language;
             if ([supported containsObject:mapped]) { [filtered addObject:mapped]; }
         }
         if (filtered.count) { request.recognitionLanguages = filtered; }
@@ -196,10 +205,11 @@ bool st_mouse_button_down(void) {
 
 void st_attach_child_window(void *parentPtr, void *childPtr) {
     if (!parentPtr || !childPtr) return;
+    // Bridge before dispatch_async so ARC retains both windows across the queue hop.
+    NSWindow *parent = (__bridge NSWindow *)parentPtr;
+    NSWindow *child = (__bridge NSWindow *)childPtr;
     dispatch_async(dispatch_get_main_queue(), ^{
         @autoreleasepool {
-            NSWindow *parent = (__bridge NSWindow *)parentPtr;
-            NSWindow *child = (__bridge NSWindow *)childPtr;
             if (child.parentWindow != parent) {
                 [parent addChildWindow:child ordered:NSWindowAbove];
             }
@@ -216,9 +226,10 @@ bool st_system_dark(void) {
 
 void st_configure_window(void *windowPtr, int themeMode) {
     if (!windowPtr) return;
+    // Bridge before dispatch_async so ARC retains the window until the block runs.
+    NSWindow *window = (__bridge NSWindow *)windowPtr;
     dispatch_async(dispatch_get_main_queue(), ^{
         @autoreleasepool {
-            NSWindow *window = (__bridge NSWindow *)windowPtr;
             BOOL isDark = NO;
             if (themeMode == 1) {
                 isDark = YES;

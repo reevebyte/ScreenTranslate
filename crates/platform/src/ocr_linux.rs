@@ -35,7 +35,7 @@ pub async fn recognize(
         .iter()
         .map(|code| match code.as_str() {
             "zh-Hans-CN" | "zh-Hans" | "zh-CN" => "chi_sim",
-            "zh-Hant" | "zh-TW" => "chi_tra",
+            "zh-Hant" | "zh-Hant-TW" | "zh-Hant-HK" | "zh-TW" => "chi_tra",
             "en-US" | "en" => "eng",
             "ja-JP" | "ja" => "jpn",
             "ko-KR" | "ko" => "kor",

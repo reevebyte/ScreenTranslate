@@ -170,7 +170,6 @@ pub fn run() {
             commands::save_secret,
             commands::read_secret,
             commands::delete_secret,
-            commands::credential_status,
             commands::test_provider,
             commands::list_models,
             commands::import_legacy_config,
@@ -183,7 +182,6 @@ pub fn run() {
             update_ui::set_tray_update,
             update_ui::take_update_request,
             set_update_caption,
-            commands::quit,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -260,6 +258,9 @@ fn handle_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
             code: None, api, ..
         } => {
             api.prevent_exit();
+        }
+        tauri::RunEvent::Exit => {
+            windows::restore_selection_fade();
         }
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => {

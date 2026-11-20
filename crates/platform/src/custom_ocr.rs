@@ -174,12 +174,13 @@ impl OcrBackend for CustomOcr {
                 .and_then(Value::as_str)
                 .ok_or_else(invalid)?
                 .trim();
-            let content = content
-                .strip_prefix("```json")
-                .or_else(|| content.strip_prefix("```"))
-                .unwrap_or(content)
-                .trim();
-            let content = content.strip_suffix("```").unwrap_or(content).trim();
+            let content = if let Some(rest) = content.strip_prefix("```") {
+                rest.split_once('\n')
+                    .map(|(_, body)| body.trim_end().trim_end_matches("```").trim())
+                    .unwrap_or(rest.trim_end_matches("```").trim())
+            } else {
+                content
+            };
             serde_json::from_str(content).map_err(|_| invalid())?
         } else {
             value

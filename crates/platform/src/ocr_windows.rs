@@ -82,13 +82,16 @@ pub fn recognize(image: &RgbaImage, languages: &[String]) -> Result<Vec<OcrLine>
         })
         .or_else(|| OcrEngine::TryCreateFromUserProfileLanguages().ok())
         .ok_or_else(unavailable)?;
+    if image.width() == 0 || image.height() == 0 {
+        return Ok(Vec::new());
+    }
     let max = OcrEngine::MaxImageDimension().unwrap_or(2600);
     let ratio = (max as f64 / image.width().max(image.height()) as f64).min(1.0);
     let smaller = if ratio < 1.0 {
         image::imageops::resize(
             image,
-            (image.width() as f64 * ratio) as u32,
-            (image.height() as f64 * ratio) as u32,
+            ((image.width() as f64 * ratio).round() as u32).max(1),
+            ((image.height() as f64 * ratio).round() as u32).max(1),
             image::imageops::FilterType::Triangle,
         )
     } else {

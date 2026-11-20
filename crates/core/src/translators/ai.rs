@@ -1,4 +1,4 @@
-use super::{HttpTranslator, json_response};
+use super::{HttpTranslator, apply_opencode_session, json_response};
 use crate::{
     AppError, ErrorCode, Result, TranslatedItem, TranslationRequest, config::ProviderId, language,
 };
@@ -20,21 +20,14 @@ pub async fn translate(
     let is_anthropic = backend.provider == ProviderId::Anthropic;
     let request = if is_anthropic {
         let base = base.strip_suffix("/messages").unwrap_or(base);
-        let mut req = backend
-            .client
-            .post(format!("{base}/messages"))
-            .header("x-api-key", &backend.key)
-            .header("anthropic-version", "2023-06-01");
-        if base.to_lowercase().contains("opencode") {
-            let session = format!(
-                "screentranslate-{:x}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
-            );
-            req = req.header("x-opencode-session", session);
-        }
+        let req = apply_opencode_session(
+            backend
+                .client
+                .post(format!("{base}/messages"))
+                .header("x-api-key", &backend.key)
+                .header("anthropic-version", "2023-06-01"),
+            base,
+        );
         req.json(
             &json!({ "model": backend.options.model, "max_tokens": 8192, "system": system,
             "messages": [{ "role": "user", "content": user }] }),
@@ -45,16 +38,7 @@ pub async fn translate(
         if !backend.key.is_empty() {
             request = request.bearer_auth(&backend.key);
         }
-        if base.to_lowercase().contains("opencode") {
-            let session = format!(
-                "screentranslate-{:x}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
-            );
-            request = request.header("x-opencode-session", session);
-        }
+        let request = apply_opencode_session(request, base);
         request.json(&json!({ "model": backend.options.model, "stream": false,
             "messages": [{"role":"system","content":system},{"role":"user","content":user}] }))
     };

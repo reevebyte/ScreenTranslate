@@ -468,7 +468,12 @@ pub fn import_legacy(bytes: &[u8]) -> Result<LegacyImport> {
                 .filter(|s| !s.is_empty())
             {
                 options.base_url = if id == ProviderId::Anthropic {
-                    format!("{}/v1", value.trim_end_matches('/'))
+                    let trimmed = value.trim_end_matches('/');
+                    if trimmed.ends_with("/v1") {
+                        trimmed.into()
+                    } else {
+                        format!("{trimmed}/v1")
+                    }
                 } else {
                     value.into()
                 };
@@ -708,5 +713,13 @@ mod tests {
         );
         assert_eq!(migration.config.appearance.accent, "#28C76F");
         assert!(migration.config.appearance.auto_copy);
+        let with_v1 = import_legacy(
+            br#"{"translator":{"anthropic":{"base_url":"https://api.anthropic.com/v1/"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            with_v1.config.providers[&ProviderId::Anthropic].base_url,
+            "https://api.anthropic.com/v1"
+        );
     }
 }

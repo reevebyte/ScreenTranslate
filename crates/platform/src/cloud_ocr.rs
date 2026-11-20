@@ -103,6 +103,27 @@ fn parse_youdao(value: &serde_json::Value) -> Result<Vec<OcrLine>> {
     Ok(output)
 }
 
+fn ocr_action(mut error: AppError) -> AppError {
+    if error.code != ErrorCode::Cancelled {
+        error.action = Some("ocr".into());
+    }
+    error
+}
+
+async fn encode_png(image: Arc<RgbaImage>, stop: &CancellationToken) -> Result<Vec<u8>> {
+    let encode = tokio::task::spawn_blocking(move || {
+        let mut png = Cursor::new(Vec::new());
+        image
+            .write_to(&mut png, image::ImageFormat::Png)
+            .map_err(|_| AppError::new(ErrorCode::InvalidInput, "无法编码 OCR 图像"))?;
+        Ok::<_, AppError>(png.into_inner())
+    });
+    tokio::select! {
+        _ = stop.cancelled() => Err(AppError::cancelled()),
+        result = encode => result.map_err(|_| AppError::new(ErrorCode::Internal, "OCR 图像编码失败"))?,
+    }
+}
+
 #[async_trait]
 impl OcrBackend for YoudaoOcr {
     async fn recognize(
@@ -111,11 +132,7 @@ impl OcrBackend for YoudaoOcr {
         _languages: Vec<String>,
         stop: CancellationToken,
     ) -> Result<Vec<OcrLine>> {
-        let mut png = Cursor::new(Vec::new());
-        image
-            .write_to(&mut png, image::ImageFormat::Png)
-            .map_err(|_| AppError::new(ErrorCode::InvalidInput, "无法编码 OCR 图像"))?;
-        let png = png.into_inner();
+        let png = encode_png(image, &stop).await?;
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -146,7 +163,7 @@ impl OcrBackend for YoudaoOcr {
             .build()
             .map_err(|_| AppError::new(ErrorCode::Internal, "无法初始化 OCR 请求"))?;
         let request = client.post("https://ocrtran.youdao.com/ocr/imgtranocr").header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/127.0.0.0 Safari/537.36").header("Content-Type", format!("multipart/form-data; boundary={boundary}")).body(body);
-        parse_youdao(&json_response(request, &stop).await?)
+        parse_youdao(&json_response(request, &stop).await.map_err(ocr_action)?)
     }
 }
 
@@ -158,18 +175,16 @@ impl OcrBackend for AzureOcr {
         _languages: Vec<String>,
         stop: CancellationToken,
     ) -> Result<Vec<OcrLine>> {
-        validate_api_url(&self.endpoint)?;
+        validate_api_url(&self.endpoint).map_err(ocr_action)?;
         if self.key.is_empty() {
             return Err(
                 AppError::new(ErrorCode::Credentials, "请配置 Azure Vision 密钥").action("ocr"),
             );
         }
-        let mut png = Cursor::new(Vec::new());
-        image
-            .write_to(&mut png, image::ImageFormat::Png)
-            .map_err(|_| AppError::new(ErrorCode::InvalidInput, "无法编码 OCR 图像"))?;
+        let png = encode_png(image, &stop).await?;
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(45))
+            .connect_timeout(Duration::from_secs(12))
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| AppError::new(ErrorCode::Internal, "无法初始化 OCR 请求"))?;
@@ -181,8 +196,8 @@ impl OcrBackend for AzureOcr {
             .query(&[("api-version", "2024-02-01"), ("features", "read")])
             .header("Ocp-Apim-Subscription-Key", &self.key)
             .header("Content-Type", "application/octet-stream")
-            .body(png.into_inner());
-        let value = json_response(request, &stop).await?;
+            .body(png);
+        let value = json_response(request, &stop).await.map_err(ocr_action)?;
         let blocks = value
             .pointer("/readResult/blocks")
             .and_then(|v| v.as_array())

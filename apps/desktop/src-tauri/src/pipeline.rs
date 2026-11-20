@@ -51,6 +51,7 @@ pub fn schedule_text(app: AppHandle, delay: bool) {
         (revision, sessions.text.input.clone())
     };
     if input.trim().is_empty() {
+        state.jobs.finish("text", &ticket);
         state.publish_text(&app);
         return;
     }
@@ -65,6 +66,7 @@ pub fn schedule_text(app: AppHandle, delay: bool) {
         {
             let mut sessions = lock(&state.sessions);
             if sessions.text.revision != revision || ticket.stop.is_cancelled() {
+                state.jobs.finish("text", &ticket);
                 return;
             }
             sessions.text.job.stage = JobStage::Translating;
@@ -97,7 +99,9 @@ pub fn schedule_text(app: AppHandle, delay: bool) {
             )
         }
         .await;
-        if !state.jobs.is_current("text", &ticket) {
+        let current = state.jobs.is_current("text", &ticket);
+        state.jobs.finish("text", &ticket);
+        if !current {
             return;
         }
         {
@@ -150,9 +154,11 @@ pub fn start_visual(app: AppHandle, metadata: FrameMetadata, recognize: bool) {
     state.publish_visual(&app);
     if let Err(e) = windows::show_result(&app, &metadata) {
         tracing::error!("show_result failed: {e:?}");
+        state.jobs.finish("visual", &ticket);
         // Without a result window nothing would retire the frozen selection
         // overlay; end the capture (same as Esc) and report the failure.
         windows::abort_capture(&app, e);
+        return;
     }
     tauri::async_runtime::spawn(async move {
         let outcome = tokio::time::timeout(
@@ -209,12 +215,18 @@ async fn run_visual(
     if recognize {
         let image = lock(&state.frames).image(&metadata.id)?;
         let (image, ratio) = if config.ocr.upscale && image.width().max(image.height()) < 1200 {
-            let resized = image::imageops::resize(
-                image.as_ref(),
-                image.width() * 2,
-                image.height() * 2,
-                image::imageops::FilterType::CatmullRom,
-            );
+            let resize = tokio::task::spawn_blocking(move || {
+                image::imageops::resize(
+                    image.as_ref(),
+                    image.width() * 2,
+                    image.height() * 2,
+                    image::imageops::FilterType::CatmullRom,
+                )
+            });
+            let resized = tokio::select! {
+                _ = ticket.stop.cancelled() => return Err(AppError::cancelled()),
+                result = resize => result.map_err(|_| AppError::new(ErrorCode::Internal, "图像缩放失败"))?,
+            };
             (Arc::new(resized), 2.0)
         } else {
             (image, 1.0)
@@ -422,10 +434,18 @@ pub fn retranslate_block(app: AppHandle, id: String, text: String, target: Strin
                     ticket.stop.clone(),
                 )
                 .await?;
-            Ok::<_, AppError>(response[0].text.clone())
+            Ok::<_, AppError>(
+                response
+                    .into_iter()
+                    .next()
+                    .map(|item| item.text)
+                    .unwrap_or_default(),
+            )
         }
         .await;
-        if !state.jobs.is_current(&lane, &ticket) {
+        let current = state.jobs.is_current(&lane, &ticket);
+        state.jobs.finish(&lane, &ticket);
+        if !current {
             return;
         }
         let error = {
@@ -468,22 +488,30 @@ pub fn retranslate_block(app: AppHandle, id: String, text: String, target: Strin
                 .map(|b| b.translation.as_str())
                 .collect::<Vec<_>>()
                 .join("\n\n");
+            let other_blocks_running = state.jobs.has_running_prefix("block:");
             sessions.visual.job.stage = if error.is_some() {
                 JobStage::Error
+            } else if other_blocks_running {
+                JobStage::Translating
             } else {
                 JobStage::Complete
             };
             sessions.visual.job.error = error;
         }
 
-        let _ = crate::visual_render::render(
+        if crate::visual_render::render(
             &state.frames,
             &state.sessions,
             visual_revision,
             ticket.stop.clone(),
         )
-        .await;
-        state.publish_visual(&app);
+        .await
+        .is_ok()
+            && lock(&state.sessions).visual.revision == visual_revision
+            && !ticket.stop.is_cancelled()
+        {
+            state.publish_visual(&app);
+        }
     });
     Ok(())
 }

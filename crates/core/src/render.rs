@@ -236,6 +236,9 @@ fn cover_source_line(image: &mut RgbaImage, rect: Rect, background: [u8; 3]) {
 
 pub fn process_visual_rendering(image: &RgbaImage, blocks: &mut [TextBlock]) -> RgbaImage {
     let mut clean_image = image.clone();
+    if image.width() == 0 || image.height() == 0 {
+        return clean_image;
+    }
     let source_bounds: Vec<_> = blocks
         .iter()
         .map(|b| crate::layout::union(b.source_lines.iter().copied()).unwrap_or(b.bounds))
@@ -390,5 +393,22 @@ mod tests {
         assert!(blocks[0].font_size.unwrap() <= 14.0);
         blocks[0].translation.clear();
         assert_eq!(process_visual_rendering(&image, &mut blocks), image);
+    }
+
+    #[test]
+    fn empty_image_does_not_panic() {
+        let image = RgbaImage::new(0, 0);
+        let mut blocks = crate::layout::group_lines(vec![crate::OcrLine {
+            text: "Hello".into(),
+            bounds: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 10.0,
+                height: 10.0,
+            },
+            confidence: None,
+        }]);
+        let clean = process_visual_rendering(&image, &mut blocks);
+        assert_eq!(clean.dimensions(), (0, 0));
     }
 }

@@ -1,20 +1,5 @@
-__pycache__/
-*.py[cod]
-.venv/
-.venv-build/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.pip-audit-cache/
-.tox/
-.nox/
-.coverage
-.coverage.*
-htmlcov/
-
 build/
 dist/
-*.spec
 
 # Editors and IDEs
 .idea/

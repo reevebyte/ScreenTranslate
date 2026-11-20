@@ -94,12 +94,17 @@ impl CredentialVault {
     }
 
     pub fn delete(&self, name: &str) -> Result<()> {
-        self.persistent.delete(name)?;
-        self.session
+        let removed_session = self
+            .session
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .remove(name);
-        Ok(())
+            .remove(name)
+            .is_some();
+        match self.persistent.delete(name) {
+            Ok(()) => Ok(()),
+            Err(_) if removed_session => Ok(()),
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -147,4 +152,34 @@ pub fn decode_legacy(value: &str) -> Result<String> {
         ErrorCode::Credentials,
         "旧 DPAPI 密钥只能在原 Windows 账户中导入，请重新填写",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct FailingStore;
+    impl SecretStore for FailingStore {
+        fn get(&self, _name: &str) -> Result<Option<String>> {
+            Err(credentials_error())
+        }
+        fn set(&self, _name: &str, _secret: &str) -> Result<()> {
+            Err(credentials_error())
+        }
+        fn delete(&self, _name: &str) -> Result<()> {
+            Err(credentials_error())
+        }
+    }
+
+    #[test]
+    fn session_secret_can_be_deleted_when_keyring_is_unavailable() {
+        let vault = CredentialVault {
+            persistent: Box::new(FailingStore),
+            session: Mutex::new(HashMap::new()),
+        };
+        assert!(!vault.set("openai", "sk-test", true).unwrap());
+        assert_eq!(vault.get("openai").unwrap().as_deref(), Some("sk-test"));
+        vault.delete("openai").unwrap();
+        assert!(vault.get("openai").is_err());
+    }
 }

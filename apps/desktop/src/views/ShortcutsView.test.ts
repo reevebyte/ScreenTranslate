@@ -7,12 +7,14 @@ const { call, toast } = vi.hoisted(() => ({ call: vi.fn(), toast: { error: vi.fn
 vi.mock('$lib/api', () => ({ desktop: true, call, loadBootstrap: vi.fn() }));
 vi.mock('svelte-sonner', () => ({ toast }));
 import { app } from '$lib/store.svelte';
+import { setLocale } from '$lib/i18n.svelte';
 import ShortcutsView from './ShortcutsView.svelte';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  setLocale('zh-CN');
   vi.stubGlobal('matchMedia', () => ({ matches: false }));
-  app.data = previewBootstrap(); app.configError = ''; app.configErrorAction = ''; app.configPending = false;
+  app.data = previewBootstrap(); app.configError = ''; app.configErrorRaw = ''; app.configErrorAction = ''; app.configPending = false;
   app.data.config.hotkeys.capture = 'Ctrl+Alt+Q';
 });
 afterEach(async () => { cleanup(); await tick(); });
@@ -64,4 +66,16 @@ it('says when a hotkey duplicates another action instead of blaming another app'
   await fireEvent.keyDown(view.getByLabelText('快速查找快捷键'), { key: 'q', code: 'KeyQ', ctrlKey: true, altKey: true });
   await waitFor(() => expect(toast.warning).toHaveBeenCalledWith('Ctrl + Alt + Q 已用于其他操作，已恢复原快捷键', { id: 'hotkey-search' }));
   await waitFor(() => expect(app.data!.config.hotkeys.search).toBe('Ctrl+Alt+K'));
+});
+
+it('localizes taken hotkey conflict notices in English UI mode', async () => {
+  setLocale('en');
+  call.mockImplementation(async (command, args) => {
+    if (command !== 'save_config') return;
+    if (args.config.hotkeys.capture === 'Ctrl+Alt+K') throw { code: 'configuration', message: '快捷键已被其他程序占用，请重新设置', action: 'hotkeys' };
+    return args.config;
+  });
+  const view = render(ShortcutsView);
+  await fireEvent.keyDown(view.getByLabelText('Capture translation shortcut'), { key: 'k', code: 'KeyK', ctrlKey: true, altKey: true });
+  await waitFor(() => expect(toast.warning).toHaveBeenCalledWith('Ctrl + Alt + K is used by another app; the previous shortcut was restored.', { id: 'hotkey-capture' }));
 });

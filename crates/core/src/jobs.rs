@@ -63,6 +63,15 @@ impl JobRegistry {
             .is_some_and(|current| !current.stop.is_cancelled())
     }
 
+    /// True while any lane starting with `prefix` has an active uncancelled job.
+    pub fn has_running_prefix(&self, prefix: &str) -> bool {
+        self.lanes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|(name, current)| name.starts_with(prefix) && !current.stop.is_cancelled())
+    }
+
     pub fn cancel(&self, lane: &str) {
         if let Some(ticket) = self
             .lanes

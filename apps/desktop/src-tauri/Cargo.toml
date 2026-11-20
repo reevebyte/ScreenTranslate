@@ -39,7 +39,6 @@ tokio.workspace = true
 tokio-util.workspace = true
 image.workspace = true
 tracing.workspace = true
-base64 = "0.22"
 tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]

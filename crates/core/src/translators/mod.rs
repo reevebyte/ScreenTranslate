@@ -5,7 +5,7 @@ mod web;
 
 use async_trait::async_trait;
 use reqwest::{Client, Response};
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, sync::OnceLock, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -13,6 +13,65 @@ use crate::{
     config::{ProviderConfig, ProviderId, validate_api_url},
     ports::TranslatorBackend,
 };
+
+fn build_client(allow_https_redirects: bool) -> Result<Client> {
+    let policy = if allow_https_redirects {
+        reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 5 {
+                attempt.stop()
+            } else if attempt.url().scheme() == "https" {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        })
+    } else {
+        reqwest::redirect::Policy::none()
+    };
+    Client::builder()
+        .timeout(Duration::from_secs(60))
+        .connect_timeout(Duration::from_secs(12))
+        .redirect(policy)
+        .user_agent("ScreenTranslate/2.0")
+        .build()
+        .map_err(|_| AppError::new(ErrorCode::Internal, "无法初始化网络客户端"))
+}
+
+fn shared_client(allow_https_redirects: bool) -> Result<Client> {
+    if allow_https_redirects {
+        static REDIRECT_CLIENT: OnceLock<Client> = OnceLock::new();
+        if let Some(client) = REDIRECT_CLIENT.get() {
+            return Ok(client.clone());
+        }
+        let client = build_client(true)?;
+        Ok(REDIRECT_CLIENT.get_or_init(|| client).clone())
+    } else {
+        static STRICT_CLIENT: OnceLock<Client> = OnceLock::new();
+        if let Some(client) = STRICT_CLIENT.get() {
+            return Ok(client.clone());
+        }
+        let client = build_client(false)?;
+        Ok(STRICT_CLIENT.get_or_init(|| client).clone())
+    }
+}
+
+pub(crate) fn apply_opencode_session(
+    request: reqwest::RequestBuilder,
+    base: &str,
+) -> reqwest::RequestBuilder {
+    if base.to_ascii_lowercase().contains("opencode") {
+        let session = format!(
+            "screentranslate-{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        request.header("x-opencode-session", session)
+    } else {
+        request
+    }
+}
 
 #[derive(Clone)]
 pub struct HttpTranslator {
@@ -33,13 +92,8 @@ impl HttpTranslator {
         if !options.base_url.is_empty() {
             validate_api_url(&options.base_url)?;
         }
-        let client = Client::builder()
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(12))
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent("ScreenTranslate/2.0")
-            .build()
-            .map_err(|_| AppError::new(ErrorCode::Internal, "无法初始化网络客户端"))?;
+        // Only BingFree's keyless web page may geo-redirect (e.g. cn.bing.com -> www.bing.com).
+        let client = shared_client(provider == ProviderId::BingFree)?;
         Ok(Self {
             client,
             provider,
@@ -62,16 +116,7 @@ impl HttpTranslator {
         if !self.key.is_empty() {
             request = request.bearer_auth(&self.key);
         }
-        if base.to_lowercase().contains("opencode") {
-            let session = format!(
-                "screentranslate-{:x}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_nanos())
-                    .unwrap_or(0)
-            );
-            request = request.header("x-opencode-session", session);
-        }
+        let request = apply_opencode_session(request, base);
         let value = json_response(request, &stop).await?;
         Ok(value
             .get("data")
@@ -221,7 +266,7 @@ pub(crate) async fn response_bytes(
                         .pointer("/error/message")
                         .and_then(|v| v.as_str())
                         .or_else(|| value.get("message").and_then(|v| v.as_str()))
-                        .map(|s| s.trim().to_string())
+                        .map(|s| s.trim().chars().take(240).collect::<String>())
                 })
         } else {
             None
