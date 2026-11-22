@@ -329,6 +329,14 @@ fn install_package(update: &Update, bytes: &[u8]) -> Result<()> {
     if bytes.starts_with(b"!<arch>\n") {
         return install_linux_deb(update, bytes);
     }
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("APPIMAGE").is_none() {
+        return Err(AppError::new(
+            ErrorCode::Unsupported,
+            "当前 Linux 运行方式不支持应用内替换安装，请前往发布页手动下载新版",
+        )
+        .action("releases"));
+    }
     update
         .install(bytes)
         .map_err(|_| AppError::new(ErrorCode::Internal, "无法启动更新安装，请重试"))?;
@@ -516,6 +524,12 @@ pub async fn install_update(app: AppHandle, window: WebviewWindow, version: Stri
     }
     {
         let state = app.state::<AppState>();
+        if state.rapid_ocr.is_downloading() {
+            return Err(AppError::new(
+                ErrorCode::InvalidInput,
+                "本地 OCR 模型正在下载中，请完成后再安装更新",
+            ));
+        }
         let sessions = lock(&state.sessions);
         install_allowed(
             !lock(&state.dirty_windows).is_empty(),

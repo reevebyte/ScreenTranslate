@@ -232,6 +232,31 @@ pub struct Bootstrap {
     pub updater_ready: bool,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalOcrInstallState {
+    NotInstalled,
+    Downloading,
+    Ready,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalOcrStatus {
+    pub supported: bool,
+    pub state: LocalOcrInstallState,
+    pub model_version: String,
+    #[ts(type = "number")]
+    pub installed_bytes: u64,
+    #[ts(type = "number")]
+    pub downloaded_bytes: u64,
+    #[ts(type = "number | null")]
+    pub total_bytes: Option<u64>,
+    pub worker_running: bool,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct MigrationReport {

@@ -114,8 +114,25 @@ pub enum Theme {
 pub enum OcrEngine {
     Youdao,
     System,
+    Rapid,
     Azure,
     Custom,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RapidOcrConfig {
+    /// Seconds of inactivity before stopping the background worker process to
+    /// release all memory. `0` keeps the worker alive until app exit or engine switch.
+    pub idle_unload_secs: u32,
+}
+
+impl Default for RapidOcrConfig {
+    fn default() -> Self {
+        Self {
+            idle_unload_secs: 180,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -145,6 +162,7 @@ pub struct OcrConfig {
     pub azure_endpoint: String,
     pub upscale: bool,
     pub custom: CustomOcrConfig,
+    pub rapid: RapidOcrConfig,
 }
 
 impl Default for OcrConfig {
@@ -156,6 +174,7 @@ impl Default for OcrConfig {
             azure_endpoint: String::new(),
             upscale: true,
             custom: CustomOcrConfig::default(),
+            rapid: RapidOcrConfig::default(),
         }
     }
 }
@@ -333,6 +352,9 @@ impl Config {
         }
         if self.ocr.custom.model.len() > 200 {
             return Err(invalid("OCR 模型名称过长"));
+        }
+        if self.ocr.rapid.idle_unload_secs > 3600 {
+            return Err(invalid("本地 OCR 空闲释放时间无效"));
         }
         Ok(())
     }
@@ -721,5 +743,23 @@ mod tests {
             with_v1.config.providers[&ProviderId::Anthropic].base_url,
             "https://api.anthropic.com/v1"
         );
+    }
+
+    #[test]
+    fn rapid_ocr_config_defaults_and_validates_idle_unload_window() {
+        let mut config = Config::default();
+        assert_eq!(config.ocr.engine, OcrEngine::Youdao);
+        assert_eq!(config.ocr.rapid.idle_unload_secs, 180);
+        config.ocr.engine = OcrEngine::Rapid;
+        config.ocr.rapid.idle_unload_secs = 0;
+        assert!(config.validate().is_ok());
+        config.ocr.rapid.idle_unload_secs = 3601;
+        assert!(config.validate().is_err());
+
+        // Old config files without `ocr.rapid` still deserialize with defaults.
+        let mut old = serde_json::to_value(Config::default()).unwrap();
+        old["ocr"].as_object_mut().unwrap().remove("rapid");
+        let parsed: Config = serde_json::from_value(old).unwrap();
+        assert_eq!(parsed.ocr.rapid.idle_unload_secs, 180);
     }
 }

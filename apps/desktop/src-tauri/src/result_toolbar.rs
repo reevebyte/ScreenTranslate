@@ -20,15 +20,24 @@ pub struct ToolbarState {
     pub image_moving: bool,
     #[serde(skip)]
     pub image_resizing: bool,
+    #[serde(skip)]
+    pub toolbar_moving: bool,
+    #[serde(skip)]
+    pub placing: bool,
 }
 
 impl ToolbarState {
     pub fn suppressed(&self) -> bool {
         self.quiet || self.image_moving || self.image_resizing
     }
+    pub fn matches_expected(&self, x: i32, y: i32) -> bool {
+        self.expected
+            .is_some_and(|(ex, ey)| (ex - x).abs() <= 2 && (ey - y).abs() <= 2)
+    }
     pub fn finish_image_gesture(&mut self) {
         self.image_moving = false;
         self.image_resizing = false;
+        self.toolbar_moving = false;
         self.detached = false;
     }
 }
@@ -175,5 +184,17 @@ mod tests {
         };
         let result = clamp(moved, area);
         assert_eq!((result.x, result.y), (552.0, 552.0));
+    }
+    #[test]
+    fn expected_position_tolerates_hidpi_rounding_drift() {
+        let state = ToolbarState {
+            expected: Some((1001, 501)),
+            ..Default::default()
+        };
+        assert!(state.matches_expected(1000, 500));
+        assert!(state.matches_expected(1003, 499));
+        assert!(!state.matches_expected(1004, 501));
+        assert!(!state.matches_expected(1001, 504));
+        assert!(!ToolbarState::default().matches_expected(0, 0));
     }
 }

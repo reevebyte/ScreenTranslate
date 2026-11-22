@@ -1,4 +1,4 @@
-export type ProviderBrand = 'openai'|'claude'|'google'|'googlecloud'|'azure'|'microsoft'|'nvidia'|'deepseek'|'ollama'|'bing'|'tencent'|'yandex'|'deepl'|'apple'|'windows'|'youdao'|'iciba'|'meta'|'qwen'|'mistral'|'zhipu'|'custom';
+export type ProviderBrand = 'openai'|'claude'|'google'|'googlecloud'|'azure'|'microsoft'|'nvidia'|'deepseek'|'ollama'|'bing'|'tencent'|'yandex'|'deepl'|'apple'|'windows'|'youdao'|'iciba'|'meta'|'qwen'|'mistral'|'zhipu'|'local_ocr'|'custom';
 export function providerBrand(id:string,endpoint=''):ProviderBrand {
   const known:Record<string,ProviderBrand>={google_free:'google',google:'googlecloud',anthropic:'claude',microsoft:'microsoft',microsoft_free:'microsoft',bing_free:'bing',tencent_free:'tencent',yandex_free:'yandex',iciba_free:'iciba',nvidia:'nvidia',deepl:'deepl',azure:'azure',youdao:'youdao'};
   if(id!=='openai')return known[id]??'custom';

@@ -1,5 +1,7 @@
 mod cache;
 mod commands;
+#[cfg(target_os = "linux")]
+mod linux_tray;
 mod pipeline;
 #[cfg(windows)]
 mod resize_outline;
@@ -23,11 +25,16 @@ mod visual_render;
 mod windows;
 
 use state::{AppState, lock};
+use std::path::PathBuf;
 use tauri::{
     Emitter, Manager,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
 };
+
+pub fn parse_ocr_worker_args() -> Option<PathBuf> {
+    screentrans_platform::rapid_ocr::parse_worker_args()
+}
 
 pub fn run() {
     // On a Wayland session run our windows through XWayland, as Electron-based
@@ -176,6 +183,11 @@ pub fn run() {
             commands::open_image,
             commands::configure_portal_shortcuts,
             commands::open_help,
+            commands::local_ocr_status,
+            commands::download_local_ocr,
+            commands::cancel_local_ocr_download,
+            commands::remove_local_ocr,
+            commands::unload_local_ocr_worker,
             updater::check_update,
             updater::download_update,
             updater::install_update,
@@ -206,13 +218,33 @@ pub fn run() {
                 && lock(&state.config).wayland_shortcuts
                 && !lock(&state.capabilities).global_shortcuts
             {
-                shortcuts::configure_portal(handle.clone(), keys);
+                shortcuts::configure_portal_at_startup(handle.clone(), keys);
             }
-            if !cfg!(feature = "e2e")
-                && let Err(error) = setup_tray(&handle)
-            {
-                lock(&state.capabilities).tray = false;
-                state.warning(&handle, format!("系统托盘不可用，将保留主窗口：{error}"));
+            let tray_supported = lock(&state.capabilities).tray;
+            if !cfg!(feature = "e2e") && tray_supported {
+                #[cfg(target_os = "linux")]
+                let tray_ready = match linux_tray::setup(&handle) {
+                    Ok(tray_handle) => {
+                        *lock(&handle.state::<update_ui::UpdateUi>().linux_tray) =
+                            Some(tray_handle);
+                        lock(&state.capabilities).tray = true;
+                        let _ = handle.emit("capabilities-changed", ());
+                        let _ = handle.emit("tray-ready", ());
+                        true
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            "Native Linux StatusNotifierItem tray unavailable, falling back to AppIndicator: {error}"
+                        );
+                        false
+                    }
+                };
+                #[cfg(not(target_os = "linux"))]
+                let tray_ready = false;
+                if !tray_ready && let Err(error) = setup_tray(&handle) {
+                    lock(&state.capabilities).tray = false;
+                    state.warning(&handle, format!("系统托盘不可用，将保留主窗口：{error}"));
+                }
             }
             let arguments: Vec<_> = std::env::args().collect();
             let background = arguments.iter().any(|arg| arg == "--background")
@@ -260,6 +292,12 @@ fn handle_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
             api.prevent_exit();
         }
         tauri::RunEvent::Exit => {
+            #[cfg(target_os = "macos")]
+            screentrans_platform::set_crosshair_cursor(false);
+            if let Some(state) = app.try_state::<AppState>() {
+                state.rapid_ocr.shutdown_blocking();
+            }
+            shortcuts::cleanup(app);
             windows::restore_selection_fade();
         }
         #[cfg(target_os = "macos")]

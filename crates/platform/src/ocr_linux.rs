@@ -31,7 +31,7 @@ pub async fn recognize(
         .await
         .map_err(|_| unavailable())?
         .1;
-    let requested: Vec<_> = requested
+    let mapped: Vec<_> = requested
         .iter()
         .map(|code| match code.as_str() {
             "zh-Hans-CN" | "zh-Hans" | "zh-CN" => "chi_sim",
@@ -45,10 +45,14 @@ pub async fn recognize(
             "ru-RU" | "ru" => "rus",
             other => other,
         })
+        .collect();
+    let available: Vec<_> = mapped
+        .iter()
+        .copied()
         .filter(|code| installed.iter().any(|installed| installed == code))
         .collect();
-    if requested.is_empty() {
-        return Err(unavailable());
+    if available.is_empty() {
+        return Err(unavailable_for(&mapped, &installed));
     }
     let mut png = Cursor::new(Vec::new());
     image
@@ -56,7 +60,7 @@ pub async fn recognize(
         .map_err(|_| unavailable())?;
     // No shell expansion; language names are restricted to the installed engine's own list.
     let mut child = tokio::process::Command::new("tesseract")
-        .args(["stdin", "stdout", "-l", &requested.join("+"), "tsv"])
+        .args(["stdin", "stdout", "-l", &available.join("+"), "tsv"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -82,9 +86,67 @@ pub async fn recognize(
 fn unavailable() -> AppError {
     AppError::new(
         ErrorCode::OcrUnavailable,
-        "请安装 Tesseract 5 及所选语言包：tesseract-ocr-eng、tesseract-ocr-chi-sim",
+        "请安装 Tesseract 5 及所需语言包（如 eng、chi_sim）",
     )
     .action("ocr")
+}
+
+fn unavailable_for(requested: &[&str], installed: &[String]) -> AppError {
+    if installed.is_empty() || requested.is_empty() {
+        return unavailable();
+    }
+    let missing: Vec<_> = requested
+        .iter()
+        .copied()
+        .filter(|code| !installed.iter().any(|item| item == code))
+        .collect();
+    if missing.is_empty() {
+        return unavailable();
+    }
+    AppError::new(
+        ErrorCode::OcrUnavailable,
+        format!(
+            "未找到所需 Tesseract 语言包（{}）；请安装对应语言数据",
+            missing.join("、")
+        ),
+    )
+    .action("ocr")
+}
+
+fn is_cjk_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{3000}'..='\u{303F}'
+            | '\u{3040}'..='\u{309F}'
+            | '\u{30A0}'..='\u{30FF}'
+            | '\u{3400}'..='\u{4DBF}'
+            | '\u{4E00}'..='\u{9FFF}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{FF00}'..='\u{FFEF}'
+    )
+}
+
+fn is_cjk_punctuation(ch: char) -> bool {
+    matches!(ch, '\u{3000}'..='\u{303F}' | '\u{FF01}'..='\u{FF0F}' | '\u{FF1A}'..='\u{FF20}' | '\u{FF3B}'..='\u{FF40}' | '\u{FF5B}'..='\u{FF65}')
+}
+
+fn join_ocr_words(words: &[&str]) -> String {
+    let mut joined = String::new();
+    for word in words {
+        if word.is_empty() {
+            continue;
+        }
+        if let (Some(prev), Some(next)) = (joined.chars().last(), word.chars().next()) {
+            let omit_space = (is_cjk_char(prev) && is_cjk_char(next))
+                || is_cjk_punctuation(prev)
+                || is_cjk_punctuation(next);
+            if !omit_space {
+                joined.push(' ');
+            }
+        }
+        joined.push_str(word);
+    }
+    joined
 }
 
 fn parse_tsv(tsv: &str) -> Result<Vec<OcrLine>> {
@@ -123,13 +185,10 @@ fn parse_tsv(tsv: &str) -> Result<Vec<OcrLine>> {
         .into_values()
         .filter_map(|words| {
             let bounds = screentrans_core::layout::union(words.iter().map(|(rect, _, _)| *rect))?;
+            let tokens: Vec<_> = words.iter().map(|(_, text, _)| text.as_str()).collect();
             Some(OcrLine {
                 bounds,
-                text: words
-                    .iter()
-                    .map(|(_, text, _)| text.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" "),
+                text: join_ocr_words(&tokens),
                 confidence: Some(
                     words
                         .iter()
@@ -150,5 +209,29 @@ mod tests {
         let result = parse_tsv("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n5\t1\t1\t1\t1\t1\t10\t20\t40\t15\t95\tHello\n5\t1\t1\t1\t1\t2\t55\t20\t40\t15\t90\tworld").unwrap();
         assert_eq!(result[0].text, "Hello world");
         assert_eq!(result[0].bounds.width, 85.0);
+    }
+
+    #[test]
+    fn joins_cjk_words_without_spurious_spaces_and_keeps_latin_spaces() {
+        assert_eq!(
+            join_ocr_words(&["你", "好", "，", "世", "界"]),
+            "你好，世界"
+        );
+        assert_eq!(
+            join_ocr_words(&["使", "用", "ScreenTranslate", "进", "行", "翻", "译"]),
+            "使用 ScreenTranslate 进行翻译"
+        );
+        assert_eq!(join_ocr_words(&["Hello", "world"]), "Hello world");
+        assert_eq!(
+            join_ocr_words(&["测试", "（", "Linux", "）"]),
+            "测试（Linux）"
+        );
+    }
+
+    #[test]
+    fn unavailable_error_names_missing_tesseract_languages() {
+        let err = unavailable_for(&["chi_sim", "eng"], &["eng".into()]);
+        assert!(err.message.contains("chi_sim"));
+        assert!(!err.message.contains("eng"));
     }
 }

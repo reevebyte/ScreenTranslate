@@ -4,9 +4,9 @@ use crate::{
     windows,
 };
 use screentrans_core::{
-    AppError, Bootstrap, CaptureFrame, ErrorCode, FrameMetadata, JobStage, MigrationReport,
-    PlatformCapabilities, Rect, Result, TranslationSession,
-    config::{Config, LANGUAGES, ProviderId, import_legacy},
+    AppError, Bootstrap, CaptureFrame, ErrorCode, FrameMetadata, JobStage, LocalOcrStatus,
+    MigrationReport, PlatformCapabilities, Rect, Result, TranslationSession,
+    config::{Config, LANGUAGES, OcrEngine, ProviderId, import_legacy},
     ports::TranslatorBackend,
     translators::HttpTranslator,
 };
@@ -323,12 +323,46 @@ pub async fn copy_text(app: AppHandle, text: String) -> Result<()> {
         let _ = app;
         Ok(())
     }
-    #[cfg(not(feature = "e2e"))]
+    #[cfg(all(target_os = "linux", not(feature = "e2e")))]
+    {
+        if app.clipboard().write_text(text.clone()).is_ok() {
+            return Ok(());
+        }
+        if screentrans_platform::is_wayland() && write_wayland_clipboard(&text) {
+            return Ok(());
+        }
+        Err(AppError::new(ErrorCode::Internal, "无法写入系统剪贴板"))
+    }
+    #[cfg(all(not(target_os = "linux"), not(feature = "e2e")))]
     {
         app.clipboard()
             .write_text(text)
             .map_err(|_| AppError::new(ErrorCode::Internal, "无法写入系统剪贴板"))
     }
+}
+
+#[cfg(all(target_os = "linux", not(feature = "e2e")))]
+fn write_wayland_clipboard(text: &str) -> bool {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let Ok(mut child) = Command::new("wl-copy")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    if let Some(mut stdin) = child.stdin.take()
+        && stdin.write_all(text.as_bytes()).is_err()
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        return false;
+    }
+    child.wait().is_ok_and(|status| status.success())
 }
 
 #[tauri::command]
@@ -421,7 +455,7 @@ pub async fn begin_toolbar_drag(app: AppHandle, window: WebviewWindow) -> Result
 #[tauri::command]
 pub async fn finish_toolbar_drag(app: AppHandle, window: WebviewWindow) -> Result<()> {
     result_only(&window)?;
-    crate::result_tools::clamp_toolbar(&app)
+    crate::result_tools::finish_drag(&app).await
 }
 #[tauri::command]
 pub async fn quiet_result_toolbar(
@@ -571,6 +605,17 @@ fn save_configuration(app: &AppHandle, config: Config) -> Result<()> {
             sessions.visual.job.error = None;
         }
         *lock(&state.config) = config.clone();
+    }
+    state
+        .rapid_ocr
+        .set_idle_unload_secs(config.ocr.rapid.idle_unload_secs);
+    if old.ocr.engine == OcrEngine::Rapid && config.ocr.engine != OcrEngine::Rapid {
+        let rapid = std::sync::Arc::clone(&state.rapid_ocr);
+        let handle = app.clone();
+        tauri::async_runtime::spawn(async move {
+            rapid.shutdown_worker().await;
+            let _ = handle.emit_to("main", "local-ocr-status", rapid.status());
+        });
     }
     if translation_changed {
         state.publish_text(app);
@@ -829,10 +874,7 @@ pub async fn configure_portal_shortcuts(app: AppHandle, window: WebviewWindow) -
             "当前环境无需配置 Wayland 快捷键",
         ));
     }
-    let mut config = lock(&app.state::<AppState>().config).clone();
-    config.wayland_shortcuts = true;
-    let keys = config.hotkeys.clone();
-    save_configuration(&app, config)?;
+    let keys = lock(&app.state::<AppState>().config).hotkeys.clone();
     shortcuts::configure_portal(app, keys);
     Ok(())
 }
@@ -857,4 +899,67 @@ pub async fn open_help(app: AppHandle, topic: String) -> Result<()> {
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|_| AppError::new(ErrorCode::Internal, "无法打开系统设置或帮助页面"))
+}
+
+#[tauri::command]
+pub async fn local_ocr_status(app: AppHandle) -> Result<LocalOcrStatus> {
+    Ok(app.state::<AppState>().rapid_ocr.status())
+}
+
+#[tauri::command]
+pub async fn download_local_ocr(app: AppHandle, window: WebviewWindow) -> Result<LocalOcrStatus> {
+    main_only(&window)?;
+    let rapid = std::sync::Arc::clone(&app.state::<AppState>().rapid_ocr);
+    let emit_app = app.clone();
+    rapid
+        .download(move |status| {
+            let _ = emit_app.emit_to("main", "local-ocr-status", status);
+        })
+        .await
+}
+
+#[tauri::command]
+pub async fn cancel_local_ocr_download(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<LocalOcrStatus> {
+    main_only(&window)?;
+    let rapid = std::sync::Arc::clone(&app.state::<AppState>().rapid_ocr);
+    rapid.cancel_download();
+    let status = rapid.status();
+    let _ = app.emit_to("main", "local-ocr-status", status.clone());
+    Ok(status)
+}
+
+#[tauri::command]
+pub async fn remove_local_ocr(app: AppHandle, window: WebviewWindow) -> Result<LocalOcrStatus> {
+    main_only(&window)?;
+    let state = app.state::<AppState>();
+    let current = lock(&state.config).clone();
+    if current.ocr.engine == OcrEngine::Rapid {
+        let mut fallback = current;
+        fallback.ocr.engine = if lock(&state.capabilities).local_ocr {
+            OcrEngine::System
+        } else {
+            OcrEngine::Youdao
+        };
+        save_configuration(&app, fallback)?;
+    }
+    let rapid = std::sync::Arc::clone(&state.rapid_ocr);
+    let status = rapid.remove().await?;
+    let _ = app.emit_to("main", "local-ocr-status", status.clone());
+    Ok(status)
+}
+
+#[tauri::command]
+pub async fn unload_local_ocr_worker(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<LocalOcrStatus> {
+    main_only(&window)?;
+    let rapid = std::sync::Arc::clone(&app.state::<AppState>().rapid_ocr);
+    rapid.shutdown_worker().await;
+    let status = rapid.status();
+    let _ = app.emit_to("main", "local-ocr-status", status.clone());
+    Ok(status)
 }

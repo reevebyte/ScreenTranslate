@@ -20,6 +20,60 @@ fn portal_error() -> AppError {
     .action("permissions")
 }
 
+fn portal_shortcuts_unsupported() -> AppError {
+    AppError::new(
+        ErrorCode::Unsupported,
+        "当前桌面未提供全局快捷键 Portal 服务；可在桌面配置自定义快捷键执行 --capture",
+    )
+    .action("permissions")
+}
+
+fn portal_shortcuts_unbound() -> AppError {
+    AppError::new(
+        ErrorCode::Configuration,
+        "桌面快捷键服务已响应，但尚未分配快捷键；请在桌面设置中绑定或配置自定义快捷键执行 --capture",
+    )
+    .action("hotkeys")
+}
+
+fn classify_portal_error_message(message: &str) -> AppError {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("serviceunknown")
+        || lower.contains("unknowninterface")
+        || lower.contains("unknownmethod")
+        || lower.contains("unknownobject")
+        || lower.contains("no such interface")
+        || lower.contains("not supported")
+    {
+        return portal_shortcuts_unsupported();
+    }
+    if lower.contains("notallowed") || lower.contains("not allowed") || lower.contains("denied") {
+        return AppError::new(
+            ErrorCode::PermissionDenied,
+            "桌面未授权全局快捷键，可在桌面设置中允许或配置桌面自定义快捷键",
+        )
+        .action("permissions");
+    }
+    AppError::new(
+        ErrorCode::Internal,
+        "无法连接桌面快捷键服务，可稍后重试或配置桌面自定义快捷键",
+    )
+    .action("permissions")
+}
+
+fn classify_portal_error(error: &ashpd::Error) -> AppError {
+    match error {
+        ashpd::Error::Response(ResponseError::Cancelled)
+        | ashpd::Error::Portal(ashpd::PortalError::Cancelled(_)) => AppError::cancelled(),
+        ashpd::Error::Portal(ashpd::PortalError::NotAllowed(_)) => AppError::new(
+            ErrorCode::PermissionDenied,
+            "桌面未授权全局快捷键，可在桌面设置中允许或配置桌面自定义快捷键",
+        )
+        .action("permissions"),
+        other => classify_portal_error_message(&other.to_string()),
+    }
+}
+
 fn shortcut_error(value: &str) -> AppError {
     AppError::new(ErrorCode::Configuration, format!("快捷键格式无效：{value}")).action("hotkeys")
 }
@@ -210,6 +264,99 @@ fn desktop_capture_error() -> AppError {
     .action("permissions")
 }
 
+fn parse_slurp_geometry(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let (origin, size) = trimmed.split_once(' ')?;
+    let (x, y) = origin.split_once(',')?;
+    let (w, h) = size.split_once('x')?;
+    let x: i32 = x.parse().ok()?;
+    let y: i32 = y.parse().ok()?;
+    let w: u32 = w.parse().ok()?;
+    let h: u32 = h.parse().ok()?;
+    if w == 0 || h == 0 {
+        return None;
+    }
+    Some(format!("{x},{y} {w}x{h}"))
+}
+
+/// Fast-path region screenshot for wlroots / Hyprland / Sway using `slurp` +
+/// `grim` (stdout PNG, zero temp files, no Portal permission dialogs).
+/// Returns `None` when `slurp` or `grim` is not installed so callers can fall
+/// back seamlessly to the XDG Screenshot portal.
+pub async fn wlroots_screenshot(stop: CancellationToken) -> Option<Result<CaptureFrame>> {
+    if !super::is_tiling_wayland_compositor() {
+        return None;
+    }
+    let slurp_child = match tokio::process::Command::new("slurp")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => return None,
+    };
+    let slurp_output = tokio::select! {
+        _ = stop.cancelled() => return Some(Err(AppError::cancelled())),
+        res = slurp_child.wait_with_output() => match res {
+            Ok(output) => output,
+            Err(_) => return None,
+        },
+    };
+    if !slurp_output.status.success() {
+        // User pressed Escape or right-clicked in slurp.
+        return Some(Err(AppError::cancelled()));
+    }
+    let geometry = match parse_slurp_geometry(&String::from_utf8_lossy(&slurp_output.stdout)) {
+        Some(geom) => geom,
+        None => return Some(Err(AppError::cancelled())),
+    };
+    let grim_child = match tokio::process::Command::new("grim")
+        .args(["-t", "png", "-g", &geometry, "-"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => return None,
+    };
+    let grim_output = tokio::select! {
+        _ = stop.cancelled() => return Some(Err(AppError::cancelled())),
+        res = grim_child.wait_with_output() => match res {
+            Ok(output) => output,
+            Err(_) => return Some(Err(portal_error())),
+        },
+    };
+    if !grim_output.status.success() || grim_output.stdout.is_empty() {
+        return None;
+    }
+    let png_bytes = grim_output.stdout;
+    let decoded = tokio::task::spawn_blocking(move || {
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(16000);
+        limits.max_image_height = Some(16000);
+        limits.max_alloc = Some(192 * 1024 * 1024);
+        let mut reader = image::ImageReader::new(std::io::Cursor::new(png_bytes))
+            .with_guessed_format()
+            .ok()?;
+        reader.limits(limits);
+        Some(reader.decode().ok()?.to_rgba8())
+    })
+    .await
+    .ok()
+    .flatten()?;
+    Some(Ok(CaptureFrame {
+        image: decoded,
+        screen_bounds: None,
+        scale_factor: 1.0,
+    }))
+}
+
 pub async fn screenshot(stop: CancellationToken) -> Result<CaptureFrame> {
     let started_at = SystemTime::now();
     let request = Screenshot::request().interactive(true).send();
@@ -236,6 +383,12 @@ pub async fn screenshot(stop: CancellationToken) -> Result<CaptureFrame> {
             if let Some(ref path) = portal_path
                 && let Some(decoded) = decode_image_file(path)
             {
+                let created_now = std::fs::metadata(path)
+                    .and_then(|metadata| metadata.modified())
+                    .is_ok_and(|modified| modified + Duration::from_secs(2) >= started_at);
+                if created_now {
+                    let _ = std::fs::remove_file(path);
+                }
                 return Ok(decoded);
             }
             if let Some(decoded) = find_recent_screenshot(started_at) {
@@ -259,21 +412,23 @@ pub async fn shortcuts(
     handler: Arc<dyn Fn(String) + Send + Sync>,
     stop: CancellationToken,
 ) -> Result<()> {
-    let portal = GlobalShortcuts::new().await.map_err(|_| portal_error())?;
+    let portal = GlobalShortcuts::new()
+        .await
+        .map_err(|err| classify_portal_error(&err))?;
     let session = portal
         .create_session(Default::default())
         .await
-        .map_err(|_| portal_error())?;
+        .map_err(|err| classify_portal_error(&err))?;
     // Session exposes its object path through Serialize; path() is private in ashpd.
     let session_path = serde_json::to_value(&session)
-        .map_err(|_| portal_error())?
+        .map_err(|_| portal_shortcuts_unsupported())?
         .as_str()
-        .ok_or_else(portal_error)?
+        .ok_or_else(portal_shortcuts_unsupported)?
         .to_owned();
     let mut events = portal
         .receive_activated()
         .await
-        .map_err(|_| portal_error())?;
+        .map_err(|err| classify_portal_error(&err))?;
     let entries = [
         ("capture", "截图翻译", hotkeys.capture),
         ("toggle", "显示或隐藏译文", hotkeys.toggle),
@@ -298,16 +453,19 @@ pub async fn shortcuts(
     let bound = tokio::select! {
         _ = stop.cancelled() => { let _ = session.close().await; return Ok(()); }
         result = binding => result
-    .map_err(|_| portal_error())?
-    .map_err(|_| portal_error())?
-    .response()
-    .map_err(|_| portal_error())?,
+            .map_err(|_| AppError::new(ErrorCode::Internal, "等待桌面快捷键授权超时，请重试").action("hotkeys"))?
+            .map_err(|err| classify_portal_error(&err))?
+            .response()
+            .map_err(|err| classify_portal_error(&err))?,
     };
     if bound.shortcuts().is_empty() {
         let _ = session.close().await;
-        return Err(portal_error());
+        return Err(portal_shortcuts_unbound());
     }
-    let closed = session.receive_closed().await.map_err(|_| portal_error())?;
+    let closed = session
+        .receive_closed()
+        .await
+        .map_err(|err| classify_portal_error(&err))?;
     futures_util::pin_mut!(closed);
     handler("ready".into());
     loop {
@@ -326,7 +484,22 @@ pub async fn shortcuts(
 
 #[cfg(test)]
 mod tests {
-    use super::preferred_trigger;
+    use super::{classify_portal_error_message, parse_slurp_geometry, preferred_trigger};
+    use screentrans_core::ErrorCode;
+
+    #[test]
+    fn parses_valid_slurp_geometry_and_rejects_empty_or_malformed() {
+        assert_eq!(
+            parse_slurp_geometry("120,240 640x360\n").as_deref(),
+            Some("120,240 640x360")
+        );
+        assert_eq!(
+            parse_slurp_geometry("-1920,0 800x400").as_deref(),
+            Some("-1920,0 800x400")
+        );
+        assert_eq!(parse_slurp_geometry("10,20 0x100"), None);
+        assert_eq!(parse_slurp_geometry("selection cancelled"), None);
+    }
 
     #[test]
     fn portal_triggers_use_the_freedesktop_shortcut_language() {
@@ -343,5 +516,25 @@ mod tests {
             Some("LOGO+SHIFT+F12")
         );
         assert_eq!(preferred_trigger("Ctrl+Unknown"), None);
+    }
+
+    #[test]
+    fn classifies_portal_error_messages_accurately() {
+        assert_eq!(
+            classify_portal_error_message("org.freedesktop.DBus.Error.UnknownInterface").code,
+            ErrorCode::Unsupported
+        );
+        assert_eq!(
+            classify_portal_error_message("org.freedesktop.DBus.Error.ServiceUnknown").code,
+            ErrorCode::Unsupported
+        );
+        assert_eq!(
+            classify_portal_error_message("Portal error: NotAllowed").code,
+            ErrorCode::PermissionDenied
+        );
+        assert_eq!(
+            classify_portal_error_message("transient io error").code,
+            ErrorCode::Internal
+        );
     }
 }

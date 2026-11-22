@@ -45,7 +45,7 @@ impl CaptureBackend for SystemCapture {
         // (on a Wayland session it tries GNOME Shell, the portal and wlroots).
         #[cfg(target_os = "linux")]
         if super::native_wayland_windows() {
-            return super::portal::screenshot(stop).await;
+            return picker_screenshot(stop).await;
         }
         let capture = tokio::task::spawn_blocking(move || {
             let monitors = xcap::Monitor::all().map_err(|_| capture_error())?;
@@ -103,7 +103,14 @@ impl SystemCapture {
                         return Ok(frames);
                     }
                 }
-                Err(error) if error.code == ErrorCode::Cancelled => return Err(error),
+                Err(error)
+                    if matches!(
+                        error.code,
+                        ErrorCode::Cancelled | ErrorCode::PermissionDenied | ErrorCode::Unsupported
+                    ) =>
+                {
+                    return Err(error);
+                }
                 Err(_) => {}
             }
             // xcap serialises its Wayland captures on D-Bus, so go one by one.
@@ -134,11 +141,17 @@ impl SystemCapture {
     }
 }
 
-/// Lets the compositor's own screenshot UI pick the region (Wayland portal).
+/// Lets the compositor's own screenshot UI pick the region (wlroots `slurp` +
+/// `grim` fast path when available, otherwise the Wayland Screenshot portal).
 /// The frame has no screen position, so its result opens centred.
 pub async fn picker_screenshot(stop: CancellationToken) -> Result<CaptureFrame> {
     #[cfg(target_os = "linux")]
-    return super::portal::screenshot(stop).await;
+    {
+        if let Some(result) = super::portal::wlroots_screenshot(stop.clone()).await {
+            return result;
+        }
+        super::portal::screenshot(stop).await
+    }
     #[cfg(not(target_os = "linux"))]
     {
         let _ = stop;
@@ -184,7 +197,8 @@ pub fn crop_monitors(
     let scale_x = full_w / span_x;
     let scale_y = full_h / span_y;
     // A different aspect ratio means the screenshot does not show this layout.
-    if (scale_x / scale_y - 1.0).abs() > 0.02 {
+    // Allow a small rounding margin for fractional Wayland display scaling.
+    if (scale_x / scale_y - 1.0).abs() > 0.04 {
         return None;
     }
     monitors
@@ -310,6 +324,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(frames[0].image.dimensions(), (1920, 1080));
+    }
+
+    #[test]
+    fn fractional_scaling_rounding_still_matches_monitor_layout() {
+        // 1366x768 at ~1.25x may round slightly differently on X vs Y in compositors.
+        let frames = crop_monitors(
+            &desktop(1708, 970),
+            &[monitor("a", 0.0, 0.0, 1366.0, 768.0)],
+        )
+        .unwrap();
+        assert_eq!(frames[0].image.dimensions(), (1366, 768));
     }
 
     #[test]

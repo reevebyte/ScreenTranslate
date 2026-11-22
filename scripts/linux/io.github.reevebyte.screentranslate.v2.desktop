@@ -1,0 +1,23 @@
+[Desktop Entry]
+Type=Application
+Name=ScreenTranslate
+Comment=Lightweight screenshot and text translation tool
+Comment[zh_CN]=轻量、专注的跨平台截图翻译工具
+Exec=screentranslate %U
+Icon=io.github.reevebyte.screentranslate.v2
+Terminal=false
+Categories=Utility;Office;Translation;
+Keywords=translate;ocr;screenshot;翻译;截图;
+StartupNotify=true
+StartupWMClass=screentranslate
+Actions=Capture;Quick;
+
+[Desktop Action Capture]
+Name=Capture and Translate
+Name[zh_CN]=截图翻译
+Exec=screentranslate --capture
+
+[Desktop Action Quick]
+Name=Quick Text Translate
+Name[zh_CN]=快速文字翻译
+Exec=screentranslate --quick

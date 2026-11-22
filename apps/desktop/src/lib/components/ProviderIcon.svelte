@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { PlugZap } from '$lib/icons';
+  import { PlugZap, ScanLine } from '$lib/icons';
   import type { ProviderBrand } from '$lib/provider-brand';
   import openai from '$lib/assets/providers/openai.svg?raw';
   import claude from '$lib/assets/providers/claude-color.svg?raw';
@@ -30,6 +30,7 @@
 <span class="provider-icon" class:provider-icon-featured={featured} aria-hidden="true" data-brand={brand}>
   {#if brand==='youdao'||brand==='iciba'}<img src={brand==='youdao'?youdao:iciba} alt=""/>
   {:else if brand==='windows'}<svg viewBox="0 0 24 24" fill="#0078d4"><path d="M2 2h9v9H2zm11 0h9v9h-9zM2 13h9v9H2zm11 0h9v9h-9z"/></svg>
+  {:else if brand==='local_ocr'}<ScanLine size={20}/>
   {:else if artwork[brand]}{@html svg}
   {:else}<PlugZap size={20}/>{/if}
 </span>

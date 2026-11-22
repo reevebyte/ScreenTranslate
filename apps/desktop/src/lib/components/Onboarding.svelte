@@ -38,7 +38,7 @@
       <div class="welcome-actions"><Button onclick={() => start(false)}>{t("开始使用")}<ArrowRight size={16}/></Button></div>
       <div class="welcome-footer">
         <button class="text-action" onclick={() => start(true)}>{t("配置服务")}</button>
-        <span class="welcome-privacy">{#if app.data?.config.ocr.engine === 'system'}<Monitor size={14}/>{t("本机识别")}{:else}<Globe size={14}/>{app.data?.config.ocr.engine === 'custom' ? t("自定义 OCR 接口") : app.data?.config.ocr.engine === 'azure' ? t("Azure 云端识别") : t("有道云端识别")}{/if}</span>
+        <span class="welcome-privacy">{#if app.data?.config.ocr.engine === 'system' || app.data?.config.ocr.engine === 'rapid'}<Monitor size={14}/>{t("本机识别")}{:else}<Globe size={14}/>{app.data?.config.ocr.engine === 'custom' ? t("自定义 OCR 接口") : app.data?.config.ocr.engine === 'azure' ? t("Azure 云端识别") : t("有道云端识别")}{/if}</span>
       </div>
     </Dialog.Content>
   </Dialog.Portal>

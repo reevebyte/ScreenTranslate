@@ -172,11 +172,23 @@ char *st_recognize(const unsigned char *png, size_t length, const char *language
     }
 }
 
+static void st_on_main_sync(dispatch_block_t block) {
+    if ([NSThread isMainThread]) {
+        block();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), block);
+    }
+}
+
+static BOOL g_crosshair_active = NO;
+
 void st_activate_app(void) {
     @autoreleasepool {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-            [NSApp activateIgnoringOtherApps:YES];
+        st_on_main_sync(^{
+            @autoreleasepool {
+                [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+                [NSApp activateIgnoringOtherApps:YES];
+            }
         });
     }
 }
@@ -191,10 +203,44 @@ void st_hide_dock_icon(void) {
 
 void st_focus_app(void) {
     @autoreleasepool {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [NSApp activateIgnoringOtherApps:YES];
+        st_on_main_sync(^{
+            @autoreleasepool {
+                [NSApp activateIgnoringOtherApps:YES];
+            }
         });
     }
+}
+
+void st_prepare_selection_window(void *windowPtr) {
+    if (!windowPtr) return;
+    NSWindow *window = (__bridge NSWindow *)windowPtr;
+    st_on_main_sync(^{
+        @autoreleasepool {
+            [window setLevel:NSScreenSaverWindowLevel];
+            [window setCollectionBehavior:
+                NSWindowCollectionBehaviorCanJoinAllSpaces |
+                NSWindowCollectionBehaviorFullScreenAuxiliary |
+                NSWindowCollectionBehaviorStationary];
+            [window setAcceptsMouseMovedEvents:YES];
+        }
+    });
+}
+
+void st_set_crosshair_cursor(bool active) {
+    st_on_main_sync(^{
+        @autoreleasepool {
+            if (active) {
+                if (!g_crosshair_active) {
+                    [[NSCursor crosshairCursor] push];
+                    g_crosshair_active = YES;
+                }
+                [[NSCursor crosshairCursor] set];
+            } else if (g_crosshair_active) {
+                [NSCursor pop];
+                g_crosshair_active = NO;
+            }
+        }
+    });
 }
 
 bool st_mouse_button_down(void) {
@@ -205,13 +251,25 @@ bool st_mouse_button_down(void) {
 
 void st_attach_child_window(void *parentPtr, void *childPtr) {
     if (!parentPtr || !childPtr) return;
-    // Bridge before dispatch_async so ARC retains both windows across the queue hop.
     NSWindow *parent = (__bridge NSWindow *)parentPtr;
     NSWindow *child = (__bridge NSWindow *)childPtr;
-    dispatch_async(dispatch_get_main_queue(), ^{
+    st_on_main_sync(^{
         @autoreleasepool {
             if (child.parentWindow != parent) {
                 [parent addChildWindow:child ordered:NSWindowAbove];
+            }
+        }
+    });
+}
+
+void st_detach_child_window(void *parentPtr, void *childPtr) {
+    if (!parentPtr || !childPtr) return;
+    NSWindow *parent = (__bridge NSWindow *)parentPtr;
+    NSWindow *child = (__bridge NSWindow *)childPtr;
+    st_on_main_sync(^{
+        @autoreleasepool {
+            if (child.parentWindow == parent) {
+                [parent removeChildWindow:child];
             }
         }
     });

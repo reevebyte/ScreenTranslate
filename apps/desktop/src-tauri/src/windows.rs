@@ -68,6 +68,19 @@ fn reveal(window: &tauri::WebviewWindow) -> Result<()> {
     if window.is_minimized().unwrap_or(false) {
         let _ = window.unminimize();
     }
+    #[cfg(target_os = "macos")]
+    {
+        if window.label() == "main" {
+            screentrans_platform::activate_app();
+        } else {
+            screentrans_platform::focus_app();
+        }
+        if window.label().starts_with("selection-")
+            && let Ok(ns_window) = window.ns_window()
+        {
+            screentrans_platform::prepare_selection_window(ns_window);
+        }
+    }
     window.show().map_err(|_| window_error())?;
     if window.label() != "result-tools"
         && (!window.label().starts_with("selection-") || contains_cursor(window))
@@ -75,10 +88,8 @@ fn reveal(window: &tauri::WebviewWindow) -> Result<()> {
         let _ = window.set_focus();
     }
     #[cfg(target_os = "macos")]
-    if window.label() == "main" {
-        screentrans_platform::activate_app();
-    } else {
-        screentrans_platform::focus_app();
+    if window.label().starts_with("selection-") {
+        screentrans_platform::set_crosshair_cursor(true);
     }
     Ok(())
 }
@@ -346,11 +357,11 @@ fn system_dark() -> bool {
         }
         light == 0
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         screentrans_platform::system_dark()
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
         false
     }
@@ -720,7 +731,7 @@ fn selection_window(app: &AppHandle, label: &str) -> Result<tauri::WebviewWindow
         screentrans_core::config::Theme::Light => "light",
         screentrans_core::config::Theme::System => "system",
     };
-    builder(app, label, &format!("selection&theme={theme_name}"))
+    let window = builder(app, label, &format!("selection&theme={theme_name}"))
         .decorations(false)
         .transparent(true)
         .shadow(false)
@@ -728,7 +739,12 @@ fn selection_window(app: &AppHandle, label: &str) -> Result<tauri::WebviewWindow
         .always_on_top(true)
         .skip_taskbar(true)
         .build()
-        .map_err(|_| window_error())
+        .map_err(|_| window_error())?;
+    #[cfg(target_os = "macos")]
+    if let Ok(ns_window) = window.ns_window() {
+        screentrans_platform::prepare_selection_window(ns_window);
+    }
+    Ok(window)
 }
 
 pub fn prewarm_selection(app: &AppHandle) {
@@ -833,9 +849,6 @@ pub fn show_result(app: &AppHandle, frame: &FrameMetadata) -> Result<()> {
     lock(&app.state::<AppState>().window_lifecycle).forget("result");
     let _ = window.hide();
     let _ = crate::result_tools::hide(app);
-    if !screentrans_platform::native_wayland_windows() {
-        let _ = crate::result_tools::prepare(app)?;
-    }
     *lock(&app.state::<AppState>().result_frame_id) = frame.id.clone();
     let overlay = lock(&app.state::<AppState>().capabilities).overlay;
     let mut layout = if let Some(bounds) = frame.screen_bounds.filter(|_| overlay) {
@@ -853,6 +866,9 @@ pub fn show_result(app: &AppHandle, frame: &FrameMetadata) -> Result<()> {
         let _ = window.center();
         ResultLayout::default()
     };
+    if !screentrans_platform::native_wayland_windows() {
+        let _ = crate::result_tools::prepare(app)?;
+    }
     #[cfg(not(target_os = "macos"))]
     let dpi = window.scale_factor().map_err(|_| window_error())?;
     if let Some(bounds) = frame.screen_bounds.filter(|_| overlay) {
@@ -906,6 +922,8 @@ pub fn toggle_result(app: &AppHandle) -> Result<()> {
 const SELECTION_CLEAR_TIMEOUT: Duration = Duration::from_millis(250);
 
 fn retire_selections(app: &AppHandle, clear_first: bool) {
+    #[cfg(target_os = "macos")]
+    screentrans_platform::set_crosshair_cursor(false);
     for (label, window) in app.webview_windows() {
         if !label.starts_with("selection-") {
             continue;
@@ -1469,6 +1487,9 @@ pub fn request_quit(app: &AppHandle) {
 }
 
 pub fn quit(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    screentrans_platform::set_crosshair_cursor(false);
+    crate::shortcuts::cleanup(app);
     restore_selection_fade();
     app.state::<AppState>().jobs.cancel_all();
     app.exit(0);

@@ -47,6 +47,28 @@ fn register(app: &AppHandle, keys: &Hotkeys, best_effort: bool) -> Result<()> {
                 if sync_gnome_shortcuts(&bindings) {
                     mark_global_shortcuts(app);
                 }
+            } else if is_hyprland_desktop() {
+                let (bindings, invalid) = hyprland_bindings(keys, best_effort)?;
+                if sync_hyprland_shortcuts(app, &bindings) {
+                    mark_global_shortcuts(app);
+                }
+                if !invalid.is_empty() {
+                    let refs: Vec<&str> = invalid.iter().map(String::as_str).collect();
+                    return startup_result(&refs, &[]);
+                }
+            } else if !best_effort {
+                let state = app.state::<AppState>();
+                let should_resync = {
+                    let current = lock(&state.config);
+                    current.wayland_shortcuts
+                        && (current.hotkeys.capture != keys.capture
+                            || current.hotkeys.toggle != keys.toggle
+                            || current.hotkeys.quick != keys.quick
+                            || current.hotkeys.search != keys.search)
+                };
+                if should_resync {
+                    configure_portal(app.clone(), keys.clone());
+                }
             }
         }
         return Ok(());
@@ -315,6 +337,249 @@ fn shell_quote(value: &str) -> String {
 }
 
 #[cfg(target_os = "linux")]
+struct HyprlandBinding {
+    action: &'static str,
+    mods: String,
+    key: String,
+}
+
+#[cfg(target_os = "linux")]
+fn hyprland_binding(value: &str) -> Option<(String, String)> {
+    let mut mods = Vec::new();
+    let mut key: Option<String> = None;
+    for raw in value.split('+') {
+        let part = raw.trim();
+        if part.is_empty() {
+            return None;
+        }
+        let lower = part.to_ascii_lowercase();
+        let upper = part.to_ascii_uppercase();
+        let function_key = upper.len() > 1
+            && upper.starts_with('F')
+            && upper[1..].chars().all(|c| c.is_ascii_digit());
+        match lower.as_str() {
+            "ctrl" | "control" => {
+                if !mods.contains(&"CTRL") {
+                    mods.push("CTRL");
+                }
+            }
+            "alt" => {
+                if !mods.contains(&"ALT") {
+                    mods.push("ALT");
+                }
+            }
+            "shift" => {
+                if !mods.contains(&"SHIFT") {
+                    mods.push("SHIFT");
+                }
+            }
+            "super" | "meta" | "win" | "logo" => {
+                if !mods.contains(&"SUPER") {
+                    mods.push("SUPER");
+                }
+            }
+            _ => {
+                if key.is_some() {
+                    return None;
+                }
+                let mapped = match lower.as_str() {
+                    "space" => "SPACE".to_string(),
+                    "enter" | "return" => "Return".to_string(),
+                    "tab" => "Tab".to_string(),
+                    "escape" | "esc" => "Escape".to_string(),
+                    "backspace" => "BackSpace".to_string(),
+                    "delete" => "Delete".to_string(),
+                    "arrowup" => "Up".to_string(),
+                    "arrowdown" => "Down".to_string(),
+                    "arrowleft" => "Left".to_string(),
+                    "arrowright" => "Right".to_string(),
+                    "pageup" => "Page_Up".to_string(),
+                    "pagedown" => "Page_Down".to_string(),
+                    "home" => "Home".to_string(),
+                    "end" => "End".to_string(),
+                    "insert" => "Insert".to_string(),
+                    "-" => "minus".to_string(),
+                    "=" => "equal".to_string(),
+                    "[" => "bracketleft".to_string(),
+                    "]" => "bracketright".to_string(),
+                    ";" => "semicolon".to_string(),
+                    "'" => "apostrophe".to_string(),
+                    "," => "comma".to_string(),
+                    "." => "period".to_string(),
+                    "/" => "slash".to_string(),
+                    "\\" => "backslash".to_string(),
+                    "`" => "grave".to_string(),
+                    _ if part.len() == 1 && part.chars().all(|c| c.is_ascii_alphanumeric()) => {
+                        part.to_ascii_uppercase()
+                    }
+                    _ if function_key => upper,
+                    _ => return None,
+                };
+                key = Some(mapped);
+            }
+        }
+    }
+    Some((mods.join(" "), key?))
+}
+
+#[cfg(target_os = "linux")]
+fn hyprland_bindings(
+    keys: &Hotkeys,
+    best_effort: bool,
+) -> Result<(Vec<HyprlandBinding>, Vec<String>)> {
+    let entries = [
+        ("capture", &keys.capture),
+        ("toggle", &keys.toggle),
+        ("quick", &keys.quick),
+        ("search", &keys.search),
+    ];
+    let mut parsed = Vec::new();
+    let mut invalid = Vec::new();
+    for (action, value) in entries.into_iter().filter(|(_, value)| !value.is_empty()) {
+        match hyprland_binding(value) {
+            Some((mods, key)) => parsed.push(HyprlandBinding { action, mods, key }),
+            None if best_effort => invalid.push(value.clone()),
+            None => {
+                return Err(AppError::new(
+                    ErrorCode::Configuration,
+                    format!("快捷键格式无效：{value}"),
+                )
+                .action("hotkeys"));
+            }
+        }
+    }
+    Ok((parsed, invalid))
+}
+
+#[cfg(target_os = "linux")]
+fn is_hyprland_desktop() -> bool {
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+}
+
+#[cfg(target_os = "linux")]
+fn lua_string(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+    out
+}
+
+#[cfg(target_os = "linux")]
+fn hyprland_lua_combo(mods: &str, key: &str) -> String {
+    let parts: Vec<&str> = mods
+        .split_whitespace()
+        .chain(std::iter::once(key))
+        .collect();
+    parts.join("+")
+}
+
+#[cfg(target_os = "linux")]
+fn hyprctl_eval(code: &str) -> bool {
+    Command::new("hyprctl")
+        .args(["eval", code])
+        .output()
+        .is_ok_and(|output| {
+            output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "ok"
+        })
+}
+
+#[cfg(target_os = "linux")]
+fn hyprctl_keyword(keyword: &str, value: &str) -> bool {
+    Command::new("hyprctl")
+        .args(["keyword", keyword, value])
+        .output()
+        .is_ok_and(|output| {
+            output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "ok"
+        })
+}
+
+#[cfg(target_os = "linux")]
+fn unbind_single_hyprland(entry: &str) {
+    if let Some(combo) = entry.strip_prefix("lua:") {
+        let code = format!("hl.unbind({})", lua_string(combo));
+        let _ = hyprctl_eval(&code);
+    } else if let Some(spec) = entry.strip_prefix("legacy:") {
+        let _ = hyprctl_keyword("unbind", spec);
+    } else {
+        let _ = hyprctl_keyword("unbind", entry);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn unbind_hyprland_shortcuts(app: &AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let previous: Vec<String> = lock(&state.hyprland_shortcuts).drain(..).collect();
+    for entry in previous {
+        unbind_single_hyprland(&entry);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn sync_hyprland_shortcuts(app: &AppHandle, bindings: &[HyprlandBinding]) -> bool {
+    if !is_hyprland_desktop() {
+        return false;
+    }
+    let executable = std::env::var_os("APPIMAGE")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_exe().ok());
+    let Some(executable) = executable else {
+        return false;
+    };
+    let executable = shell_quote(&executable.to_string_lossy());
+    unbind_hyprland_shortcuts(app);
+    let mut registered: Vec<String> = Vec::with_capacity(bindings.len());
+    for binding in bindings {
+        let argument = match binding.action {
+            "capture" => "--capture",
+            "toggle" => "--toggle-result",
+            "search" => "--search",
+            _ => "--quick",
+        };
+        let command = format!("{executable} {argument}");
+        let lua_combo = hyprland_lua_combo(&binding.mods, &binding.key);
+        let lua_code = format!(
+            "hl.bind({}, function() hl.exec_cmd({}) end)",
+            lua_string(&lua_combo),
+            lua_string(&command)
+        );
+        if hyprctl_eval(&lua_code) {
+            registered.push(format!("lua:{lua_combo}"));
+            continue;
+        }
+        let key_spec = format!("{}, {}", binding.mods, binding.key);
+        let bind_value = format!("{key_spec}, exec, {command}");
+        if hyprctl_keyword("bind", &bind_value) {
+            registered.push(format!("legacy:{key_spec}"));
+            continue;
+        }
+        for entry in registered {
+            unbind_single_hyprland(&entry);
+        }
+        return false;
+    }
+    *lock(&app.state::<AppState>().hyprland_shortcuts) = registered;
+    true
+}
+
+pub fn cleanup(app: &AppHandle) {
+    #[cfg(target_os = "linux")]
+    unbind_hyprland_shortcuts(app);
+    #[cfg(not(target_os = "linux"))]
+    let _ = app;
+}
+
+#[cfg(target_os = "linux")]
 fn mark_global_shortcuts(app: &AppHandle) {
     let state = app.state::<AppState>();
     lock(&state.portal_stop).cancel();
@@ -330,13 +595,54 @@ fn shortcut_error() -> AppError {
     .action("hotkeys")
 }
 
+#[cfg(target_os = "linux")]
+fn persist_wayland_shortcuts(app: &AppHandle, enabled: bool) {
+    let state = app.state::<AppState>();
+    let mut config = lock(&state.config).clone();
+    if config.wayland_shortcuts == enabled {
+        return;
+    }
+    config.wayland_shortcuts = enabled;
+    if config.save(&state.config_path).is_ok() {
+        *lock(&state.config) = config.clone();
+        let mut broadcast = config;
+        broadcast.appearance.theme =
+            lock(&state.theme_preview).effective(broadcast.appearance.theme);
+        let _ = app.emit("config-changed", broadcast);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn should_disable_portal_after_startup_error(code: ErrorCode) -> bool {
+    matches!(
+        code,
+        ErrorCode::Unsupported | ErrorCode::PermissionDenied | ErrorCode::Configuration
+    )
+}
+
 pub fn configure_portal(app: AppHandle, keys: Hotkeys) {
+    configure_portal_with_mode(app, keys, false);
+}
+
+pub fn configure_portal_at_startup(app: AppHandle, keys: Hotkeys) {
+    configure_portal_with_mode(app, keys, true);
+}
+
+fn configure_portal_with_mode(app: AppHandle, keys: Hotkeys, at_startup: bool) {
     #[cfg(target_os = "linux")]
     {
         let bindings = gnome_bindings(&keys);
         if bindings
             .as_ref()
             .is_ok_and(|bindings| sync_gnome_shortcuts(bindings))
+        {
+            mark_global_shortcuts(&app);
+            persist_wayland_shortcuts(&app, true);
+            return;
+        }
+        if is_hyprland_desktop()
+            && let Ok((bindings, _)) = hyprland_bindings(&keys, at_startup)
+            && sync_hyprland_shortcuts(&app, &bindings)
         {
             mark_global_shortcuts(&app);
             return;
@@ -350,6 +656,7 @@ pub fn configure_portal(app: AppHandle, keys: Hotkeys) {
             let callback = std::sync::Arc::new(move |action: String| {
                 if action == "ready" {
                     lock(&callback_app.state::<AppState>().capabilities).global_shortcuts = true;
+                    persist_wayland_shortcuts(&callback_app, true);
                     let _ = callback_app.emit("capabilities-changed", ());
                 } else {
                     dispatch(&callback_app, &action);
@@ -357,19 +664,63 @@ pub fn configure_portal(app: AppHandle, keys: Hotkeys) {
             });
             if let Err(error) = screentrans_platform::portal::shortcuts(keys, callback, stop).await
             {
+                tracing::warn!(
+                    code = ?error.code,
+                    at_startup,
+                    "Wayland portal shortcuts failed: {}",
+                    error.message
+                );
+                if error.code == ErrorCode::Cancelled {
+                    return;
+                }
+                if at_startup {
+                    if should_disable_portal_after_startup_error(error.code) {
+                        persist_wayland_shortcuts(&app, false);
+                    }
+                    return;
+                }
                 app.state::<AppState>().warning(&app, error.message);
             }
         });
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (app, keys);
+        let _ = (app, keys, at_startup);
     }
 }
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
-    use super::{gnome_binding, parse_gvariant_strings};
+    use super::{
+        gnome_binding, hyprland_binding, hyprland_lua_combo, lua_string, parse_gvariant_strings,
+        should_disable_portal_after_startup_error,
+    };
+    use screentrans_core::ErrorCode;
+
+    #[test]
+    fn converts_product_hotkeys_to_hyprland_specs() {
+        assert_eq!(
+            hyprland_binding("Ctrl+Alt+Q"),
+            Some(("CTRL ALT".into(), "Q".into()))
+        );
+        assert_eq!(
+            hyprland_binding("Ctrl+Alt+Space"),
+            Some(("CTRL ALT".into(), "SPACE".into()))
+        );
+        assert_eq!(
+            hyprland_binding("Super+Shift+F12"),
+            Some(("SUPER SHIFT".into(), "F12".into()))
+        );
+        assert_eq!(
+            hyprland_binding("Ctrl+Shift+ArrowUp"),
+            Some(("CTRL SHIFT".into(), "Up".into()))
+        );
+        assert_eq!(hyprland_lua_combo("CTRL ALT", "Q"), "CTRL+ALT+Q");
+        assert_eq!(hyprland_lua_combo("CTRL", "SPACE"), "CTRL+SPACE");
+        assert_eq!(lua_string("a\"b\\c"), "\"a\\\"b\\\\c\"");
+        assert_eq!(hyprland_binding("Ctrl+Alt"), None);
+        assert_eq!(hyprland_binding("Ctrl+UnknownKey"), None);
+    }
 
     #[test]
     fn converts_product_hotkeys_to_gnome_accelerators() {
@@ -399,6 +750,25 @@ mod tests {
                 "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom1/",
             ]
         );
+    }
+
+    #[test]
+    fn startup_portal_disables_flag_only_for_persistent_failures() {
+        assert!(should_disable_portal_after_startup_error(
+            ErrorCode::Unsupported
+        ));
+        assert!(should_disable_portal_after_startup_error(
+            ErrorCode::PermissionDenied
+        ));
+        assert!(should_disable_portal_after_startup_error(
+            ErrorCode::Configuration
+        ));
+        assert!(!should_disable_portal_after_startup_error(
+            ErrorCode::Internal
+        ));
+        assert!(!should_disable_portal_after_startup_error(
+            ErrorCode::Cancelled
+        ));
     }
 }
 

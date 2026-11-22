@@ -5,11 +5,13 @@ use screentrans_core::{
     jobs::JobRegistry,
     ports::CaptureBackend,
 };
-use screentrans_platform::{capture::SystemCapture, credentials::CredentialVault};
+use screentrans_platform::{
+    capture::SystemCapture, credentials::CredentialVault, rapid_ocr::RapidOcrManager,
+};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::PathBuf,
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
 };
 #[cfg(not(feature = "e2e"))]
 use tauri::Manager;
@@ -49,11 +51,14 @@ pub struct AppState {
     pub result_resize: Mutex<Option<crate::result_resize::ResizeGesture>>,
     pub window_lifecycle: Mutex<crate::windows::WindowLifecycle>,
     pub vault: CredentialVault,
+    pub rapid_ocr: Arc<RapidOcrManager>,
     pub capabilities: Mutex<PlatformCapabilities>,
     pub warnings: Mutex<Vec<String>>,
     pub dirty_windows: Mutex<HashSet<String>>,
     #[cfg(target_os = "linux")]
     pub portal_stop: Mutex<CancellationToken>,
+    #[cfg(target_os = "linux")]
+    pub hyprland_shortcuts: Mutex<Vec<String>>,
 }
 
 impl AppState {
@@ -72,6 +77,15 @@ impl AppState {
         #[cfg(feature = "e2e")]
         let _ = app;
         let config_path = directory.join("config.json");
+        #[cfg(not(feature = "e2e"))]
+        let rapid_ocr_dir = app
+            .path()
+            .app_data_dir()
+            .unwrap_or_else(|_| directory.clone())
+            .join("ocr")
+            .join("rapidocr");
+        #[cfg(feature = "e2e")]
+        let rapid_ocr_dir = directory.join("ocr").join("rapidocr");
         let config = Config::load(&config_path).unwrap_or_else(|error| {
             warnings.push(error.message);
             // Defaults will be saved over this file on the next settings change.
@@ -81,6 +95,8 @@ impl AppState {
             }
             Config::default()
         });
+        let rapid_ocr = RapidOcrManager::new(rapid_ocr_dir);
+        rapid_ocr.set_idle_unload_secs(config.ocr.rapid.idle_unload_secs);
         let legacy_path = if cfg!(windows) && !cfg!(feature = "e2e") {
             std::env::var_os("APPDATA")
                 .map(PathBuf::from)
@@ -127,36 +143,43 @@ impl AppState {
             } else {
                 CredentialVault::default()
             },
+            rapid_ocr,
             capabilities: Mutex::new(screentrans_platform::capabilities()),
             warnings: Mutex::new(warnings),
             dirty_windows: Mutex::new(HashSet::new()),
             #[cfg(target_os = "linux")]
             portal_stop: Mutex::new(CancellationToken::new()),
+            #[cfg(target_os = "linux")]
+            hyprland_shortcuts: Mutex::new(Vec::new()),
         }
     }
 
     pub fn bootstrap(&self) -> Bootstrap {
-        let credentials = ProviderId::ALL
-            .into_iter()
-            .map(|provider| {
-                let name = provider.key();
-                let present = self
-                    .vault
-                    .get(&name)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|v| !v.is_empty());
-                (name, present)
-            })
-            .chain(std::iter::once((
-                "azure_ocr".into(),
-                self.vault.get("azure_ocr").ok().flatten().is_some(),
-            )))
-            .chain(std::iter::once((
-                "custom_ocr".into(),
-                self.vault.get("custom_ocr").ok().flatten().is_some(),
-            )))
-            .collect::<BTreeMap<_, _>>();
+        let mut persistent_available = true;
+        let mut has_secret = |name: &str| {
+            if let Some(value) = self.vault.get_session(name) {
+                return !value.is_empty();
+            }
+            if !persistent_available {
+                return false;
+            }
+            match self.vault.get(name) {
+                Ok(Some(value)) => !value.is_empty(),
+                Ok(None) => false,
+                Err(_) => {
+                    persistent_available = false;
+                    false
+                }
+            }
+        };
+        let mut credentials = BTreeMap::new();
+        for provider in ProviderId::ALL {
+            let name = provider.key();
+            let present = has_secret(&name);
+            credentials.insert(name, present);
+        }
+        credentials.insert("azure_ocr".into(), has_secret("azure_ocr"));
+        credentials.insert("custom_ocr".into(), has_secret("custom_ocr"));
         let mut config = lock(&self.config).clone();
         config.appearance.theme = lock(&self.theme_preview).effective(config.appearance.theme);
         let sessions = lock(&self.sessions);

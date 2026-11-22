@@ -386,7 +386,13 @@ import { onMount, onDestroy, tick } from 'svelte';
   function beginToolbar(event: PointerEvent) {
     if (desktop && toolsOnly && event.button === 0) {
       event.preventDefault();event.stopPropagation();
-      void call('begin_toolbar_drag').then(()=>getCurrentWindow().startDragging()).then(()=>call('finish_toolbar_drag')).catch(()=>showNotice(t("无法移动工具栏"),'error'));
+      if (toolbarDragging) return;
+      toolbarDragging = true;
+      void call('begin_toolbar_drag')
+        .then(()=>getCurrentWindow().startDragging())
+        .then(()=>call('finish_toolbar_drag'))
+        .catch(()=>{ void call('finish_toolbar_drag').catch(()=>{}); showNotice(t("无法移动工具栏"),'error'); })
+        .finally(()=>{ toolbarDragging = false; });
       return;
     }
     if (event.button !== 0 || resizing) return;
@@ -506,7 +512,7 @@ import { onMount, onDestroy, tick } from 'svelte';
 />
 
 <div class="result-workspace" class:floating bind:clientWidth={workspaceWidth}>
-  {#if toolsOnly}<!-- svelte-ignore a11y_no_static_element_interactions --><div class="toolbar-window" onpointerenter={() => { void getCurrentWindow?.()?.setFocus?.()?.catch(() => {}); }} onpointerdown={() => { void getCurrentWindow?.()?.setFocus?.()?.catch(() => {}); }}>{@render floatingToolbar()}</div>
+  {#if toolsOnly}<!-- svelte-ignore a11y_no_static_element_interactions --><div class="toolbar-window" onpointerenter={() => { if (!toolbarDragging) void getCurrentWindow?.()?.setFocus?.()?.catch(() => {}); }} onpointerdown={event => { if (!(event.target instanceof Element && event.target.closest('.hud-grip'))) void getCurrentWindow?.()?.setFocus?.()?.catch(() => {}); }}>{@render floatingToolbar()}</div>
   {:else if !frame}
     <div class="capture-empty">
       <span class="capture-empty-symbol" aria-hidden="true"><ScanLine size={28}/></span>

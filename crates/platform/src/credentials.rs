@@ -69,15 +69,19 @@ impl CredentialVault {
         }
     }
     pub fn get(&self, name: &str) -> Result<Option<String>> {
-        if let Some(value) = self
-            .session
+        if let Some(value) = self.get_session(name) {
+            return Ok(Some(value));
+        }
+        self.persistent.get(name)
+    }
+
+    /// Reads only the in-memory session store without touching the OS keyring.
+    pub fn get_session(&self, name: &str) -> Option<String> {
+        self.session
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(name)
-        {
-            return Ok(Some(value.clone()));
-        }
-        self.persistent.get(name)
+            .cloned()
     }
 
     /// Returns whether the credential is durable. A failed keyring write never creates a plaintext file.
@@ -179,6 +183,8 @@ mod tests {
         };
         assert!(!vault.set("openai", "sk-test", true).unwrap());
         assert_eq!(vault.get("openai").unwrap().as_deref(), Some("sk-test"));
+        assert_eq!(vault.get_session("openai").as_deref(), Some("sk-test"));
+        assert_eq!(vault.get_session("deepl"), None);
         vault.delete("openai").unwrap();
         assert!(vault.get("openai").is_err());
     }

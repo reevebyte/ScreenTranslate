@@ -19,8 +19,11 @@ unsafe extern "C" {
     fn st_activate_app();
     fn st_hide_dock_icon();
     fn st_focus_app();
+    fn st_prepare_selection_window(window: *mut std::ffi::c_void);
+    fn st_set_crosshair_cursor(active: bool);
     fn st_mouse_button_down() -> bool;
     fn st_attach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void);
+    fn st_detach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void);
     fn st_system_dark() -> bool;
     fn st_configure_window(window: *mut std::ffi::c_void, theme_mode: i32);
     fn st_free(pointer: *mut std::ffi::c_void);
@@ -117,6 +120,18 @@ pub fn focus_app() {
     }
 }
 
+pub fn prepare_selection_window(window_ptr: *mut std::ffi::c_void) {
+    unsafe {
+        st_prepare_selection_window(window_ptr);
+    }
+}
+
+pub fn set_crosshair_cursor(active: bool) {
+    unsafe {
+        st_set_crosshair_cursor(active);
+    }
+}
+
 pub fn mouse_button_down() -> bool {
     unsafe { st_mouse_button_down() }
 }
@@ -124,6 +139,12 @@ pub fn mouse_button_down() -> bool {
 pub fn attach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void) {
     unsafe {
         st_attach_child_window(parent, child);
+    }
+}
+
+pub fn detach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void) {
+    unsafe {
+        st_detach_child_window(parent, child);
     }
 }
 

@@ -17,7 +17,7 @@ use screentrans_platform::{
     ocr::SystemOcr,
 };
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 fn translator(state: &AppState, config: &Config) -> Result<HttpTranslator> {
@@ -234,6 +234,9 @@ async fn run_visual(
         let backend: Box<dyn OcrBackend> = match config.ocr.engine {
             OcrEngine::Youdao => Box::new(YoudaoOcr),
             OcrEngine::System => Box::new(SystemOcr),
+            OcrEngine::Rapid => {
+                Box::new(state.rapid_ocr.backend(config.ocr.rapid.idle_unload_secs))
+            }
             OcrEngine::Custom => Box::new(CustomOcr {
                 options: config.ocr.custom.clone(),
                 key: state
@@ -274,6 +277,9 @@ async fn run_visual(
                 .action("ocr"));
             }
         };
+        if config.ocr.engine == OcrEngine::Rapid {
+            let _ = app.emit_to("main", "local-ocr-status", state.rapid_ocr.status());
+        }
         for line in &mut lines {
             line.bounds.x /= ratio;
             line.bounds.y /= ratio;

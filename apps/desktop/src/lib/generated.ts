@@ -48,7 +48,14 @@ export type ProviderConfig = { baseUrl: string, model: string, region: string, f
 
 export type Theme = "system" | "light" | "dark";
 
-export type OcrEngine = "youdao" | "system" | "azure" | "custom";
+export type OcrEngine = "youdao" | "system" | "rapid" | "azure" | "custom";
+
+export type RapidOcrConfig = { 
+/**
+ * Seconds of inactivity before stopping the background worker process to
+ * release all memory. `0` keeps the worker alive until app exit or engine switch.
+ */
+idleUnloadSecs: number, };
 
 export type OcrProtocol = "openai" | "http_json";
 
@@ -58,7 +65,11 @@ export type OcrConfig = {
 /**
  * Apply the requested cloud default once, preserving later explicit choices.
  */
-defaultsVersion: number, engine: OcrEngine, languages: Array<string>, azureEndpoint: string, upscale: boolean, custom: CustomOcrConfig, };
+defaultsVersion: number, engine: OcrEngine, languages: Array<string>, azureEndpoint: string, upscale: boolean, custom: CustomOcrConfig, rapid: RapidOcrConfig, };
+
+export type LocalOcrInstallState = "not_installed" | "downloading" | "ready" | "error";
+
+export type LocalOcrStatus = { supported: boolean, state: LocalOcrInstallState, modelVersion: string, installedBytes: number, downloadedBytes: number, totalBytes: number | null, workerRunning: boolean, error: string | null, };
 
 export type Hotkeys = { capture: string, toggle: string, quick: string, 
 /**

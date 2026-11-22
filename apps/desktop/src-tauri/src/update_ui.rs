@@ -13,6 +13,8 @@ pub struct UpdateUi {
     pub busy: std::sync::atomic::AtomicBool,
     pub request: Mutex<Option<String>>,
     pub tray: Mutex<Option<TrayItems>>,
+    #[cfg(target_os = "linux")]
+    pub linux_tray: Mutex<Option<crate::linux_tray::LinuxTrayHandle>>,
 }
 pub async fn on_ui<T: Send + 'static>(
     app: &AppHandle,
@@ -102,6 +104,10 @@ pub async fn set_tray_update(
         blocked,
         english,
     )?;
+    #[cfg(target_os = "linux")]
+    if let Some(handle) = lock(&app.state::<UpdateUi>().linux_tray).as_ref() {
+        handle.update(text.clone(), enabled, english);
+    }
     on_ui(&app, move |app| {
         if let Some(items) = lock(&app.state::<UpdateUi>().tray).as_ref() {
             items

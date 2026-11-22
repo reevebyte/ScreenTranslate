@@ -1,0 +1,43 @@
+# Maintainer: reevebyte <mo0nster@163.com>
+pkgname=screentranslate
+pkgver=2.0.39
+pkgrel=1
+pkgdesc="Lightweight cross-platform screenshot and text translation tool"
+arch=('x86_64')
+url="https://github.com/reevebyte/ScreenTranslate"
+license=('MIT')
+depends=(
+  'webkit2gtk-4.1'
+  'gtk3'
+  'libayatana-appindicator'
+  'xdg-desktop-portal'
+)
+optdepends=(
+  'grim: fast native region capture on Hyprland/Sway/wlroots'
+  'slurp: interactive region selection for grim on Hyprland/Sway/wlroots'
+  'wl-clipboard: reliable Wayland clipboard copy fallback'
+  'tesseract: offline local OCR engine'
+  'tesseract-data-eng: English language data for Tesseract'
+  'tesseract-data-chi_sim: Simplified Chinese language data for Tesseract'
+)
+makedepends=('cargo' 'nodejs' 'pnpm')
+
+build() {
+  cd "$startdir/../.."
+  pnpm install --frozen-lockfile
+  pnpm --filter @screentranslate/desktop tauri build --no-bundle
+}
+
+package() {
+  local root="$startdir/../.."
+  install -Dm755 "$root/target/release/screentranslate" "$pkgdir/usr/bin/screentranslate"
+  install -Dm644 "$root/scripts/linux/io.github.reevebyte.screentranslate.v2.desktop" \
+    "$pkgdir/usr/share/applications/io.github.reevebyte.screentranslate.v2.desktop"
+  install -Dm644 "$root/apps/desktop/src-tauri/icons/app-icon.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.reevebyte.screentranslate.v2.svg"
+  install -Dm644 "$root/apps/desktop/src-tauri/icons/128x128.png" \
+    "$pkgdir/usr/share/icons/hicolor/128x128/apps/io.github.reevebyte.screentranslate.v2.png"
+  install -Dm644 "$root/apps/desktop/src-tauri/icons/32x32.png" \
+    "$pkgdir/usr/share/icons/hicolor/32x32/apps/io.github.reevebyte.screentranslate.v2.png"
+  install -Dm644 "$root/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

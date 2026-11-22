@@ -130,3 +130,71 @@ it('shows the current service as a status instead of a disabled button', async (
   expect(view.getByRole('button', { name: '设为当前' })).toBeTruthy();
   expect(app.data!.config.provider).toBe(current);
 });
+
+it('browses PP-OCRv5 local engine without activating it until models are ready', async () => {
+  vi.mocked(call).mockImplementation(async (command: string) => {
+    if (command === 'local_ocr_status') {
+      return {
+        supported: true,
+        state: 'not_installed',
+        modelVersion: 'ppocrv5-mobile-v1',
+        installedBytes: 0,
+        downloadedBytes: 0,
+        totalBytes: 37_600_000,
+        workerRunning: false,
+        error: null,
+      };
+    }
+    if (command === 'download_local_ocr') {
+      return {
+        supported: true,
+        state: 'ready',
+        modelVersion: 'ppocrv5-mobile-v1',
+        installedBytes: 37_600_000,
+        downloadedBytes: 37_600_000,
+        totalBytes: 37_600_000,
+        workerRunning: false,
+        error: null,
+      };
+    }
+    return undefined;
+  });
+  app.servicesTab = 'ocr';
+  const view = render(ServicesView);
+  await fireEvent.click(view.getByRole('button', { name: 'PP-OCRv5 本地' }));
+  expect(app.data!.config.ocr.engine).toBe('youdao');
+  const activateBtn = view.getByRole('button', { name: '设为当前' }) as HTMLButtonElement;
+  expect(activateBtn.disabled).toBe(true);
+  await fireEvent.click(view.getByRole('button', { name: '下载模型' }));
+  await waitFor(() => expect(activateBtn.disabled).toBe(false));
+  expect(app.data!.config.ocr.engine).toBe('youdao');
+  await fireEvent.click(activateBtn);
+  await waitFor(() => expect(app.data!.config.ocr.engine).toBe('rapid'));
+});
+
+it('cancelling a PP-OCRv5 download returns to not_installed without showing an error', async () => {
+  vi.mocked(call).mockImplementation(async (command: string) => {
+    if (command === 'local_ocr_status') {
+      return {
+        supported: true,
+        state: 'not_installed',
+        modelVersion: 'ppocrv5-mobile-v1',
+        installedBytes: 0,
+        downloadedBytes: 0,
+        totalBytes: 37_600_000,
+        workerRunning: false,
+        error: null,
+      };
+    }
+    if (command === 'download_local_ocr') {
+      throw { code: 'cancelled', message: 'OCR 操作已取消', action: null };
+    }
+    return undefined;
+  });
+  app.servicesTab = 'ocr';
+  const view = render(ServicesView);
+  await fireEvent.click(view.getByRole('button', { name: 'PP-OCRv5 本地' }));
+  await fireEvent.click(view.getByRole('button', { name: '下载模型' }));
+  await waitFor(() => expect(view.getByRole('button', { name: '下载模型' })).toBeTruthy());
+  expect(view.container.querySelector('.error-text')).toBeNull();
+});

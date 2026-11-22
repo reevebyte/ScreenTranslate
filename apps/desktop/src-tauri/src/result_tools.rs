@@ -125,6 +125,32 @@ fn monitor(window: &WebviewWindow, bounds: Rect) -> Result<(Rect, f64)> {
         m.scale_factor(),
     ))
 }
+#[cfg(target_os = "macos")]
+fn detach_macos_child(app: &AppHandle) {
+    if let (Some(image), Some(tool)) = (
+        app.get_webview_window("result"),
+        app.get_webview_window("result-tools"),
+    ) && let (Ok(image_ptr), Ok(tool_ptr)) = (image.ns_window(), tool.ns_window())
+    {
+        screentrans_platform::detach_child_window(image_ptr, tool_ptr);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn attach_macos_child(app: &AppHandle, image: &WebviewWindow, tool: &WebviewWindow) {
+    let _ = app;
+    if let (Ok(image_ptr), Ok(tool_ptr)) = (image.ns_window(), tool.ns_window()) {
+        screentrans_platform::attach_child_window(image_ptr, tool_ptr);
+    }
+}
+
+struct PlacingGuard<'a>(&'a AppHandle);
+impl Drop for PlacingGuard<'_> {
+    fn drop(&mut self) {
+        lock(&self.0.state::<AppState>().result_toolbar).placing = false;
+    }
+}
+
 pub fn prepare(app: &AppHandle) -> Result<WebviewWindow> {
     if let Some(tool) = app.get_webview_window("result-tools") {
         return Ok(tool);
@@ -136,7 +162,7 @@ pub fn prepare(app: &AppHandle) -> Result<WebviewWindow> {
     } else {
         builder
     };
-    let tool = builder
+    builder
         .inner_size(248.0, 48.0)
         .decorations(false)
         .transparent(true)
@@ -145,27 +171,48 @@ pub fn prepare(app: &AppHandle) -> Result<WebviewWindow> {
         .always_on_top(true)
         .skip_taskbar(true)
         .build()
-        .map_err(|_| windows::window_error())?;
-    #[cfg(target_os = "macos")]
-    if let Some((image_ptr, tool_ptr)) = app
-        .get_webview_window("result")
-        .and_then(|image| image.ns_window().ok().zip(tool.ns_window().ok()))
-    {
-        screentrans_platform::attach_child_window(image_ptr, tool_ptr);
-    }
-    Ok(tool)
+        .map_err(|_| windows::window_error())
 }
 fn place(app: &AppHandle, tool: &WebviewWindow, bounds: Rect) -> Result<()> {
-    lock(&app.state::<AppState>().result_toolbar).expected =
-        Some((bounds.x.round() as i32, bounds.y.round() as i32));
+    let target_x = bounds.x.round() as i32;
+    let target_y = bounds.y.round() as i32;
+    let target_w = bounds.width.round() as u32;
+    let target_h = bounds.height.round() as u32;
+    {
+        let state = app.state::<AppState>();
+        let mut bar = lock(&state.result_toolbar);
+        bar.placing = true;
+        bar.expected = Some((target_x, target_y));
+    }
+    let _guard = PlacingGuard(app);
     let pos = tool.inner_position().map_err(|_| windows::window_error())?;
     let size = tool.inner_size().map_err(|_| windows::window_error())?;
-    if pos.x != bounds.x.round() as i32
-        || pos.y != bounds.y.round() as i32
-        || size.width != bounds.width.round() as u32
-        || size.height != bounds.height.round() as u32
-    {
-        windows::set_client_rect(tool, bounds)?;
+    let pos_diff = (pos.x - target_x).abs() > 1 || (pos.y - target_y).abs() > 1;
+    let size_diff = size.width.abs_diff(target_w) > 1 || size.height.abs_diff(target_h) > 1;
+    if pos_diff || size_diff {
+        #[cfg(target_os = "macos")]
+        {
+            let scale = tool.scale_factor().unwrap_or(1.0).max(1.0);
+            if size_diff {
+                tool.set_size(tauri::LogicalSize::new(
+                    bounds.width / scale,
+                    bounds.height / scale,
+                ))
+                .map_err(|_| windows::window_error())?;
+            }
+            tool.set_position(tauri::LogicalPosition::new(
+                bounds.x / scale,
+                bounds.y / scale,
+            ))
+            .map_err(|_| windows::window_error())?;
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            windows::set_client_rect(tool, bounds)?;
+        }
+        if let Ok(actual) = tool.inner_position() {
+            lock(&app.state::<AppState>().result_toolbar).expected = Some((actual.x, actual.y));
+        }
     }
     Ok(())
 }
@@ -193,25 +240,32 @@ pub fn sync(app: &AppHandle) -> Result<()> {
     };
     let state = app.state::<AppState>();
     let settings = lock(&state.result_toolbar).clone();
+    if settings.toolbar_moving {
+        return Ok(());
+    }
     if !image.is_visible().unwrap_or(false) || settings.suppressed() {
+        #[cfg(target_os = "macos")]
+        detach_macos_child(app);
         if let Some(tool) = app.get_webview_window("result-tools") {
             let _ = tool.hide();
         }
         return Ok(());
     }
     let tool = prepare(app)?;
-    #[cfg(target_os = "macos")]
-    if let (Ok(image_ptr), Ok(tool_ptr)) = (image.ns_window(), tool.ns_window()) {
-        screentrans_platform::attach_child_window(image_ptr, tool_ptr);
-    }
     if settings.detached {
+        #[cfg(target_os = "macos")]
+        detach_macos_child(app);
         clamp_toolbar(app)?;
     } else {
+        #[cfg(target_os = "macos")]
+        detach_macos_child(app);
         let bounds = image_bounds(&image)?;
         let (area, scale) = monitor(&image, bounds)?;
         let rect = crate::result_toolbar::placement(bounds, scale, &settings, area);
         place(app, &tool, rect)?;
         lock(&state.result_toolbar).above = rect.bottom() <= bounds.y;
+        #[cfg(target_os = "macos")]
+        attach_macos_child(app, &image, &tool);
     }
     let _ = tool.emit(
         "toolbar-placement-changed",
@@ -230,6 +284,7 @@ pub fn dock(app: &AppHandle, above: bool, align_left: bool) -> Result<windows::R
         bar.preferred_above = above;
         bar.align_left = align_left;
         bar.detached = false;
+        bar.toolbar_moving = false;
     }
     let state = app.state::<AppState>();
     let mut result = lock(&state.result_layout).clone();
@@ -245,10 +300,46 @@ pub fn dock(app: &AppHandle, above: bool, align_left: bool) -> Result<windows::R
     Ok(result)
 }
 pub fn begin_drag(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    let mut bar = lock(&state.result_toolbar);
-    bar.detached = true;
-    bar.expected = None;
+    {
+        let state = app.state::<AppState>();
+        let mut bar = lock(&state.result_toolbar);
+        bar.detached = true;
+        bar.toolbar_moving = true;
+        bar.expected = None;
+        bar.generation += 1;
+    }
+    #[cfg(target_os = "macos")]
+    detach_macos_child(app);
+}
+pub async fn finish_drag(app: &AppHandle) -> Result<()> {
+    #[cfg(windows)]
+    {
+        use ::windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+        while unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } < 0 {
+            if !lock(&app.state::<AppState>().result_toolbar).toolbar_moving {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(16)).await;
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        while screentrans_platform::mouse_button_down() {
+            if !lock(&app.state::<AppState>().result_toolbar).toolbar_moving {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(16)).await;
+        }
+    }
+    {
+        let state = app.state::<AppState>();
+        let mut bar = lock(&state.result_toolbar);
+        if !bar.toolbar_moving {
+            return Ok(());
+        }
+        bar.toolbar_moving = false;
+    }
+    clamp_toolbar(app)
 }
 pub fn begin_image_drag(app: &AppHandle) -> Result<()> {
     #[cfg(target_os = "linux")]
@@ -412,7 +503,14 @@ pub fn hide(app: &AppHandle) -> Result<()> {
     // Renderer cleanup is not guaranteed after hide/crash; release native resize
     // surfaces here as well as on normal pointer release and owner destruction.
     *lock(&app.state::<AppState>().result_resize) = None;
-    lock(&app.state::<AppState>().result_toolbar).finish_image_gesture();
+    {
+        let state = app.state::<AppState>();
+        let mut bar = lock(&state.result_toolbar);
+        bar.finish_image_gesture();
+        bar.placing = false;
+    }
+    #[cfg(target_os = "macos")]
+    detach_macos_child(app);
     for label in ["result", "result-tools"] {
         if let Some(w) = app.get_webview_window(label) {
             w.hide().map_err(|_| windows::window_error())?;
@@ -432,10 +530,15 @@ pub fn window_changed(window: &tauri::Window) {
         }
         return;
     }
-    if label == "result" {
+    {
         let state = window.state::<AppState>();
         let bar = lock(&state.result_toolbar);
-        if bar.image_moving || bar.image_resizing {
+        if label == "result" && (bar.image_moving || bar.image_resizing) {
+            return;
+        }
+        if label == "result-tools"
+            && (bar.toolbar_moving || bar.placing || bar.image_moving || bar.image_resizing)
+        {
             return;
         }
     }
@@ -446,12 +549,15 @@ pub fn window_changed(window: &tauri::Window) {
             let Some(tool) = app.get_webview_window("result-tools") else {
                 return;
             };
+            if !tool.is_visible().unwrap_or(false) {
+                return;
+            }
             let Ok(pos) = tool.inner_position() else {
                 return;
             };
             let state = app.state::<AppState>();
             let mut bar = lock(&state.result_toolbar);
-            if bar.expected == Some((pos.x, pos.y)) {
+            if bar.toolbar_moving || bar.placing || bar.matches_expected(pos.x, pos.y) {
                 return;
             }
             bar.detached = true;
@@ -459,6 +565,9 @@ pub fn window_changed(window: &tauri::Window) {
         let generation = {
             let state = app.state::<AppState>();
             let mut bar = lock(&state.result_toolbar);
+            if bar.toolbar_moving || bar.placing {
+                return;
+            }
             bar.generation += 1;
             bar.generation
         };
@@ -468,7 +577,12 @@ pub fn window_changed(window: &tauri::Window) {
             120
         }))
         .await;
-        if lock(&app.state::<AppState>().result_toolbar).generation == generation {
+        let should_sync = {
+            let state = app.state::<AppState>();
+            let bar = lock(&state.result_toolbar);
+            bar.generation == generation && !bar.toolbar_moving && !bar.placing
+        };
+        if should_sync {
             let _ = sync(&app);
         }
     });
