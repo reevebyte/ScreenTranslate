@@ -78,7 +78,15 @@ fn presentation(
         version.unwrap_or(current)
     };
     let enabled = version.is_some() && !blocked && matches!(stage, "available" | "ready" | "error");
-    let text = format!("{} {target}", if english { "Version" } else { "版本" });
+    let text = if enabled && matches!(stage, "available" | "ready") {
+        if english {
+            format!("New version v{target}")
+        } else {
+            format!("新版本 v{target}")
+        }
+    } else {
+        format!("{} {target}", if english { "Version" } else { "版本" })
+    };
     Ok((text, enabled))
 }
 #[tauri::command]
@@ -174,11 +182,11 @@ mod tests {
         );
         let (text, enabled) =
             presentation("2.0.2", "available", Some("2.0.3"), false, false).unwrap();
-        assert_eq!(text, "版本 2.0.3");
+        assert_eq!(text, "新版本 v2.0.3");
         assert!(enabled);
         assert_eq!(
             presentation("2.0.2", "available", Some("2.0.3"), false, true).unwrap(),
-            ("Version 2.0.3".into(), true)
+            ("New version v2.0.3".into(), true)
         );
         for stage in ["downloading", "installing"] {
             assert_eq!(

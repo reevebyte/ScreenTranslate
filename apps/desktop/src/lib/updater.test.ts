@@ -4,9 +4,9 @@ const { call, listeners } = vi.hoisted(()=>({call:vi.fn(),listeners:new Map<stri
 vi.mock('./api',()=>({desktop:true,call,loadBootstrap:vi.fn()}));
 vi.mock('@tauri-apps/api/event',()=>({listen:vi.fn(async(name:string,fn:(e:{payload:unknown})=>void)=>{listeners.set(name,fn);return ()=>listeners.delete(name);})}));
 import {app} from './store.svelte';
-import {updates,checkUpdate,downloadUpdate,installUpdate,initializeUpdates,consumeUpdateRequest,syncUpdateUi} from './updater.svelte';
+import {updates,checkUpdate,downloadUpdate,installUpdate,initializeUpdates,consumeUpdateRequest,syncUpdateUi,scheduleAutomaticCheck,AUTO_CHECK_INTERVAL_MS,AUTO_CHECK_RETRY_DELAY_MS} from './updater.svelte';
 beforeEach(()=>{call.mockReset().mockResolvedValue(undefined);app.data=previewBootstrap();app.configPending=false;app.configSaving=false;Object.assign(updates,{stage:'idle',version:'',notes:'',progress:null,error:'',dismissed:'',confirm:false,connected:false,upToDateNotice:false});});
-afterEach(()=>listeners.clear());
+afterEach(()=>{scheduleAutomaticCheck(false);vi.useRealTimers();listeners.clear();});
 it('serializes checks and retains the downloaded version across checks',async()=>{
  let resolve!:(v:unknown)=>void;call.mockImplementationOnce(()=>new Promise(r=>resolve=r));
  const first=checkUpdate();await checkUpdate();expect(call).toHaveBeenCalledTimes(1);
@@ -80,4 +80,43 @@ it('waits for a running check instead of dropping a tray update request',async()
 it('does not leak a rejection when the update request cannot be read',async()=>{
  call.mockRejectedValueOnce(new Error('ipc down'));
  await expect(consumeUpdateRequest()).resolves.toBeUndefined();
+});
+it('checks periodically every 4 hours, retries transient failures silently in 15 minutes, and resumes when re-enabled',async()=>{
+ vi.useFakeTimers();
+ call
+  .mockRejectedValueOnce({code:'network',message:'无法检查更新，请稍后重试'})
+  .mockResolvedValueOnce({available:false})
+  .mockResolvedValueOnce({available:true,version:'2.0.42',notes:'notes'});
+ scheduleAutomaticCheck(true, 100);
+ await vi.advanceTimersByTimeAsync(100);
+ expect(call).toHaveBeenCalledTimes(1);
+ // Silent background failure must not pollute the About page with an error banner.
+ expect(updates.stage).toBe('idle');
+ expect(updates.error).toBe('');
+ await vi.advanceTimersByTimeAsync(AUTO_CHECK_RETRY_DELAY_MS);
+ expect(call).toHaveBeenCalledTimes(2);
+ expect(updates.stage).toBe('current');
+ await vi.advanceTimersByTimeAsync(AUTO_CHECK_INTERVAL_MS);
+ expect(call).toHaveBeenCalledTimes(3);
+ expect(updates.stage).toBe('available');
+ expect(updates.version).toBe('2.0.42');
+ // Toggling auto-check off then on re-schedules cleanly.
+ scheduleAutomaticCheck(false);
+ updates.stage = 'idle';
+ updates.version = '';
+ call.mockResolvedValueOnce({available:false});
+ scheduleAutomaticCheck(true, 50);
+ await vi.advanceTimersByTimeAsync(50);
+ expect(call).toHaveBeenCalledTimes(4);
+});
+it('switches to About when clicking the tray update entry',async()=>{
+ app.route = 'translate';
+ app.settingsTab = 'general';
+ updates.version='2.0.42';updates.stage='available';
+ call.mockResolvedValueOnce('tray').mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+ await consumeUpdateRequest();
+ expect(app.route).toBe('settings');
+ expect(app.settingsTab).toBe('about');
+ expect(call).toHaveBeenCalledWith('download_update',{version:'2.0.42'});
+ expect(call).toHaveBeenCalledWith('install_update',{version:'2.0.42'});
 });

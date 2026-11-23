@@ -4,11 +4,16 @@ import { app } from './store.svelte';
 import { errorMessage } from './utils';
 import { t, uiLocale } from './i18n.svelte';
 
+export const AUTO_CHECK_INITIAL_DELAY_MS = 10_000;
+export const AUTO_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
+export const AUTO_CHECK_RETRY_DELAY_MS = 15 * 60 * 1000;
+
 type Stage = 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'installing' | 'error';
 type Info = { available: boolean; version?: string; notes?: string; downloaded?: boolean };
 export const updates = $state({stage:'idle' as Stage,version:'',notes:'',progress:null as number|null,error:'',dismissed:'',confirm:false,connected:false,upToDateNotice:false});
 let operation = false;
-let checked = false;
+let autoEnabled = false;
+let autoRetried = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 function showUpToDateNotice() {
@@ -21,13 +26,13 @@ export function updateBlockReason() {
   if (app.data && [app.data.text.job.stage,app.data.visual.job.stage].some(stage=>['capturing','recognizing','translating'].includes(stage))) return t('请等待截图或翻译完成，再安装更新');
   return '';
 }
-let inflightCheck: Promise<void> | undefined;
-export function checkUpdate(manual = false): Promise<void> {
-  if (operation || updates.stage === 'ready') return Promise.resolve();
+let inflightCheck: Promise<boolean> | undefined;
+export function checkUpdate(manual = false): Promise<boolean> {
+  if (operation || updates.stage === 'ready') return Promise.resolve(true);
   inflightCheck = runCheck(manual).finally(() => { inflightCheck = undefined; });
   return inflightCheck;
 }
-async function runCheck(manual: boolean) {
+async function runCheck(manual: boolean): Promise<boolean> {
   operation = true;
   updates.stage = 'checking'; updates.error = ''; updates.upToDateNotice = false;
   try {
@@ -35,17 +40,24 @@ async function runCheck(manual: boolean) {
     updates.version = result.version ?? ''; updates.notes = result.notes ?? '';
     updates.stage = result.available ? result.downloaded ? 'ready' : 'available' : 'current';
     if (manual && updates.stage === 'current') showUpToDateNotice();
+    return true;
   } catch(error) {
     const msg = errorMessage(error);
     // Match the backend's own text: errorMessage() has already localized `msg`.
     const raw = error && typeof error === 'object' && 'message' in error ? String(error.message) : String(error);
-    if (manual && raw.includes('尚未发布可用更新')) {
+    if (raw.includes('尚未发布可用更新')) {
       updates.stage = 'current';
-      showUpToDateNotice();
-    } else {
+      if (manual) showUpToDateNotice();
+      return true;
+    } else if (manual) {
       updates.error = msg;
       updates.stage = 'error';
+    } else {
+      // Background checks stay quiet on transient network/proxy issues and retry later.
+      updates.error = '';
+      updates.stage = 'idle';
     }
+    return false;
   }
   finally { operation = false; }
 }
@@ -63,10 +75,41 @@ export async function installUpdate() {
   catch(error) { updates.error = errorMessage(error); updates.stage = 'ready'; }
   finally { operation = false; }
 }
-export function scheduleAutomaticCheck(enabled: boolean, delay = 5000) {
+function queueNextAutoCheck(delay: number) {
   clearTimeout(timer);
-  if (!desktop || import.meta.env.DEV || import.meta.env.VITE_DESKTOP_E2E === 'true' || !enabled || checked) return;
-  timer = setTimeout(()=>{ checked = true; void checkUpdate(); },delay);
+  if (!autoEnabled) return;
+  timer = setTimeout(() => {
+    void runAutomaticCheck();
+  }, delay);
+}
+async function runAutomaticCheck() {
+  if (!autoEnabled) return;
+  if (['available', 'downloading', 'ready', 'installing'].includes(updates.stage)) {
+    queueNextAutoCheck(AUTO_CHECK_INTERVAL_MS);
+    return;
+  }
+  const ok = await checkUpdate(false);
+  if (!autoEnabled) return;
+  if (ok) {
+    autoRetried = false;
+    queueNextAutoCheck(AUTO_CHECK_INTERVAL_MS);
+  } else if (!autoRetried) {
+    autoRetried = true;
+    queueNextAutoCheck(AUTO_CHECK_RETRY_DELAY_MS);
+  } else {
+    autoRetried = false;
+    queueNextAutoCheck(AUTO_CHECK_INTERVAL_MS);
+  }
+}
+export function scheduleAutomaticCheck(enabled: boolean, delay = AUTO_CHECK_INITIAL_DELAY_MS) {
+  clearTimeout(timer);
+  autoEnabled = enabled;
+  if (!enabled) {
+    autoRetried = false;
+    return;
+  }
+  if (!desktop || (import.meta.env.DEV && import.meta.env.MODE !== 'test') || import.meta.env.VITE_DESKTOP_E2E === 'true') return;
+  queueNextAutoCheck(delay);
 }
 
 let consuming = false;
@@ -80,6 +123,8 @@ export async function consumeUpdateRequest() {
     if (!updates.version) await (inflightCheck ?? checkUpdate());
     if (updateBlockReason()) { updates.error=updateBlockReason(); app.route='settings';app.settingsTab='about';return; }
     if (source === 'tray') {
+      app.route = 'settings';
+      app.settingsTab = 'about';
       if (updates.stage === 'available' || updates.stage === 'error') await downloadUpdate();
       if (updates.stage === 'ready') await installUpdate();
     } else if (source === 'caption') {
@@ -116,5 +161,5 @@ export function initializeUpdates() {
     subscribe('app-update-requested',()=>{void consumeUpdateRequest();}),
     subscribe<string>('app-update-caption-dismissed',({payload})=>{if(payload===updates.version)updates.dismissed=payload;}),
   ]).then(()=>{if(!disposed)updates.connected=true;}).catch(()=>{});
-  return ()=>{ disposed = true; updates.connected=false; clearTimeout(timer); clearTimeout(noticeTimer); cleanup.splice(0).forEach(fn=>fn()); };
+  return ()=>{ disposed = true; updates.connected=false; autoEnabled=false; autoRetried=false; clearTimeout(timer); clearTimeout(noticeTimer); cleanup.splice(0).forEach(fn=>fn()); };
 }

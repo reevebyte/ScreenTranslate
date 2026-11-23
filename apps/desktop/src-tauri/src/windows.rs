@@ -82,6 +82,10 @@ fn reveal(window: &tauri::WebviewWindow) -> Result<()> {
         }
     }
     window.show().map_err(|_| window_error())?;
+    #[cfg(target_os = "linux")]
+    if window.label() == "result-tools" {
+        crate::result_tools::realign_after_show(window.app_handle());
+    }
     if window.label() != "result-tools"
         && (!window.label().starts_with("selection-") || contains_cursor(window))
     {
@@ -165,6 +169,22 @@ pub fn selection_presented(window: &tauri::WebviewWindow) {
     };
     if all_painted {
         flush_compositor();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = window.set_focus();
+        let app = window.app_handle().clone();
+        let label = window.label().to_owned();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(60)).await;
+            let active = lock(&app.state::<AppState>().selections).contains_key(&label);
+            if active
+                && let Some(overlay) = app.get_webview_window(&label)
+                && overlay.is_visible().unwrap_or(false)
+            {
+                let _ = overlay.set_focus();
+            }
+        });
     }
 }
 
@@ -565,6 +585,16 @@ pub(crate) fn set_client_rect(window: &tauri::WebviewWindow, bounds: Rect) -> Re
             .map_err(|_| window_error())?;
         #[cfg(target_os = "linux")]
         if screentrans_platform::native_wayland_windows() {
+            return Ok(());
+        }
+        #[cfg(target_os = "linux")]
+        if matches!(window.label(), "result" | "result-tools") {
+            window
+                .set_position(PhysicalPosition::new(
+                    bounds.x.round() as i32,
+                    bounds.y.round() as i32,
+                ))
+                .map_err(|_| window_error())?;
             return Ok(());
         }
         let inner = window.inner_position().map_err(|_| window_error())?;
@@ -1535,12 +1565,27 @@ pub fn close_requested(window: &tauri::Window, api: &tauri::CloseRequestApi) {
 pub fn reap_hidden_windows(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut hidden: HashMap<String, Instant> = HashMap::new();
-        let mut timer = tokio::time::interval(Duration::from_secs(15));
+        let poll_interval = if cfg!(target_os = "linux") {
+            Duration::from_secs(5)
+        } else {
+            Duration::from_secs(15)
+        };
+        let idle_limit = if cfg!(target_os = "linux") {
+            Duration::from_secs(20)
+        } else {
+            Duration::from_secs(60)
+        };
+        let mut timer = tokio::time::interval(poll_interval);
         loop {
             timer.tick().await;
             let state = app.state::<AppState>();
             for (label, window) in app.webview_windows() {
-                if !matches!(label.as_str(), "result" | "result-tools") {
+                let reapable = if cfg!(target_os = "linux") {
+                    matches!(label.as_str(), "result" | "result-tools" | "quick")
+                } else {
+                    matches!(label.as_str(), "result" | "result-tools")
+                };
+                if !reapable {
                     continue;
                 }
                 if window.is_visible().unwrap_or(true)
@@ -1554,7 +1599,7 @@ pub fn reap_hidden_windows(app: AppHandle) {
                     .entry(label.clone())
                     .or_insert_with(Instant::now)
                     .elapsed()
-                    >= Duration::from_secs(60)
+                    >= idle_limit
                 {
                     let _ = window.destroy();
                     lock(&state.window_lifecycle).forget(&label);

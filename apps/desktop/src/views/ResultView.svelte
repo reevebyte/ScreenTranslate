@@ -35,9 +35,11 @@ import { onMount, onDestroy, tick } from 'svelte';
   // Native Wayland windows cannot be placed or moved by the app itself.
   let isWayland = $derived(app.data?.capabilities.windowPositioning === false);
   let isLinux = $derived(app.data?.capabilities.platform === 'linux');
-  // Linux keeps the toolbar embedded inside the result window and delegates
-  // drag/resize to the window manager across X11, XWayland and native Wayland.
-  let embeddedToolbar = $derived(!desktop || isLinux || isWayland);
+  // Native Wayland cannot position a separate toolbar window; X11/XWayland
+  // uses the independent freely-draggable `result-tools` window like Win/macOS.
+  let embeddedToolbar = $derived(!desktop || isWayland);
+  // All Linux sessions delegate drag/resize to the window manager so XWayland
+  // never stalls when the pointer moves outside the window during fast resize.
   let nativeWindowGestures = $derived(isLinux || isWayland);
   let sourceText = $derived(extractedText(session));
   let original = $state(false);
@@ -114,6 +116,7 @@ import { onMount, onDestroy, tick } from 'svelte';
       if (nativeWindowGestures) {
         await subscribe('result-drag-ended', () => { imageDragging = false; });
         await subscribe('result-resize-ended', () => clearNativeResize());
+        await subscribe('toolbar-drag-ended', () => { toolbarDragging = false; });
       }
       await subscribe('result-display-changed', applyDisplay);
       applyDisplay(await call('result_display'));
@@ -392,8 +395,16 @@ import { onMount, onDestroy, tick } from 'svelte';
   function beginToolbar(event: PointerEvent) {
     if (desktop && toolsOnly && event.button === 0) {
       event.preventDefault();event.stopPropagation();
-      if (toolbarDragging) return;
+      if (!nativeWindowGestures && toolbarDragging) return;
       toolbarDragging = true;
+      if (nativeWindowGestures) {
+        void call('begin_toolbar_drag').catch(() => {
+          toolbarDragging = false;
+          void call('finish_toolbar_drag').catch(() => {});
+          showNotice(t("无法移动工具栏"), 'error');
+        });
+        return;
+      }
       void call('begin_toolbar_drag')
         .then(()=>getCurrentWindow().startDragging())
         .then(()=>call('finish_toolbar_drag'))
@@ -474,6 +485,10 @@ import { onMount, onDestroy, tick } from 'svelte';
       imageDragging = false;
       void call('finish_result_drag').catch(()=>{});
     }
+    if (toolsOnly && toolbarDragging) {
+      toolbarDragging = false;
+      void call('finish_toolbar_drag').catch(()=>{});
+    }
     if (resizing) {
       void endResize();
     }
@@ -481,6 +496,12 @@ import { onMount, onDestroy, tick } from 'svelte';
 
   function keydown(event: KeyboardEvent) {
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (floating && event.key === 'Escape' && !selectedId) {
+      if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"], [role="combobox"], [role="listbox"], [role="menu"], [role="menuitem"], [role="dialog"]')) return;
+      event.preventDefault();
+      void act(call('hide_window'));
+      return;
+    }
     if (event.target instanceof Element && event.target.closest('button, input, textarea, select, [contenteditable="true"], [role="button"], [role="combobox"], [role="listbox"], [role="menu"], [role="menuitem"], [role="dialog"]')) return;
     if (selectedId) return;
     if (event.key.toLowerCase() === 'r' && !busy) { event.preventDefault(); void act(call('retry_visual')); return; }

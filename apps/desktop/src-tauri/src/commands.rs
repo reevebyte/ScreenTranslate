@@ -450,6 +450,13 @@ pub async fn toolbar_placement(
 pub async fn begin_toolbar_drag(app: AppHandle, window: WebviewWindow) -> Result<()> {
     result_only(&window)?;
     crate::result_tools::begin_drag(&app);
+    #[cfg(target_os = "linux")]
+    if !screentrans_platform::native_wayland_windows() {
+        let _ = window.set_focus();
+        window
+            .start_dragging()
+            .map_err(|_| AppError::new(ErrorCode::Internal, "无法移动工具栏"))?;
+    }
     Ok(())
 }
 #[tauri::command]

@@ -41,6 +41,15 @@
   onMount(() => {
     let disposed = false;
     const stops: (() => void)[] = [];
+    function onKeydown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        cancel();
+      }
+    }
+    window.addEventListener('keydown', onKeydown, true);
+    window.focus();
+    surface?.focus();
     function subscribe<T>(event: string, handler: (payload: T) => void) {
       void listen<T>(event, ({ payload }) => { if (!disposed) handler(payload); })
         .then(stop => { if (disposed) stop(); else stops.push(stop); })
@@ -57,6 +66,7 @@
     }
     return () => {
       disposed = true;
+      window.removeEventListener('keydown', onKeydown, true);
       for (const stop of stops) stop();
     };
   });
@@ -86,13 +96,14 @@
     await tick();
     await call('window_ready', { frameId }).catch(() => {});
     await nextPaint();
+    window.focus();
+    surface?.focus();
     void call('selection_presented').catch(() => {});
   }
 </script>
 
-<svelte:window onkeydown={event => { if (event.key === 'Escape') cancel(); }}/>
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="capture-surface" bind:this={surface} bind:clientWidth={width} bind:clientHeight={height} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={reset} onlostpointercapture={() => { if (anchor) reset(); }} oncontextmenu={event => { event.preventDefault(); cancel(); }}>
+<div class="capture-surface" tabindex="-1" bind:this={surface} bind:clientWidth={width} bind:clientHeight={height} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={reset} onlostpointercapture={() => { if (anchor) reset(); }} oncontextmenu={event => { event.preventDefault(); cancel(); }}>
   <!-- Without a frame the window is idle or retiring and must paint nothing. -->
   {#if frame}{@const frameId = frame.id}<img class="capture-background" src={frameUrl(frameId)} alt={t("待框选的屏幕图像")} draggable="false" onload={() => imageReady(frameId)} onerror={() => { error = t("截图读取失败，请重新截图"); imageReady(frameId); }}/>
   {#if selection && selection.width > 0}

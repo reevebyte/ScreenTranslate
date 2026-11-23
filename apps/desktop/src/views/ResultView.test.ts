@@ -293,26 +293,44 @@ describe('floating screenshot recovery', () => {
     await waitFor(() => expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(false));
   });
 
-  it('uses embedded toolbar and native resize dragging on Linux XWayland without hiding controls on drag', async () => {
+  it('uses independent freely-draggable toolbar and native resize on Linux XWayland', async () => {
     app.data!.capabilities.platform = 'linux';
     app.data!.capabilities.wayland = true;
     app.data!.capabilities.windowPositioning = true;
-    const view = render(ResultView, { floating: true });
-    await waitFor(() => expect(events.get('result-resize-ended')?.size).toBe(1));
-    expect(view.container.querySelector('.floating-shell')?.contains(view.getByRole('toolbar', { name: '截图操作' }))).toBe(true);
+    const view = renderResult();
+    await waitFor(() => expect(events.get('result-resize-ended')?.size).toBe(2));
+    // Independent toolbar window is used instead of embedding into `.floating-shell`.
+    expect(view.container.querySelector('.floating-shell')?.contains(view.getByRole('toolbar', { name: '截图操作' }))).toBe(false);
+
+    await fireEvent.pointerDown(view.getByRole('button', { name: '移动工具栏' }), { button: 0 });
+    await waitFor(() => expect(call).toHaveBeenCalledWith('begin_toolbar_drag'));
+    expect(startDragging).not.toHaveBeenCalled();
 
     await fireEvent.pointerDown(view.getByAltText('截图原文'), { button: 0 });
     await waitFor(() => expect(call).toHaveBeenCalledWith('begin_result_drag'));
-    expect(startDragging).not.toHaveBeenCalled();
-    expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(false);
 
     const handle = view.getByRole('button', { name: '调整右下角大小' });
     await fireEvent.pointerDown(handle, { button: 0, pointerId: 1 });
     await waitFor(() => expect(startResizeDragging).toHaveBeenCalledWith('SouthEast'));
     expect(call).toHaveBeenCalledWith('begin_result_resize', { direction: 'SouthEast' });
-    expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(true);
     broadcast('result-resize-ended', 'test-frame');
     await waitFor(() => expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(false));
+  });
+
+  it('hides the floating result on Escape even when a toolbar button or resize handle has focus', async () => {
+    app.data!.visual.output = 'translation';
+    app.data!.visual.job.stage = 'complete';
+    const view = renderResult();
+    const copyButton = view.getByRole('button', { name: '复制全部译文' });
+    copyButton.focus();
+    await fireEvent.keyDown(copyButton, { key: 'Escape' });
+    expect(call).toHaveBeenCalledWith('hide_window');
+
+    call.mockClear();
+    const handle = view.getByRole('button', { name: '调整右边大小' });
+    handle.focus();
+    await fireEvent.keyDown(handle, { key: 'Escape' });
+    expect(call).toHaveBeenCalledWith('hide_window');
   });
 
   it('lets the user cancel a running job without starting a window drag', async () => {

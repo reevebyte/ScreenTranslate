@@ -281,6 +281,7 @@ pub fn run() {
             } else {
                 let _ = windows::ensure_main(&handle);
             }
+            #[cfg(not(target_os = "linux"))]
             let _ = windows::ensure_quick(&handle);
             if !capture_requested {
                 windows::prewarm_selection(&handle);
