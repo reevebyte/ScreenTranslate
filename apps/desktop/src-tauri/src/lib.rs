@@ -126,8 +126,8 @@ pub fn run() {
             if matches!(event, tauri::WindowEvent::Moved(_)) {
                 result_tools::window_changed(window);
             }
-            if matches!(event, tauri::WindowEvent::Resized(_)) {
-                result_tools::window_resized(window);
+            if let tauri::WindowEvent::Resized(size) = event {
+                result_tools::window_resized(window, *size);
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 windows::close_requested(window, api);

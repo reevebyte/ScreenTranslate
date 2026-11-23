@@ -9,7 +9,7 @@
   let { onwelcome, autoUpdate = $bindable(true) }: { onwelcome?: () => void; autoUpdate?: boolean } = $props();
   const waiting = $derived(['checking','downloading','installing'].includes(updates.stage));
   const blockReason = $derived(updateBlockReason());
-  const status = $derived(updates.stage === 'installing' ? t('安装中…') : updates.stage === 'downloading' ? t('正在下载 {0}',updates.progress === null ? '…' : updates.progress + '%') : updates.stage === 'ready' ? t('更新已就绪') : updates.version && updates.stage === 'available' ? t('发现新版本 {0}',updates.version) : '');
+  const status = $derived(updates.stage === 'downloading' ? t('正在下载 {0}',updates.progress === null ? '…' : updates.progress + '%') : updates.version && updates.stage === 'available' ? t('发现新版本 {0}',updates.version) : '');
 </script>
 <div class="about-view">
   <header class="about-identity">
@@ -23,7 +23,7 @@
     </div>
     {#if updates.error || (status && updates.stage !== 'downloading') || (updates.stage==='ready' && blockReason)}
       <div class="about-update-status-slot">
-        {#if updates.error}<p class="about-update-status error-text" role="alert">{updates.error}</p>{:else if status && updates.stage !== 'downloading'}<p class="about-update-status" role="status">{#if updates.stage==='ready'}<Check size={15}/>{/if}{status}</p>{/if}
+        {#if updates.error}<p class="about-update-status error-text" role="alert">{updates.error}</p>{:else if status && updates.stage !== 'downloading'}<p class="about-update-status" role="status">{status}</p>{/if}
         {#if updates.stage==='ready' && blockReason}<p class="about-update-status" role="status">{blockReason}</p>{/if}
       </div>
     {/if}

@@ -24,6 +24,8 @@ pub struct ToolbarState {
     pub toolbar_moving: bool,
     #[serde(skip)]
     pub placing: bool,
+    #[serde(skip)]
+    pub realign_attempts: u8,
 }
 
 impl ToolbarState {

@@ -8,6 +8,7 @@ vi.mock('$lib/api', () => ({ desktop: true, call, loadBootstrap: vi.fn() }));
 const { toast } = vi.hoisted(() => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), dismiss: vi.fn() } }));
 vi.mock('svelte-sonner', () => ({ toast }));
 import { app, previewConfig, saveConfig } from '$lib/store.svelte';
+import { updates } from '$lib/updater.svelte';
 import SettingsView from './SettingsView.svelte';
 
 beforeEach(() => {
@@ -117,5 +118,17 @@ it('offers the desktop system theme accent swatch when exposed by capabilities',
   await fireEvent.click(swatch);
   view.unmount();
   await waitFor(() => expect(call).toHaveBeenCalledWith('save_config', { config: expect.objectContaining({ appearance: expect.objectContaining({ accent: '#89b4fa' }) }) }));
+});
+
+it('omits the ready status subtext below the restart-to-update button in About', async () => {
+  Object.assign(updates, { stage: 'ready', version: '2.0.43', error: '' });
+  try {
+    app.settingsTab = 'about';
+    const view = render(SettingsView);
+    expect(view.getByRole('button', { name: '重启更新' })).toBeTruthy();
+    expect(view.queryByText('更新已就绪')).toBeNull();
+  } finally {
+    Object.assign(updates, { stage: 'idle', version: '', error: '' });
+  }
 });
 

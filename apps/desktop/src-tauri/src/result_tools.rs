@@ -184,6 +184,17 @@ pub fn prepare(app: &AppHandle) -> Result<WebviewWindow> {
     Ok(tool)
 }
 fn place(app: &AppHandle, tool: &WebviewWindow, bounds: Rect) -> Result<()> {
+    let scale = tool.scale_factor().unwrap_or(1.0).max(1.0);
+    place_with(app, tool, bounds, scale, false)
+}
+
+fn place_with(
+    app: &AppHandle,
+    tool: &WebviewWindow,
+    bounds: Rect,
+    #[cfg_attr(windows, allow(unused_variables))] scale: f64,
+    force: bool,
+) -> Result<()> {
     let target_x = bounds.x.round() as i32;
     let target_y = bounds.y.round() as i32;
     let target_w = bounds.width.round() as u32;
@@ -197,12 +208,12 @@ fn place(app: &AppHandle, tool: &WebviewWindow, bounds: Rect) -> Result<()> {
     let _guard = PlacingGuard(app);
     let pos = tool.inner_position().map_err(|_| windows::window_error())?;
     let size = tool.inner_size().map_err(|_| windows::window_error())?;
-    let pos_diff = (pos.x - target_x).abs() > 1 || (pos.y - target_y).abs() > 1;
+    let pos_diff = force || (pos.x - target_x).abs() > 1 || (pos.y - target_y).abs() > 1;
     let size_diff = size.width.abs_diff(target_w) > 1 || size.height.abs_diff(target_h) > 1;
     if pos_diff || size_diff {
         #[cfg(target_os = "macos")]
         {
-            let scale = tool.scale_factor().unwrap_or(1.0).max(1.0);
+            let scale = scale.max(1.0);
             if size_diff {
                 tool.set_size(tauri::LogicalSize::new(
                     bounds.width / scale,
@@ -216,7 +227,26 @@ fn place(app: &AppHandle, tool: &WebviewWindow, bounds: Rect) -> Result<()> {
             ))
             .map_err(|_| windows::window_error())?;
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "linux")]
+        {
+            // Pass GTK logical coordinates using the image/monitor scale directly so a
+            // newly-created hidden toolbar window with a stale scale factor cannot be
+            // placed at 2x coordinates on HiDPI XWayland displays.
+            let scale = scale.max(1.0);
+            if size_diff || force {
+                tool.set_size(tauri::LogicalSize::new(
+                    bounds.width / scale,
+                    bounds.height / scale,
+                ))
+                .map_err(|_| windows::window_error())?;
+            }
+            tool.set_position(tauri::LogicalPosition::new(
+                bounds.x / scale,
+                bounds.y / scale,
+            ))
+            .map_err(|_| windows::window_error())?;
+        }
+        #[cfg(windows)]
         {
             windows::set_client_rect(tool, bounds)?;
         }
@@ -275,65 +305,108 @@ pub fn sync(app: &AppHandle) -> Result<()> {
         let bounds = image_bounds(&image)?;
         let (area, scale) = monitor(&image, bounds)?;
         let rect = crate::result_toolbar::placement(bounds, scale, &settings, area);
-        place(app, &tool, rect)?;
-        lock(&state.result_toolbar).above = rect.bottom() <= bounds.y;
+        place_with(app, &tool, rect, scale, false)?;
+        {
+            let mut bar = lock(&state.result_toolbar);
+            bar.above = rect.bottom() <= bounds.y;
+            #[cfg(target_os = "linux")]
+            {
+                bar.realign_attempts = 4;
+            }
+        }
         #[cfg(target_os = "macos")]
         attach_macos_child(app, &image, &tool);
     }
-    let _ = tool.emit(
-        "toolbar-placement-changed",
-        lock(&state.result_toolbar).clone(),
-    );
+    let placement_state = lock(&state.result_toolbar).clone();
+    let _ = tool.emit("toolbar-placement-changed", placement_state);
     if !tool.is_visible().unwrap_or(false) {
         windows::request_show(&tool)?;
     }
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn tool_matches_rect_logical(tool: &WebviewWindow, rect: Rect, scale: f64) -> bool {
+    let Ok(pos) = tool.inner_position() else {
+        return false;
+    };
+    let tool_scale = tool.scale_factor().unwrap_or(scale).max(1.0);
+    let scale = scale.max(1.0);
+    (pos.x as f64 / tool_scale - rect.x / scale).abs() <= 2.0
+        && (pos.y as f64 / tool_scale - rect.y / scale).abs() <= 2.0
+}
+
+#[cfg(target_os = "linux")]
+fn realign_docked_toolbar(app: &AppHandle, force: bool) -> bool {
+    let settings = {
+        let state = app.state::<AppState>();
+        let bar = lock(&state.result_toolbar);
+        if bar.detached || bar.toolbar_moving || bar.suppressed() {
+            return false;
+        }
+        bar.clone()
+    };
+    let (Some(image), Some(tool)) = (
+        app.get_webview_window("result"),
+        app.get_webview_window("result-tools"),
+    ) else {
+        return false;
+    };
+    if !image.is_visible().unwrap_or(false) || !tool.is_visible().unwrap_or(false) {
+        return false;
+    }
+    let Ok(bounds) = image_bounds(&image) else {
+        return false;
+    };
+    let Ok((area, scale)) = monitor(&image, bounds) else {
+        return false;
+    };
+    let rect = crate::result_toolbar::placement(bounds, scale, &settings, area);
+    if !force && tool_matches_rect_logical(&tool, rect, scale) {
+        return true;
+    }
+    let _ = place_with(app, &tool, rect, scale, true);
+    lock(&app.state::<AppState>().result_toolbar).above = rect.bottom() <= bounds.y;
+    false
+}
+
 /// X11 / XWayland window managers (notably GNOME Mutter) often override a
 /// window's pre-map position when `show()` maps it. Re-apply the docked
-/// rectangle immediately after showing and once more after the map settles.
+/// rectangle after the window maps and settles without holding any state lock
+/// across GTK window queries (which would deadlock the main event loop).
 #[cfg(target_os = "linux")]
 pub(crate) fn realign_after_show(app: &AppHandle) {
     if uses_embedded_toolbar() {
         return;
     }
-    let should_align = {
+    let generation = {
         let state = app.state::<AppState>();
-        let bar = lock(&state.result_toolbar);
-        !bar.detached && !bar.toolbar_moving && !bar.suppressed()
+        let mut bar = lock(&state.result_toolbar);
+        if bar.detached || bar.toolbar_moving || bar.suppressed() {
+            return;
+        }
+        bar.realign_attempts = 4;
+        bar.generation
     };
-    if !should_align {
-        return;
-    }
-    if let (Some(image), Some(tool)) = (
-        app.get_webview_window("result"),
-        app.get_webview_window("result-tools"),
-    ) && let Ok(bounds) = image_bounds(&image)
-        && let Ok((area, scale)) = monitor(&image, bounds)
-    {
-        let settings = lock(&app.state::<AppState>().result_toolbar).clone();
-        let rect = crate::result_toolbar::placement(bounds, scale, &settings, area);
-        let _ = place(app, &tool, rect);
-    }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(40)).await;
-        let (should_sync, expected_mismatch) = {
-            let state = app.state::<AppState>();
-            let bar = lock(&state.result_toolbar);
-            if bar.detached || bar.toolbar_moving || bar.placing || bar.suppressed() {
-                return;
+        for (step, delay_ms) in [30_u64, 70, 110, 160].into_iter().enumerate() {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            let active = {
+                let state = app.state::<AppState>();
+                let bar = lock(&state.result_toolbar);
+                !bar.detached
+                    && !bar.toolbar_moving
+                    && !bar.suppressed()
+                    && bar.generation == generation
+            };
+            if !active {
+                break;
             }
-            let mismatch = app
-                .get_webview_window("result-tools")
-                .filter(|tool| tool.is_visible().unwrap_or(false))
-                .and_then(|tool| tool.inner_position().ok())
-                .is_some_and(|pos| !bar.matches_expected(pos.x, pos.y));
-            (true, mismatch)
-        };
-        if should_sync && expected_mismatch {
-            let _ = sync(&app);
+            let settled = realign_docked_toolbar(&app, step == 0);
+            if settled && step >= 1 {
+                break;
+            }
         }
     });
 }
@@ -346,6 +419,8 @@ pub fn dock(app: &AppHandle, above: bool, align_left: bool) -> Result<windows::R
         bar.align_left = align_left;
         bar.detached = false;
         bar.toolbar_moving = false;
+        bar.generation += 1;
+        bar.realign_attempts = 4;
     }
     let state = app.state::<AppState>();
     let mut result = lock(&state.result_layout).clone();
@@ -368,6 +443,7 @@ pub fn begin_drag(app: &AppHandle) {
         bar.detached = true;
         bar.toolbar_moving = true;
         bar.expected = None;
+        bar.realign_attempts = 0;
         bar.generation += 1;
         bar.gesture_generation += 1;
         bar.gesture_generation
@@ -379,6 +455,7 @@ pub fn begin_drag(app: &AppHandle) {
         bar.detached = true;
         bar.toolbar_moving = true;
         bar.expected = None;
+        bar.realign_attempts = 0;
         bar.generation += 1;
     }
     #[cfg(target_os = "linux")]
@@ -562,6 +639,18 @@ fn schedule_wayland_drag_finish(window: &tauri::Window) {
 }
 
 #[cfg(target_os = "linux")]
+pub(crate) fn schedule_linux_resize_fallback(app: &AppHandle, generation: u64) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        let Some(window) = app.get_webview_window("result") else {
+            return;
+        };
+        finish_wayland_resize_gesture(&app, &window, generation);
+    });
+}
+
+#[cfg(target_os = "linux")]
 fn schedule_wayland_resize_finish(window: &tauri::Window) {
     let app = window.app_handle().clone();
     let generation = {
@@ -676,11 +765,45 @@ pub fn window_changed(window: &tauri::Window) {
         if label == "result-tools" && (bar.placing || bar.image_moving || bar.image_resizing) {
             return;
         }
-        // On Linux X11/XWayland, initial alignment is handled by `realign_after_show`
-        // and user drags go through `toolbar_moving`; ignoring unsolicited WM `Moved`
-        // events on `result-tools` avoids Mutter placement ping-pong loops.
+        // On Linux X11/XWayland, Mutter can emit a late Moved event when
+        // placing a newly mapped `result-tools` window far from the capture.
+        // Snap it back with a bounded attempt budget so ping-pong is impossible
+        // and user drags (`detached` / `toolbar_moving`) are never interfered with.
         #[cfg(target_os = "linux")]
         if label == "result-tools" {
+            drop(bar);
+            let retry_generation = {
+                let mut bar = lock(&state.result_toolbar);
+                if bar.detached
+                    || bar.toolbar_moving
+                    || bar.placing
+                    || bar.suppressed()
+                    || bar.realign_attempts == 0
+                {
+                    None
+                } else {
+                    bar.realign_attempts -= 1;
+                    Some(bar.generation)
+                }
+            };
+            if let Some(generation) = retry_generation {
+                let app = window.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                    let active = {
+                        let state = app.state::<AppState>();
+                        let bar = lock(&state.result_toolbar);
+                        bar.generation == generation
+                            && !bar.detached
+                            && !bar.toolbar_moving
+                            && !bar.placing
+                            && !bar.suppressed()
+                    };
+                    if active {
+                        let _ = realign_docked_toolbar(&app, false);
+                    }
+                });
+            }
             return;
         }
     }
@@ -738,7 +861,10 @@ pub fn window_changed(window: &tauri::Window) {
     });
 }
 
-pub fn window_resized(window: &tauri::Window) {
+pub fn window_resized(
+    window: &tauri::Window,
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] size: tauri::PhysicalSize<u32>,
+) {
     let label = window.label();
     if label != "result" && label != "result-tools" {
         return;
@@ -747,23 +873,24 @@ pub fn window_resized(window: &tauri::Window) {
     {
         if label == "result" {
             let state = window.state::<AppState>();
-            if let Some(gesture) = lock(&state.result_resize).clone()
-                && *lock(&state.result_frame_id) == gesture.frame_id
-                && let Ok(size) = window.inner_size()
-            {
-                let layout = resized_layout_for_wayland(
-                    &gesture.layout,
-                    gesture.direction,
-                    gesture.scale,
-                    gesture.start_size,
-                    (size.width, size.height),
-                );
-                *lock(&state.result_layout) = layout.clone();
-                let _ = window
-                    .app_handle()
-                    .emit_to("result", "result-layout-changed", layout);
-                schedule_wayland_resize_finish(window);
-                return;
+            let gesture = lock(&state.result_resize).clone();
+            if let Some(gesture) = gesture {
+                let current_frame = lock(&state.result_frame_id).clone();
+                if current_frame == gesture.frame_id {
+                    let layout = resized_layout_for_wayland(
+                        &gesture.layout,
+                        gesture.direction,
+                        gesture.scale,
+                        gesture.start_size,
+                        (size.width, size.height),
+                    );
+                    *lock(&state.result_layout) = layout.clone();
+                    let _ = window
+                        .app_handle()
+                        .emit_to("result", "result-layout-changed", layout);
+                    schedule_wayland_resize_finish(window);
+                    return;
+                }
             }
         }
         if uses_embedded_toolbar() {

@@ -130,14 +130,16 @@ pub fn window_ready(window: &tauri::WebviewWindow, frame_id: Option<&str>) -> Re
         }
     }
     let pending = lock(&window.state::<AppState>().window_lifecycle).loaded(window.label());
-    if window.label() == "result-tools"
-        && (lock(&state.result_toolbar).suppressed()
+    if window.label() == "result-tools" {
+        let suppressed = lock(&state.result_toolbar).suppressed();
+        if suppressed
             || !window
                 .app_handle()
                 .get_webview_window("result")
-                .is_some_and(|w| w.is_visible().unwrap_or(false)))
-    {
-        return Ok(());
+                .is_some_and(|w| w.is_visible().unwrap_or(false))
+        {
+            return Ok(());
+        }
     }
     if pending {
         reveal(window)?;
@@ -482,11 +484,21 @@ pub fn begin_result_resize(
         start_size: (size.width, size.height),
         layout,
     });
+    #[cfg(target_os = "linux")]
+    let generation = {
+        let mut toolbar = lock(&state.result_toolbar);
+        toolbar.image_resizing = true;
+        toolbar.gesture_generation += 1;
+        toolbar.gesture_generation
+    };
+    #[cfg(not(target_os = "linux"))]
     {
         let mut toolbar = lock(&state.result_toolbar);
         toolbar.image_resizing = true;
         toolbar.gesture_generation += 1;
     }
+    #[cfg(target_os = "linux")]
+    crate::result_tools::schedule_linux_resize_fallback(window.app_handle(), generation);
     crate::result_tools::sync(window.app_handle())?;
     Ok(())
 }
@@ -1327,12 +1339,15 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
         }
     }
     #[cfg(target_os = "linux")]
-    if !lock(&state.capabilities).window_positioning
-        && let Some(window) = app.get_webview_window("main")
-        && window.is_visible().unwrap_or(false)
     {
-        lock(&state.return_windows).push("main".into());
-        let _ = window.hide();
+        let can_position = lock(&state.capabilities).window_positioning;
+        if !can_position
+            && let Some(window) = app.get_webview_window("main")
+            && window.is_visible().unwrap_or(false)
+        {
+            lock(&state.return_windows).push("main".into());
+            let _ = window.hide();
+        }
     }
     #[cfg(windows)]
     let overflow_visible = from_tray && tray_overflow_visible();
@@ -1588,7 +1603,12 @@ pub fn reap_hidden_windows(app: AppHandle) {
                 if !reapable {
                     continue;
                 }
+                let result_active = label == "result-tools"
+                    && app
+                        .get_webview_window("result")
+                        .is_some_and(|w| w.is_visible().unwrap_or(false));
                 if window.is_visible().unwrap_or(true)
+                    || result_active
                     || lock(&state.dirty_windows).contains(&label)
                     || !lock(&state.return_windows).is_empty()
                 {
