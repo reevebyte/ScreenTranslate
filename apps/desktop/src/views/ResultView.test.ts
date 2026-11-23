@@ -293,6 +293,28 @@ describe('floating screenshot recovery', () => {
     await waitFor(() => expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(false));
   });
 
+  it('uses embedded toolbar and native resize dragging on Linux XWayland without hiding controls on drag', async () => {
+    app.data!.capabilities.platform = 'linux';
+    app.data!.capabilities.wayland = true;
+    app.data!.capabilities.windowPositioning = true;
+    const view = render(ResultView, { floating: true });
+    await waitFor(() => expect(events.get('result-resize-ended')?.size).toBe(1));
+    expect(view.container.querySelector('.floating-shell')?.contains(view.getByRole('toolbar', { name: '截图操作' }))).toBe(true);
+
+    await fireEvent.pointerDown(view.getByAltText('截图原文'), { button: 0 });
+    await waitFor(() => expect(call).toHaveBeenCalledWith('begin_result_drag'));
+    expect(startDragging).not.toHaveBeenCalled();
+    expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(false);
+
+    const handle = view.getByRole('button', { name: '调整右下角大小' });
+    await fireEvent.pointerDown(handle, { button: 0, pointerId: 1 });
+    await waitFor(() => expect(startResizeDragging).toHaveBeenCalledWith('SouthEast'));
+    expect(call).toHaveBeenCalledWith('begin_result_resize', { direction: 'SouthEast' });
+    expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(true);
+    broadcast('result-resize-ended', 'test-frame');
+    await waitFor(() => expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(false));
+  });
+
   it('lets the user cancel a running job without starting a window drag', async () => {
     const view = renderResult();
     const button = view.getByRole('button', { name: '取消截图翻译' });

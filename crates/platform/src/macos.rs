@@ -24,6 +24,7 @@ unsafe extern "C" {
     fn st_mouse_button_down() -> bool;
     fn st_attach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void);
     fn st_detach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void);
+    fn st_configure_transparent_window(window: *mut std::ffi::c_void);
     fn st_system_dark() -> bool;
     fn st_configure_window(window: *mut std::ffi::c_void, theme_mode: i32);
     fn st_free(pointer: *mut std::ffi::c_void);
@@ -145,6 +146,12 @@ pub fn attach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::
 pub fn detach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void) {
     unsafe {
         st_detach_child_window(parent, child);
+    }
+}
+
+pub fn configure_transparent_window(window_ptr: *mut std::ffi::c_void) {
+    unsafe {
+        st_configure_transparent_window(window_ptr);
     }
 }
 

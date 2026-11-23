@@ -163,6 +163,7 @@ it('browses PP-OCRv5 local engine without activating it until models are ready',
   const view = render(ServicesView);
   await fireEvent.click(view.getByRole('button', { name: 'PP-OCRv5 本地' }));
   expect(app.data!.config.ocr.engine).toBe('youdao');
+  expect(view.container.querySelector('.local-ocr-hint')).toBeNull();
   const activateBtn = view.getByRole('button', { name: '设为当前' }) as HTMLButtonElement;
   expect(activateBtn.disabled).toBe(true);
   await fireEvent.click(view.getByRole('button', { name: '下载模型' }));

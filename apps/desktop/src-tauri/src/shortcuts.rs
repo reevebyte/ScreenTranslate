@@ -43,9 +43,13 @@ fn register(app: &AppHandle, keys: &Hotkeys, best_effort: bool) -> Result<()> {
         #[cfg(target_os = "linux")]
         {
             if is_gnome_desktop() {
-                let bindings = gnome_bindings(keys)?;
+                let (bindings, invalid) = gnome_bindings(keys, best_effort)?;
                 if sync_gnome_shortcuts(&bindings) {
                     mark_global_shortcuts(app);
+                }
+                if !invalid.is_empty() {
+                    let refs: Vec<&str> = invalid.iter().map(String::as_str).collect();
+                    return startup_result(&refs, &[]);
                 }
             } else if is_hyprland_desktop() {
                 let (bindings, invalid) = hyprland_bindings(keys, best_effort)?;
@@ -143,28 +147,36 @@ struct GnomeBinding {
 }
 
 #[cfg(target_os = "linux")]
-fn gnome_bindings(keys: &Hotkeys) -> Result<Vec<GnomeBinding>> {
-    [
+fn gnome_bindings(keys: &Hotkeys, best_effort: bool) -> Result<(Vec<GnomeBinding>, Vec<String>)> {
+    let entries = [
         ("capture", "ScreenTranslate 框选翻译", &keys.capture),
         ("toggle", "ScreenTranslate 收起显示", &keys.toggle),
         ("quick", "ScreenTranslate 快速文字翻译", &keys.quick),
         ("search", "ScreenTranslate 快速查找", &keys.search),
-    ]
-    .into_iter()
-    .filter(|(_, _, value)| !value.is_empty())
-    .map(|(action, name, value)| {
-        gnome_binding(value)
-            .map(|binding| GnomeBinding {
+    ];
+    let mut parsed = Vec::new();
+    let mut invalid = Vec::new();
+    for (action, name, value) in entries
+        .into_iter()
+        .filter(|(_, _, value)| !value.is_empty())
+    {
+        match gnome_binding(value) {
+            Some(binding) => parsed.push(GnomeBinding {
                 action,
                 name,
                 binding,
-            })
-            .ok_or_else(|| {
-                AppError::new(ErrorCode::Configuration, format!("快捷键格式无效：{value}"))
-                    .action("hotkeys")
-            })
-    })
-    .collect()
+            }),
+            None if best_effort => invalid.push(value.clone()),
+            None => {
+                return Err(AppError::new(
+                    ErrorCode::Configuration,
+                    format!("快捷键格式无效：{value}"),
+                )
+                .action("hotkeys"));
+            }
+        }
+    }
+    Ok((parsed, invalid))
 }
 
 #[cfg(target_os = "linux")]
@@ -212,6 +224,34 @@ fn gnome_binding(value: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "linux")]
+fn gnome_command(executable: &str, argument: &str) -> String {
+    let safe_unquoted = !executable.is_empty()
+        && executable
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '-' | '_' | '+'));
+    if safe_unquoted {
+        format!("{executable} {argument}")
+    } else {
+        format!("{} {argument}", shell_quote(executable))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn format_gvariant_string_array(items: &[String]) -> String {
+    if items.is_empty() {
+        return "@as []".to_string();
+    }
+    format!(
+        "[{}]",
+        items
+            .iter()
+            .map(|path| gvariant_string(path))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+#[cfg(target_os = "linux")]
 fn sync_gnome_shortcuts(bindings: &[GnomeBinding]) -> bool {
     if !is_gnome_desktop() {
         return false;
@@ -222,7 +262,7 @@ fn sync_gnome_shortcuts(bindings: &[GnomeBinding]) -> bool {
     let Some(executable) = executable else {
         return false;
     };
-    let executable = shell_quote(&executable.to_string_lossy());
+    let executable = executable.to_string_lossy();
     const MEDIA_KEYS: &str = "org.gnome.settings-daemon.plugins.media-keys";
     const SLOT_ROOT: &str = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/";
     let slots = ["capture", "toggle", "quick", "search"]
@@ -232,6 +272,7 @@ fn sync_gnome_shortcuts(bindings: &[GnomeBinding]) -> bool {
     };
     paths.retain(|path| !slots.contains(path));
 
+    let mut active_slots = Vec::with_capacity(bindings.len());
     for binding in bindings {
         let slot = format!("{SLOT_ROOT}screentranslate-{}/", binding.action);
         let schema =
@@ -242,24 +283,18 @@ fn sync_gnome_shortcuts(bindings: &[GnomeBinding]) -> bool {
             "search" => "--search",
             _ => "--quick",
         };
-        let command = format!("{executable} {argument}");
-        if !gsettings_set(&schema, "name", binding.name)
-            || !gsettings_set(&schema, "command", &command)
-            || !gsettings_set(&schema, "binding", &binding.binding)
+        let command = gnome_command(&executable, argument);
+        if !gsettings_set_string(&schema, "name", binding.name)
+            || !gsettings_set_string(&schema, "command", &command)
+            || !gsettings_set_string(&schema, "binding", &binding.binding)
         {
             return false;
         }
-        paths.push(slot);
+        active_slots.push(slot);
     }
 
-    let array = format!(
-        "[{}]",
-        paths
-            .iter()
-            .map(|path| gvariant_string(path))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
+    paths.extend(active_slots);
+    let array = format_gvariant_string_array(&paths);
     gsettings_set(MEDIA_KEYS, "custom-keybindings", &array)
 }
 
@@ -293,11 +328,31 @@ fn gsettings_strings(schema: &str, key: &str) -> Option<Vec<String>> {
 }
 
 #[cfg(target_os = "linux")]
+fn gsettings_set_string(schema: &str, key: &str, value: &str) -> bool {
+    gsettings_set(schema, key, &gvariant_string(value))
+}
+
+#[cfg(target_os = "linux")]
 fn gsettings_set(schema: &str, key: &str, value: &str) -> bool {
-    Command::new("gsettings")
+    match Command::new("gsettings")
         .args(["set", schema, key, value])
         .output()
-        .is_ok_and(|output| output.status.success())
+    {
+        Ok(output) if output.status.success() => true,
+        Ok(output) => {
+            tracing::warn!(
+                schema,
+                key,
+                stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+                "gsettings set failed"
+            );
+            false
+        }
+        Err(error) => {
+            tracing::warn!(schema, key, error = %error, "failed to invoke gsettings");
+            false
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -572,6 +627,43 @@ fn sync_hyprland_shortcuts(app: &AppHandle, bindings: &[HyprlandBinding]) -> boo
     true
 }
 
+#[cfg(target_os = "linux")]
+fn hyprland_window_rules_lua() -> &'static str {
+    "if not _G.__screentranslate_rules then \
+       _G.__screentranslate_rules = true; \
+       local apply = (o and o.window) \
+         and function(m, r) o.window(m, r) end \
+         or function(m, r) r.match = m; hl.window_rule(r) end; \
+       for _, title in ipairs({'^ScreenTranslate · 截图$', '^ScreenTranslate · 快速翻译$'}) do \
+         apply({ title = title }, { float = true, center = true, pin = true, border_size = 0, no_shadow = true, no_blur = true }); \
+       end \
+     end"
+}
+
+/// Keeps the floating result and quick-translate windows floating, centered and
+/// borderless on Hyprland (including Omarchy's Lua Hyprland config) instead of
+/// being forced into the tiling layout.
+pub fn apply_hyprland_window_rules() {
+    #[cfg(target_os = "linux")]
+    {
+        if cfg!(feature = "e2e") || !is_hyprland_desktop() {
+            return;
+        }
+        if hyprctl_eval(hyprland_window_rules_lua()) {
+            return;
+        }
+        // Fallback for non-Lua Hyprland setups (0.53+ match syntax, then legacy windowrulev2).
+        let modern = "float on, center on, pin on, border_size 0, no_shadow on, no_blur on, match:title ^ScreenTranslate · (截图|快速翻译)$";
+        if hyprctl_keyword("windowrule", modern) {
+            return;
+        }
+        let target = "title:^(ScreenTranslate · (截图|快速翻译))$";
+        for rule in ["float", "center", "pin", "noborder", "noshadow", "noblur"] {
+            let _ = hyprctl_keyword("windowrulev2", &format!("{rule}, {target}"));
+        }
+    }
+}
+
 pub fn cleanup(app: &AppHandle) {
     #[cfg(target_os = "linux")]
     unbind_hyprland_shortcuts(app);
@@ -631,10 +723,9 @@ pub fn configure_portal_at_startup(app: AppHandle, keys: Hotkeys) {
 fn configure_portal_with_mode(app: AppHandle, keys: Hotkeys, at_startup: bool) {
     #[cfg(target_os = "linux")]
     {
-        let bindings = gnome_bindings(&keys);
-        if bindings
-            .as_ref()
-            .is_ok_and(|bindings| sync_gnome_shortcuts(bindings))
+        if is_gnome_desktop()
+            && let Ok((bindings, _)) = gnome_bindings(&keys, at_startup)
+            && sync_gnome_shortcuts(&bindings)
         {
             mark_global_shortcuts(&app);
             persist_wayland_shortcuts(&app, true);
@@ -692,10 +783,11 @@ fn configure_portal_with_mode(app: AppHandle, keys: Hotkeys, at_startup: bool) {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::{
-        gnome_binding, hyprland_binding, hyprland_lua_combo, lua_string, parse_gvariant_strings,
+        format_gvariant_string_array, gnome_binding, gnome_bindings, gnome_command,
+        gvariant_string, hyprland_binding, hyprland_lua_combo, lua_string, parse_gvariant_strings,
         should_disable_portal_after_startup_error,
     };
-    use screentrans_core::ErrorCode;
+    use screentrans_core::{ErrorCode, config::Hotkeys};
 
     #[test]
     fn converts_product_hotkeys_to_hyprland_specs() {
@@ -720,6 +812,10 @@ mod tests {
         assert_eq!(lua_string("a\"b\\c"), "\"a\\\"b\\\\c\"");
         assert_eq!(hyprland_binding("Ctrl+Alt"), None);
         assert_eq!(hyprland_binding("Ctrl+UnknownKey"), None);
+        let rules = super::hyprland_window_rules_lua();
+        assert!(rules.contains("__screentranslate_rules"));
+        assert!(rules.contains("^ScreenTranslate · 截图$"));
+        assert!(rules.contains("^ScreenTranslate · 快速翻译$"));
     }
 
     #[test]
@@ -736,6 +832,46 @@ mod tests {
             gnome_binding("Super+Shift+F12").as_deref(),
             Some("<Super><Shift>F12")
         );
+    }
+
+    #[test]
+    fn formats_gnome_commands_and_gvariant_strings_safely() {
+        let plain = gnome_command("/usr/bin/screen-translate", "--capture");
+        assert_eq!(plain, "/usr/bin/screen-translate --capture");
+        assert_eq!(
+            gvariant_string(&plain),
+            "'/usr/bin/screen-translate --capture'"
+        );
+
+        let spaced = gnome_command("/home/user/My Apps/Screen's.AppImage", "--quick");
+        assert_eq!(spaced, "'/home/user/My Apps/Screen'\\''s.AppImage' --quick");
+        // Must wrap and escape quotes so `gsettings set` parses a single GVariant string.
+        assert_eq!(
+            gvariant_string(&spaced),
+            "'\\'/home/user/My Apps/Screen\\'\\\\\\'\\'s.AppImage\\' --quick'"
+        );
+
+        assert_eq!(format_gvariant_string_array(&[]), "@as []");
+        assert_eq!(
+            format_gvariant_string_array(&["/a/".into(), "/b/".into()]),
+            "['/a/', '/b/']"
+        );
+    }
+
+    #[test]
+    fn gnome_bindings_best_effort_keeps_valid_keys_when_one_is_invalid() {
+        let keys = Hotkeys {
+            capture: "Ctrl+Alt+Q".into(),
+            toggle: "Ctrl+UnknownKey".into(),
+            quick: String::new(),
+            search: "Ctrl+Alt+K".into(),
+        };
+        let (bindings, invalid) = gnome_bindings(&keys, true).unwrap();
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].action, "capture");
+        assert_eq!(bindings[1].action, "search");
+        assert_eq!(invalid, vec!["Ctrl+UnknownKey"]);
+        assert!(gnome_bindings(&keys, false).is_err());
     }
 
     #[test]

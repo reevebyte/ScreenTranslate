@@ -192,6 +192,8 @@ pub struct PlatformCapabilities {
     pub local_ocr: bool,
     pub ocr_languages: Vec<String>,
     pub tray: bool,
+    #[serde(default)]
+    pub system_accent: Option<String>,
     pub notes: Vec<String>,
 }
 

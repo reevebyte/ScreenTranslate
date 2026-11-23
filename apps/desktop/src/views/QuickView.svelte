@@ -3,7 +3,6 @@
   import {
     Copy,
     X,
-    ArrowUpRight,
     CornerDownLeft,
     LoaderCircle,
     Check
@@ -86,7 +85,6 @@
     <div class="spotlight-actions">
       <Button size="sm" class="quick-translate" disabled={!app.input.trim() || composing || app.data?.text.job.stage === 'translating'} onclick={submit}>{#if app.data?.text.job.stage === 'translating'}<LoaderCircle size={15} class="spin"/>{/if}{t("翻译")}<CornerDownLeft size={14}/></Button>
       <span class="spotlight-divider" aria-hidden="true"></span>
-      <button class="spotlight-icon-btn" aria-label={t("打开完整窗口")} title={t("打开主窗口")} onclick={() => act(call('show_main'))}><ArrowUpRight size={16}/></button>
       <button class="spotlight-icon-btn" aria-label={t("收起")} title={t("收起")} onclick={() => act(call('hide_window'))}><X size={16}/></button>
     </div>
   </header>

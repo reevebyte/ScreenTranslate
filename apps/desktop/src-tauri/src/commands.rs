@@ -38,9 +38,9 @@ pub async fn begin_result_drag(window: WebviewWindow) -> Result<()> {
     }
     crate::result_tools::begin_image_drag(window.app_handle())?;
     #[cfg(target_os = "linux")]
-    if screentrans_platform::native_wayland_windows() {
+    {
         // Keep focus and the native drag request in one backend turn. Starting them
-        // from separate IPC calls made the first drag only focus the Wayland window.
+        // from separate IPC calls made the first drag only focus the window.
         let _ = window.set_focus();
         window
             .start_dragging()

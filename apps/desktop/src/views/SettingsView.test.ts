@@ -109,3 +109,13 @@ it('keeps the newest theme when an older save completes late', async () => {
   expect(document.documentElement.classList.contains('dark')).toBe(false);
 });
 
+it('offers the desktop system theme accent swatch when exposed by capabilities', async () => {
+  app.data!.capabilities.systemAccent = '#89b4fa';
+  app.settingsTab = 'appearance';
+  const view = render(SettingsView);
+  const swatch = view.getByRole('button', { name: '系统主题' });
+  await fireEvent.click(swatch);
+  view.unmount();
+  await waitFor(() => expect(call).toHaveBeenCalledWith('save_config', { config: expect.objectContaining({ appearance: expect.objectContaining({ accent: '#89b4fa' }) }) }));
+});
+

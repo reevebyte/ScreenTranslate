@@ -216,6 +216,11 @@ impl StatusNotifierItem {
     }
 
     #[zbus(property)]
+    fn icon_theme_path(&self) -> &str {
+        ""
+    }
+
+    #[zbus(property)]
     fn icon_pixmap(&self) -> Vec<Pixmap> {
         self.pixmaps.clone()
     }
@@ -416,6 +421,14 @@ impl LinuxTrayHandle {
 
 async fn register_with_watcher(connection: &Connection, service_name: &str) -> zbus::Result<()> {
     let proxy = Proxy::new(connection, WATCHER_SERVICE, WATCHER_PATH, WATCHER_SERVICE).await?;
+    if let Ok(false) = proxy
+        .get_property::<bool>("IsStatusNotifierHostRegistered")
+        .await
+    {
+        return Err(zbus::Error::Failure(
+            "no StatusNotifierHost registered".into(),
+        ));
+    }
     let _: () = proxy
         .call("RegisterStatusNotifierItem", &(service_name,))
         .await?;

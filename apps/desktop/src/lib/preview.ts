@@ -13,6 +13,6 @@ export function previewBootstrap(): Bootstrap {
     version, initialRoute: 'translate', config, text, visual: { ...text, id: 'visual' }, credentials: {}, warnings: [], monitors: [],
     legacyAvailable: false, updaterReady: false,
     capabilities: { platform: 'preview', wayland: false, windowPositioning: true, screenshot: false, overlay: false, globalShortcuts: false,
-      localOcr: false, ocrLanguages: [], tray: false, notes: ['浏览器仅预览界面；截图、OCR 与网络翻译请使用桌面应用。'] },
+      localOcr: false, ocrLanguages: [], tray: false, systemAccent: null, notes: ['浏览器仅预览界面；截图、OCR 与网络翻译请使用桌面应用。'] },
   };
 }

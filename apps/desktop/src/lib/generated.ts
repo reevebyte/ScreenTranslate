@@ -36,7 +36,7 @@ wayland: boolean,
  * Windows can be placed on screen. False only for native Wayland windows;
  * on a Wayland session the app normally runs its windows through XWayland.
  */
-windowPositioning: boolean, screenshot: boolean, overlay: boolean, globalShortcuts: boolean, localOcr: boolean, ocrLanguages: Array<string>, tray: boolean, notes: Array<string>, };
+windowPositioning: boolean, screenshot: boolean, overlay: boolean, globalShortcuts: boolean, localOcr: boolean, ocrLanguages: Array<string>, tray: boolean, systemAccent: string | null, notes: Array<string>, };
 
 export type TranslationItem = { id: string, text: string, };
 

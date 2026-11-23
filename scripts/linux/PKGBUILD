@@ -1,11 +1,13 @@
 # Maintainer: reevebyte <mo0nster@163.com>
 pkgname=screentranslate
-pkgver=2.0.39
+pkgver=2.0.40
 pkgrel=1
 pkgdesc="Lightweight cross-platform screenshot and text translation tool"
 arch=('x86_64')
 url="https://github.com/reevebyte/ScreenTranslate"
 license=('MIT')
+provides=('screentranslate')
+conflicts=('screen-translate' 'screentranslate-bin')
 depends=(
   'webkit2gtk-4.1'
   'gtk3'

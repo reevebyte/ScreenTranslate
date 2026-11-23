@@ -18,6 +18,7 @@ pub struct ResizeGesture {
     pub frame_id: String,
     pub bounds: Rect,
     pub current: Rect,
+    #[cfg(not(target_os = "linux"))]
     pub cursor: (f64, f64),
     pub direction: ResizeDirection,
     pub scale: f64,

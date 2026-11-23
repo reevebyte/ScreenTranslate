@@ -208,6 +208,9 @@ pub fn run() {
             app.manage(AppState::new(&handle));
             let state = handle.state::<AppState>();
             let keys = lock(&state.config).hotkeys.clone();
+            if !cfg!(feature = "e2e") {
+                shortcuts::apply_hyprland_window_rules();
+            }
             if !cfg!(feature = "e2e")
                 && let Err(error) = shortcuts::apply_at_startup(&handle, &keys)
             {
@@ -223,25 +226,39 @@ pub fn run() {
             let tray_supported = lock(&state.capabilities).tray;
             if !cfg!(feature = "e2e") && tray_supported {
                 #[cfg(target_os = "linux")]
-                let tray_ready = match linux_tray::setup(&handle) {
+                let (tray_ready, skip_appindicator) = match linux_tray::setup(&handle) {
                     Ok(tray_handle) => {
                         *lock(&handle.state::<update_ui::UpdateUi>().linux_tray) =
                             Some(tray_handle);
                         lock(&state.capabilities).tray = true;
                         let _ = handle.emit("capabilities-changed", ());
                         let _ = handle.emit("tray-ready", ());
-                        true
+                        (true, false)
                     }
                     Err(error) => {
-                        tracing::warn!(
-                            "Native Linux StatusNotifierItem tray unavailable, falling back to AppIndicator: {error}"
-                        );
-                        false
+                        let desktop = std::env::var("XDG_CURRENT_DESKTOP")
+                            .unwrap_or_default()
+                            .to_lowercase();
+                        let no_legacy_tray = screentrans_platform::is_wayland()
+                            || desktop.contains("gnome")
+                            || desktop.contains("ubuntu");
+                        if no_legacy_tray {
+                            tracing::info!(
+                                "Linux StatusNotifier tray host unavailable; disabling tray fallback: {error}"
+                            );
+                            lock(&state.capabilities).tray = false;
+                            let _ = handle.emit("capabilities-changed", ());
+                        } else {
+                            tracing::warn!(
+                                "Native Linux StatusNotifierItem tray unavailable, falling back to AppIndicator: {error}"
+                            );
+                        }
+                        (false, no_legacy_tray)
                     }
                 };
                 #[cfg(not(target_os = "linux"))]
-                let tray_ready = false;
-                if !tray_ready && let Err(error) = setup_tray(&handle) {
+                let (tray_ready, skip_appindicator) = (false, false);
+                if !tray_ready && !skip_appindicator && let Err(error) = setup_tray(&handle) {
                     lock(&state.capabilities).tray = false;
                     state.warning(&handle, format!("系统托盘不可用，将保留主窗口：{error}"));
                 }

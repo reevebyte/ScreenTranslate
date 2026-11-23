@@ -138,6 +138,12 @@ pub fn detach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::
     #[cfg(not(target_os = "macos"))]
     let _ = (parent, child);
 }
+pub fn configure_transparent_window(window_ptr: *mut std::ffi::c_void) {
+    #[cfg(target_os = "macos")]
+    macos::configure_transparent_window(window_ptr);
+    #[cfg(not(target_os = "macos"))]
+    let _ = window_ptr;
+}
 #[cfg(target_os = "linux")]
 fn parse_portal_color_scheme(output: &str) -> Option<bool> {
     let trimmed = output.trim();
@@ -217,7 +223,115 @@ fn has_status_notifier_watcher() -> Option<bool> {
     if !output.status.success() {
         return None;
     }
-    parse_dbus_name_has_owner(&String::from_utf8_lossy(&output.stdout))
+    let has_watcher = parse_dbus_name_has_owner(&String::from_utf8_lossy(&output.stdout))?;
+    if !has_watcher {
+        return Some(false);
+    }
+    let host_output = std::process::Command::new("dbus-send")
+        .args([
+            "--session",
+            "--print-reply=literal",
+            "--reply-timeout=500",
+            "--dest=org.kde.StatusNotifierWatcher",
+            "/StatusNotifierWatcher",
+            "org.freedesktop.DBus.Properties.Get",
+            "string:org.kde.StatusNotifierWatcher",
+            "string:IsStatusNotifierHostRegistered",
+        ])
+        .output()
+        .ok();
+    if let Some(output) = host_output
+        && output.status.success()
+        && let Some(host_registered) =
+            parse_dbus_name_has_owner(&String::from_utf8_lossy(&output.stdout))
+    {
+        return Some(host_registered);
+    }
+    Some(true)
+}
+
+#[cfg(target_os = "linux")]
+fn valid_hex_color(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_matches(['"', '\'']);
+    if trimmed.len() == 7
+        && trimmed.starts_with('#')
+        && trimmed[1..].chars().all(|c| c.is_ascii_hexdigit())
+    {
+        Some(trimmed.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn parse_omarchy_colors_toml(contents: &str) -> (Option<bool>, Option<String>) {
+    let mut dark = None;
+    let mut accent = None;
+    for raw_line in contents.lines() {
+        let line = raw_line.split('#').next().unwrap_or("");
+        let Some((key, raw_value)) = raw_line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = raw_value.trim().trim_matches(['"', '\'']);
+        if key == "mode" {
+            let mode = line
+                .split_once('=')
+                .map(|(_, v)| v.trim().trim_matches(['"', '\'']))
+                .unwrap_or(value)
+                .to_ascii_lowercase();
+            if mode == "dark" {
+                dark = Some(true);
+            } else if mode == "light" {
+                dark = Some(false);
+            }
+        } else if key == "accent" {
+            // Strip inline comments only after the hex literal.
+            let candidate = raw_value.trim();
+            let unquoted = if let Some(rest) = candidate.strip_prefix('"') {
+                rest.split('"').next().unwrap_or("")
+            } else if let Some(rest) = candidate.strip_prefix('\'') {
+                rest.split('\'').next().unwrap_or("")
+            } else {
+                candidate.split_whitespace().next().unwrap_or("")
+            };
+            if let Some(hex) = valid_hex_color(unquoted) {
+                accent = Some(hex);
+            }
+        }
+    }
+    (dark, accent)
+}
+
+#[cfg(target_os = "linux")]
+fn read_omarchy_theme() -> (Option<bool>, Option<String>) {
+    let path = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .map(|home| home.join(".config"))
+        })
+        .map(|dir| dir.join("omarchy/current/theme/colors.toml"));
+    let Some(path) = path else {
+        return (None, None);
+    };
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return (None, None);
+    };
+    parse_omarchy_colors_toml(&contents)
+}
+
+pub fn system_accent() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        read_omarchy_theme().1
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
 }
 
 pub fn system_dark() -> bool {
@@ -265,6 +379,9 @@ pub fn system_dark() -> bool {
         {
             return dark;
         }
+        if let Some(dark) = read_omarchy_theme().0 {
+            return dark;
+        }
         false
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -305,10 +422,10 @@ pub fn capabilities() -> PlatformCapabilities {
     }
     #[cfg(target_os = "linux")]
     let tray = has_status_notifier_watcher().unwrap_or_else(|| {
-        !std::env::var("XDG_CURRENT_DESKTOP")
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP")
             .unwrap_or_default()
-            .to_lowercase()
-            .contains("gnome")
+            .to_lowercase();
+        !(desktop.contains("gnome") || desktop.contains("ubuntu"))
     });
     #[cfg(not(target_os = "linux"))]
     let tray = true;
@@ -322,6 +439,7 @@ pub fn capabilities() -> PlatformCapabilities {
         local_ocr,
         ocr_languages,
         tray,
+        system_accent: system_accent(),
         notes,
     }
 }
@@ -376,6 +494,26 @@ mod tests {
         assert_eq!(parse_gtk_theme_dark("Adwaita"), None);
         assert_eq!(parse_dbus_name_has_owner("   boolean true\n"), Some(true));
         assert_eq!(parse_dbus_name_has_owner("   boolean false\n"), Some(false));
+        assert_eq!(
+            parse_dbus_name_has_owner("   variant       boolean true\n"),
+            Some(true)
+        );
+        assert_eq!(
+            parse_dbus_name_has_owner("   variant       boolean false\n"),
+            Some(false)
+        );
         assert_eq!(parse_dbus_name_has_owner("error"), None);
+        assert_eq!(
+            parse_omarchy_colors_toml("mode = \"dark\"\naccent = \"#89B4FA\" # catppuccin\n"),
+            (Some(true), Some("#89b4fa".into()))
+        );
+        assert_eq!(
+            parse_omarchy_colors_toml("mode = 'light'\naccent = '#d45b37'\n"),
+            (Some(false), Some("#d45b37".into()))
+        );
+        assert_eq!(
+            parse_omarchy_colors_toml("mode = \"unknown\"\naccent = \"invalid\"\n"),
+            (None, None)
+        );
     }
 }

@@ -40,9 +40,12 @@ Installed ScreenTranslate to:
   Binary:  ${BIN_DIR}/screentranslate
   Desktop: ${APP_DIR}/${APP_ID}.desktop
 
-Recommended Hyprland keybindings (~/.config/hypr/bindings.conf or hyprland.conf):
-  bind = CTRL ALT, Q, exec, ${BIN_DIR}/screentranslate --capture
-  bind = CTRL ALT, W, exec, ${BIN_DIR}/screentranslate --toggle-result
-  bind = CTRL ALT, SPACE, exec, ${BIN_DIR}/screentranslate --quick
-  bind = CTRL ALT, K, exec, ${BIN_DIR}/screentranslate --search
+Notes for Hyprland / Omarchy:
+  ScreenTranslate automatically binds shortcuts and applies floating window rules
+  for its screenshot/quick-translate overlays while running under Hyprland.
+  For persistent Omarchy Lua bindings (~/.config/hypr/bindings.lua):
+    o.bind("CTRL + ALT + Q", "ScreenTranslate capture", "${BIN_DIR}/screentranslate --capture")
+    o.bind("CTRL + ALT + W", "ScreenTranslate toggle", "${BIN_DIR}/screentranslate --toggle-result")
+    o.bind("CTRL + ALT + SPACE", "ScreenTranslate quick", "${BIN_DIR}/screentranslate --quick")
+    o.bind("CTRL + ALT + K", "ScreenTranslate search", "${BIN_DIR}/screentranslate --search")
 EOF

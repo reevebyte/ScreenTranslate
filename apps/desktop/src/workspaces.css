@@ -1058,14 +1058,12 @@ button.about-resource:hover { background: var(--surface-muted); }
 .service-advanced-body { padding-top:16px; }
 .ocr-processing-option { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-top:16px; padding:10px 14px; border-top:0; border-radius:var(--radius-control); background:var(--surface-muted); font-size:var(--text-ui); }
 .ocr-processing-option .setting-row-icon { background:var(--surface); }
-.local-ocr-panel { display:flex; flex-direction:column; gap:12px; padding:12px 14px; border-radius:var(--radius-control); background:var(--surface-muted); }
-.local-ocr-panel-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.local-ocr-panel { display:flex; flex-direction:column; gap:10px; padding:10px 14px; border-radius:var(--radius-control); background:var(--surface-muted); }
+.local-ocr-panel-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:var(--text-ui); color:var(--foreground); }
 .local-ocr-panel-head > .setting-row-icon { background:var(--surface); }
-.local-ocr-panel-copy { flex:1; min-width:140px; display:flex; flex-direction:column; gap:2px; font-size:var(--text-small); color:var(--secondary); line-height:1.45; }
-.local-ocr-panel-copy strong { font-size:var(--text-ui); font-weight:500; color:var(--foreground); }
-.local-ocr-progress { width:100%; height:6px; border-radius:var(--radius-pill); background:var(--surface); overflow:hidden; }
+.local-ocr-status { flex:1; min-width:0; overflow-wrap:anywhere; }
+.local-ocr-progress { width:100%; height:4px; border-radius:var(--radius-pill); background:var(--surface); overflow:hidden; }
 .local-ocr-progress-fill { height:100%; border-radius:var(--radius-pill); background:var(--primary); transition:width var(--motion-standard) var(--ease); }
-.local-ocr-hint { margin-top:8px; color:var(--secondary); font-size:var(--text-small); line-height:1.5; }
 .service-mobile { display:none; }
 .model-picker { position:relative; }
 .model-picker > input { padding-left:40px; padding-right:var(--control-height); }

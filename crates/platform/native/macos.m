@@ -275,6 +275,35 @@ void st_detach_child_window(void *parentPtr, void *childPtr) {
     });
 }
 
+static void st_clear_webview_background(NSView *view) {
+    if (!view) return;
+    if ([view isKindOfClass:NSClassFromString(@"WKWebView")]) {
+        @try {
+            [view setValue:@NO forKey:@"drawsBackground"];
+        } @catch (NSException *exception) {
+        }
+    }
+    if (view.wantsLayer && view.layer) {
+        view.layer.backgroundColor = NULL;
+    }
+    for (NSView *subview in view.subviews) {
+        st_clear_webview_background(subview);
+    }
+}
+
+void st_configure_transparent_window(void *windowPtr) {
+    if (!windowPtr) return;
+    NSWindow *window = (__bridge NSWindow *)windowPtr;
+    st_on_main_sync(^{
+        @autoreleasepool {
+            [window setOpaque:NO];
+            [window setBackgroundColor:[NSColor clearColor]];
+            [window setHasShadow:NO];
+            st_clear_webview_background(window.contentView);
+        }
+    });
+}
+
 bool st_system_dark(void) {
     @autoreleasepool {
         NSString *style = [[NSUserDefaults standardUserDefaults] stringForKey:@"AppleInterfaceStyle"];

@@ -439,12 +439,7 @@ pub fn begin_result_resize(
     let layout = lock(&state.result_layout).clone();
     let scale = window.scale_factor().map_err(|_| window_error())?;
     #[cfg(target_os = "linux")]
-    let cursor = if screentrans_platform::native_wayland_windows() {
-        (0.0, 0.0)
-    } else {
-        let cursor = window.cursor_position().map_err(|_| window_error())?;
-        (cursor.x, cursor.y)
-    };
+    let _ = window.set_focus();
     #[cfg(not(target_os = "linux"))]
     let cursor = {
         let cursor = window.cursor_position().map_err(|_| window_error())?;
@@ -459,6 +454,7 @@ pub fn begin_result_resize(
         frame_id: frame.id,
         bounds,
         current: bounds,
+        #[cfg(not(target_os = "linux"))]
         cursor,
         direction,
         scale,
@@ -499,15 +495,10 @@ pub fn update_result_resize(
         return Ok(None);
     }
     #[cfg(target_os = "linux")]
-    let (delta_x, delta_y) = if screentrans_platform::native_wayland_windows() {
-        (
-            dx.unwrap_or(0.0) * gesture.scale,
-            dy.unwrap_or(0.0) * gesture.scale,
-        )
-    } else {
-        let cursor = window.cursor_position().map_err(|_| window_error())?;
-        (cursor.x - gesture.cursor.0, cursor.y - gesture.cursor.1)
-    };
+    let (delta_x, delta_y) = (
+        dx.unwrap_or(0.0) * gesture.scale,
+        dy.unwrap_or(0.0) * gesture.scale,
+    );
     #[cfg(not(target_os = "linux"))]
     let (delta_x, delta_y) = {
         let cursor = window.cursor_position().map_err(|_| window_error())?;
@@ -699,6 +690,7 @@ pub(crate) fn builder<'a>(
     .title(match label {
         "result" => "ScreenTranslate · 截图",
         "result-tools" => "ScreenTranslate · 工具条",
+        "quick" => "ScreenTranslate · 快速翻译",
         _ => "ScreenTranslate",
     })
     .theme(native_theme(theme))
@@ -738,6 +730,7 @@ fn selection_window(app: &AppHandle, label: &str) -> Result<tauri::WebviewWindow
         .resizable(false)
         .always_on_top(true)
         .skip_taskbar(true)
+        .accept_first_mouse(true)
         .build()
         .map_err(|_| window_error())?;
     #[cfg(target_os = "macos")]
@@ -831,20 +824,28 @@ pub fn show_result(app: &AppHandle, frame: &FrameMetadata) -> Result<()> {
             return Ok(());
         }
         Some(window) => window,
-        None => builder(app, "result", "result")
-            .inner_size(640.0, 400.0)
-            .min_inner_size(
-                RESULT_CONTROLS_WIDTH + 2.0 * RESULT_PADDING,
-                RESULT_CONTROLS_HEIGHT + 2.0 * RESULT_PADDING + 1.0,
-            )
-            .decorations(false)
-            .transparent(true)
-            .shadow(false)
-            .always_on_top(true)
-            .resizable(cfg!(target_os = "linux"))
-            .skip_taskbar(true)
-            .build()
-            .map_err(|_| window_error())?,
+        None => {
+            let window = builder(app, "result", "result")
+                .inner_size(640.0, 400.0)
+                .min_inner_size(
+                    RESULT_CONTROLS_WIDTH + 2.0 * RESULT_PADDING,
+                    RESULT_CONTROLS_HEIGHT + 2.0 * RESULT_PADDING + 1.0,
+                )
+                .decorations(false)
+                .transparent(true)
+                .shadow(false)
+                .always_on_top(true)
+                .resizable(cfg!(target_os = "linux"))
+                .skip_taskbar(true)
+                .accept_first_mouse(true)
+                .build()
+                .map_err(|_| window_error())?;
+            #[cfg(target_os = "macos")]
+            if let Ok(ns_window) = window.ns_window() {
+                screentrans_platform::configure_transparent_window(ns_window);
+            }
+            window
+        }
     };
     lock(&app.state::<AppState>().window_lifecycle).forget("result");
     let _ = window.hide();
@@ -866,7 +867,7 @@ pub fn show_result(app: &AppHandle, frame: &FrameMetadata) -> Result<()> {
         let _ = window.center();
         ResultLayout::default()
     };
-    if !screentrans_platform::native_wayland_windows() {
+    if !crate::result_tools::uses_embedded_toolbar() {
         let _ = crate::result_tools::prepare(app)?;
     }
     #[cfg(not(target_os = "macos"))]

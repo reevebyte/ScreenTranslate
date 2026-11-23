@@ -154,9 +154,9 @@
 
   const idleOptions = $derived([
     ['60', t('1 分钟')],
-    ['180', t('3 分钟（默认）')],
+    ['180', t('3 分钟')],
     ['300', t('5 分钟')],
-    ['0', t('不自动释放')],
+    ['0', t('不释放')],
   ] as const);
 
   const downloadPercent = $derived(
@@ -248,15 +248,13 @@
 >
   <ServiceBrowser {entries} {selected} onselect={select} title={t('文字识别服务')}>
     {#snippet header()}<span class="service-protocol"
-        >{selected === 'system'
+        >{selected === 'system' || selected === 'rapid'
           ? t('本机识别')
-          : selected === 'rapid'
-            ? t('离线高精度 · PP-OCRv5')
-            : selected === 'custom'
-              ? t('自定义接口')
-              : selected === 'youdao'
-                ? t('免密云端识别')
-                : t('官方云端识别')}</span
+          : selected === 'custom'
+            ? t('自定义接口')
+            : selected === 'youdao'
+              ? t('免密云端识别')
+              : t('官方云端识别')}</span
       >{/snippet}
 
     {#snippet status()}
@@ -308,22 +306,18 @@
           {#if !localOcr.supported}
             <div class="connection-line">
               <span class="setting-row-icon" aria-hidden="true"><Monitor size={16} /></span>
-              <span>{t('当前系统架构暂不支持内置 PP-OCRv5 本地引擎')}</span>
+              <span>{t('当前系统暂不支持')}</span>
             </div>
           {:else if localOcr.state === 'ready'}
             <div class="connection-line">
               <span class="setting-row-icon" aria-hidden="true"><Monitor size={16} /></span>
-              <span
-                >{t(
-                  '已就绪 · 占用 {0} · 不上传截图',
-                  formatMegabytes(localOcr.installedBytes),
-                )}</span
-              >
+              <span>{t('本机识别，无需上传')}</span>
+              <span class="service-mode">{formatMegabytes(localOcr.installedBytes)}</span>
               {#if localOcr.workerRunning}
                 <button
                   class="icon-button"
                   aria-label={t('立即释放 OCR 内存')}
-                  title={t('立即释放内存')}
+                  title={t('释放内存')}
                   onclick={unloadWorker}><RotateCcw size={16} /></button
                 >
               {/if}
@@ -340,19 +334,14 @@
                 <span class="setting-row-icon" aria-hidden="true"
                   ><LoaderCircle size={16} class="spin" /></span
                 >
-                <div class="local-ocr-panel-copy">
-                  <strong
-                    >{t(
-                      '正在下载模型与运行时 {0}',
-                      downloadPercent === null ? '…' : `${downloadPercent}%`,
-                    )}</strong
-                  >
-                  <span
-                    >{formatMegabytes(localOcr.downloadedBytes)} / {formatMegabytes(
-                      localOcr.totalBytes,
-                    )}</span
-                  >
-                </div>
+                <span class="local-ocr-status"
+                  >{t('下载中 {0}', downloadPercent === null ? '…' : `${downloadPercent}%`)}</span
+                >
+                <span class="service-mode"
+                  >{formatMegabytes(localOcr.downloadedBytes)} / {formatMegabytes(
+                    localOcr.totalBytes,
+                  )}</span
+                >
                 <Button variant="outline" size="sm" onclick={cancelDownload}>{t('取消')}</Button>
               </div>
               <div
@@ -369,47 +358,27 @@
               </div>
             </div>
           {:else}
-            <div class="local-ocr-panel">
-              <div class="local-ocr-panel-head">
-                <span class="setting-row-icon" aria-hidden="true"><Download size={16} /></span>
-                <div class="local-ocr-panel-copy">
-                  <strong>{t('按需下载离线高精度模型（中 / 英 / 日）')}</strong>
-                  <span
-                    >{t(
-                      '约 {0}，仅下载到本机数据目录；空闲时自动释放推理内存。',
-                      formatMegabytes(localOcr.totalBytes ?? 37_600_000),
-                    )}</span
-                  >
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={busyAction}
-                  onclick={startDownload}
-                >
-                  {localOcr.state === 'error' ? t('重试下载') : t('下载模型')}
-                </Button>
-              </div>
+            <div class="connection-line">
+              <span class="setting-row-icon" aria-hidden="true"><Download size={16} /></span>
+              <span>{t('未下载模型')}</span>
+              <span class="service-mode"
+                >{t('约 {0}', formatMegabytes(localOcr.totalBytes ?? 37_600_000))}</span
+              >
+              <Button variant="outline" size="sm" disabled={busyAction} onclick={startDownload}>
+                {localOcr.state === 'error' ? t('重试下载') : t('下载模型')}
+              </Button>
             </div>
-            {#if app.data?.capabilities.platform === 'macos'}
-              <p class="local-ocr-hint">
-                {t('macOS 系统自带的 Apple Vision 已具备高准确率且零磁盘占用，按需下载即可。')}
-              </p>
-            {/if}
           {/if}
 
-          <label class="field-label" for="rapid-idle-unload">{t('空闲自动释放内存')}</label>
+          <label class="field-label" for="rapid-idle-unload">{t('自动释放内存')}</label>
           <Choice
             id="rapid-idle-unload"
             class="field"
-            label={t('空闲自动释放内存')}
+            label={t('自动释放内存')}
             value={String(draft.ocr.rapid.idleUnloadSecs)}
             options={idleOptions}
             onchange={v => (draft.ocr.rapid.idleUnloadSecs = Number(v))}
           />
-          <p class="local-ocr-hint">
-            {t('推理在独立子进程中运行，空闲超时或切换引擎后由系统彻底回收内存。')}
-          </p>
         </div>
       {:else if selected === 'custom'}
         <div class="provider-form">
@@ -538,8 +507,8 @@
       </div>
       <Dialog.Description
         >{draft.ocr.engine === 'rapid'
-          ? t('删除后将释放磁盘空间，并自动切换回其他可用的识别引擎。之后随时可重新下载。')
-          : t('删除后将清理本机模型与运行时文件，之后随时可重新下载。')}</Dialog.Description
+          ? t('删除后将切换回其他识别引擎。')
+          : t('删除后需重新下载才能使用。')}</Dialog.Description
       >
       <div class="dialog-actions">
         <Dialog.Close class="button button-outline button-size-default" disabled={busyAction}

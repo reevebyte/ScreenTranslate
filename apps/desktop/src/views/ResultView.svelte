@@ -34,6 +34,11 @@ import { onMount, onDestroy, tick } from 'svelte';
   let frame = $derived(session?.frame);
   // Native Wayland windows cannot be placed or moved by the app itself.
   let isWayland = $derived(app.data?.capabilities.windowPositioning === false);
+  let isLinux = $derived(app.data?.capabilities.platform === 'linux');
+  // Linux keeps the toolbar embedded inside the result window and delegates
+  // drag/resize to the window manager across X11, XWayland and native Wayland.
+  let embeddedToolbar = $derived(!desktop || isLinux || isWayland);
+  let nativeWindowGestures = $derived(isLinux || isWayland);
   let sourceText = $derived(extractedText(session));
   let original = $state(false);
   let holdingOriginal = $state(false);
@@ -106,9 +111,9 @@ import { onMount, onDestroy, tick } from 'svelte';
     };
     void (async () => {
       if (!toolsOnly) await subscribe<{text:string;tone:'normal'|'error'}>('result-feedback', value => showNotice(value.text,value.tone));
-      if (isWayland) {
+      if (nativeWindowGestures) {
         await subscribe('result-drag-ended', () => { imageDragging = false; });
-        await subscribe('result-resize-ended', () => clearWaylandResize());
+        await subscribe('result-resize-ended', () => clearNativeResize());
       }
       await subscribe('result-display-changed', applyDisplay);
       applyDisplay(await call('result_display'));
@@ -205,7 +210,7 @@ import { onMount, onDestroy, tick } from 'svelte';
   let resizeWrite: Promise<unknown> | null = null;
   let resizeDirty = false;
   function resizeArgs(finish: boolean, gesture: typeof resizing = resizing) {
-    if (isWayland && gesture) {
+    if (nativeWindowGestures && gesture) {
       return {
         finish,
         dx: gesture.currentCursor.x - gesture.startCursor.x,
@@ -216,14 +221,15 @@ import { onMount, onDestroy, tick } from 'svelte';
   }
   function resize(event: PointerEvent,direction: typeof handles[number][2]) {
     event.preventDefault();event.stopPropagation();
-    if (!desktop || event.button !== 0 || resizing || resizeEnding) return;
+    if (!desktop || event.button !== 0 || (!nativeWindowGestures && resizing) || resizeEnding) return;
+    if (nativeWindowGestures && resizing) clearNativeResize();
     const node=event.currentTarget as HTMLElement;
     const rect=node.closest('.floating-canvas-stage')!.getBoundingClientRect();
     const curX=event.screenX||(event.clientX+screenX);
     const curY=event.screenY||(event.clientY+screenY);
     resizing={id:event.pointerId,node,start:call('begin_result_resize',{direction}),direction,startCursor:{x:curX,y:curY},currentCursor:{x:curX,y:curY},anchor:{left:screenX+rect.left,top:screenY+rect.top,right:screenX+rect.right,bottom:screenY+rect.bottom,width:rect.width,height:rect.height}};
     const gesture=resizing;
-    if (isWayland) {
+    if (nativeWindowGestures) {
       resizePreview=null;
       gesture.start.then(() => {
         if (resizing !== gesture) return;
@@ -237,7 +243,7 @@ import { onMount, onDestroy, tick } from 'svelte';
   }
   function resizeMove(event: PointerEvent) {
     if (!resizing || resizeEnding || resizing.id !== event.pointerId) return;
-    if (isWayland) return;
+    if (nativeWindowGestures) return;
     event.preventDefault();
     const curX=event.screenX||(event.clientX+screenX);
     const curY=event.screenY||(event.clientY+screenY);
@@ -247,15 +253,15 @@ import { onMount, onDestroy, tick } from 'svelte';
   }
   async function writeResize() {
     const gesture=resizing;
-    if (!gesture || isWayland || !resizeDirty || resizeWrite) return;
+    if (!gesture || nativeWindowGestures || !resizeDirty || resizeWrite) return;
     resizeDirty=false;
     const write=gesture.start.then(() => call('update_result_resize',resizeArgs(false, gesture)));
     resizeWrite=write;
     try { await write; } catch { void endResize(); }
     finally { if (resizeWrite === write) resizeWrite=null; if (resizeDirty && !resizeEnding && resizing === gesture && !resizeFrame) resizeFrame=requestAnimationFrame(() => { resizeFrame=0;void writeResize(); }); }
   }
-  function clearWaylandResize() {
-    if (!isWayland) return;
+  function clearNativeResize() {
+    if (!nativeWindowGestures) return;
     if (resizeFrame) { cancelAnimationFrame(resizeFrame); resizeFrame=0; }
     if (previewFrame) { cancelAnimationFrame(previewFrame); previewFrame=0; }
     const stage = resizing?.node.closest('.floating-canvas-stage') as HTMLElement | null;
@@ -271,11 +277,11 @@ import { onMount, onDestroy, tick } from 'svelte';
   async function endResize(event?: PointerEvent) {
     const gesture=resizing;
     if (!gesture || resizeEnding || (event && event.pointerId !== gesture.id)) return;
-    if (isWayland) {
+    if (nativeWindowGestures) {
       resizeEnding=true;
       try { await gesture.start; } catch { /* Native resize may be cancelled by the compositor. */ }
       try { await call('update_result_resize',{finish:true}); } catch { /* Window may already be closed. */ }
-      clearWaylandResize();
+      clearNativeResize();
       return;
     }
     if (resizeDirty && !resizeWrite) void writeResize();
@@ -431,31 +437,31 @@ import { onMount, onDestroy, tick } from 'svelte';
   }
 
   function dragWindow(event: PointerEvent) {
-    if (!floating || !desktop || event.button !== 0 || resizing || (!isWayland && imageDragging)) return;
+    if (!floating || !desktop || event.button !== 0 || resizing || (!nativeWindowGestures && imageDragging)) return;
     const target = event.target;
     if (target instanceof Element && target.closest('button:not(.hud-grip), input, textarea')) return;
     event.preventDefault();
-    // A new pointerdown proves the previous physical press ended. Wayland can
-    // deliver that release to the compositor's move grab instead of the WebView,
-    // so treating the stale flag as a blocker would consume one full click.
+    // A new pointerdown proves the previous physical press ended. Linux WMs and
+    // Wayland compositors can deliver that release to the move grab instead of
+    // the WebView, so treating the stale flag as a blocker would eat one click.
     imageDragging = true;
     void (async () => {
       try {
-        if (isWayland) {
+        if (nativeWindowGestures) {
           await call('begin_result_drag');
         } else {
           await call('begin_result_drag');
           await getCurrentWindow().startDragging();
         }
       } catch {
-        if (isWayland) {
+        if (nativeWindowGestures) {
           imageDragging = false;
           void call('finish_result_drag').catch(()=>{});
         }
         showNotice(t("无法移动截图，请重试"), 'error');
       }
       finally {
-        if (!isWayland) {
+        if (!nativeWindowGestures) {
           await call('finish_result_drag').catch(()=>{});
           imageDragging = false;
         }
@@ -463,9 +469,14 @@ import { onMount, onDestroy, tick } from 'svelte';
     })();
   }
   function releaseImageDrag() {
-    if (!isWayland || !imageDragging) return;
-    imageDragging = false;
-    void call('finish_result_drag').catch(()=>{});
+    if (!nativeWindowGestures) return;
+    if (imageDragging) {
+      imageDragging = false;
+      void call('finish_result_drag').catch(()=>{});
+    }
+    if (resizing) {
+      void endResize();
+    }
   }
 
   function keydown(event: KeyboardEvent) {
@@ -512,7 +523,7 @@ import { onMount, onDestroy, tick } from 'svelte';
 />
 
 <div class="result-workspace" class:floating bind:clientWidth={workspaceWidth}>
-  {#if toolsOnly}<!-- svelte-ignore a11y_no_static_element_interactions --><div class="toolbar-window" onpointerenter={() => { if (!toolbarDragging) void getCurrentWindow?.()?.setFocus?.()?.catch(() => {}); }} onpointerdown={event => { if (!(event.target instanceof Element && event.target.closest('.hud-grip'))) void getCurrentWindow?.()?.setFocus?.()?.catch(() => {}); }}>{@render floatingToolbar()}</div>
+  {#if toolsOnly}<div class="toolbar-window">{@render floatingToolbar()}</div>
   {:else if !frame}
     <div class="capture-empty">
       <span class="capture-empty-symbol" aria-hidden="true"><ScanLine size={28}/></span>
@@ -533,11 +544,11 @@ import { onMount, onDestroy, tick } from 'svelte';
       class="floating-canvas-stage"
       class:dragging={imageDragging}
       class:native-resizing={nativeOutlineReady && /Windows/.test(navigator.userAgent)}
-      style:left={resizeEnding && resizePreview && !isWayland ? resizePreview.left+'px' : undefined}
-      style:right={resizeEnding && resizePreview && !isWayland ? 'auto' : undefined}
-      style:top={resizeEnding && resizePreview && !isWayland ? resizePreview.top+'px' : undefined}
-      style:width={resizeEnding && resizePreview && !isWayland ? resizePreview.width+'px' : undefined}
-      style:height={resizeEnding && resizePreview && !isWayland ? resizePreview.height+'px' : undefined}
+      style:left={resizeEnding && resizePreview && !nativeWindowGestures ? resizePreview.left+'px' : undefined}
+      style:right={resizeEnding && resizePreview && !nativeWindowGestures ? 'auto' : undefined}
+      style:top={resizeEnding && resizePreview && !nativeWindowGestures ? resizePreview.top+'px' : undefined}
+      style:width={resizeEnding && resizePreview && !nativeWindowGestures ? resizePreview.width+'px' : undefined}
+      style:height={resizeEnding && resizePreview && !nativeWindowGestures ? resizePreview.height+'px' : undefined}
       style:--image-width={`${resultLayout?.imageWidth ?? Math.max(0,frame.width * scale)}px`}
       bind:clientWidth={imageWidth}
       bind:clientHeight={imageHeight}
@@ -586,8 +597,8 @@ import { onMount, onDestroy, tick } from 'svelte';
       <div class="result-selection-border">{#each handles as [position,label,direction]}<button class={`resize-handle ${position}`} aria-label={t("调整{0}大小",label)} onpointerdown={event => resize(event,direction)} onpointermove={resizeMove} onpointerup={endResize} onpointercancel={endResize} onlostpointercapture={endResize}></button>{/each}</div>
 
     </div>
-    <div class="floating-controls" class:toolbar-left={toolbarAlignLeft} class:gesture-active={imageDragging || !!resizing} class:notice-compact={!!notice && contentHeight < 60} inert={!!notice && contentHeight < 60 || imageDragging || !!resizing} style:top={controlsAbove ? `${imagePadding}px` : `${frame.height * scaleY + imagePadding}px`}>
-      {#if !desktop || isWayland}{@render floatingToolbar()}{/if}
+    <div class="floating-controls" class:toolbar-left={toolbarAlignLeft} class:gesture-active={(isWayland && imageDragging) || !!resizing} class:notice-compact={!!notice && contentHeight < 60} inert={!!notice && contentHeight < 60 || (isWayland && imageDragging) || !!resizing} style:top={controlsAbove ? `${imagePadding}px` : `${frame.height * scaleY + imagePadding}px`}>
+      {#if embeddedToolbar}{@render floatingToolbar()}{/if}
 
     </div>
       {#if notice}<div class="overlay-notice" role={notice.tone === 'error' ? 'alert' : 'status'} style:top={contentHeight < 60 ? '50%' : ((controlsAbove ? 56 : 8) + contentHeight / 2) + 'px'} transition:fade={{ duration: prefersReducedMotion.current ? 0 : 120 }}>{notice.text}</div>{/if}

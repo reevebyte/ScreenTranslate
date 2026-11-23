@@ -25,7 +25,14 @@
   const autosave = createAutosave<Config>(config => saveConfig(config, { quiet: true }));
   const tabs = $derived([ ['general', t("常规")], ['appearance', t("外观")], ['about', t("关于")] ] as const);
   const themes = $derived([['system', t("跟随系统"), Monitor], ['light', t("浅色"), Sun], ['dark', t("深色"), Moon]] as const);
-  const accents = $derived([[t("默认"),'#18181b'],[t("橙色"),'#d45b37'],[t("蓝色"),'#4276b8'],[t("绿色"),'#438569'],[t("紫色"),'#8971ad']] as const);
+  const accents = $derived.by(() => {
+    const base: [string, string][] = [[t("默认"),'#18181b'],[t("橙色"),'#d45b37'],[t("蓝色"),'#4276b8'],[t("绿色"),'#438569'],[t("紫色"),'#8971ad']];
+    const system = app.data?.capabilities.systemAccent?.toLowerCase();
+    if (system && /^#[a-f\d]{6}$/i.test(system) && !base.some(([, color]) => color === system)) {
+      base.push([t("系统主题"), system]);
+    }
+    return base;
+  });
   let darkAppearance = $derived(draft.appearance.theme === 'dark' || (draft.appearance.theme === 'system' && typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches));
   function fontStep(step: number) { draft.appearance.fontScale = Math.max(.8,Math.min(1.5,Math.round((draft.appearance.fontScale * 100 + step) / 5) * 5 / 100)); }
   function queueDraft() {

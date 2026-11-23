@@ -47,6 +47,8 @@ it('copies the translation with Ctrl+C outside the text editor', async () => {
 it('keeps only the copy action on the translation without a separate reading dialog', () => {
   const view = render(QuickView);
   expect(view.queryByRole('button', { name: '阅读' })).toBeNull();
+  expect(view.queryByRole('button', { name: '打开完整窗口' })).toBeNull();
+  expect(view.queryByRole('button', { name: '打开主窗口' })).toBeNull();
   expect(view.getByRole('button', { name: '复制译文' })).toBeTruthy();
   expect(view.queryByRole('dialog')).toBeNull();
 });
