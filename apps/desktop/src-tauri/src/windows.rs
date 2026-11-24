@@ -18,6 +18,17 @@ pub(crate) fn window_error() -> AppError {
     AppError::new(ErrorCode::Internal, "无法创建应用窗口，请重试")
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CaptureMode {
+    /// Standard floating overlay capture (global hotkey, tray, or Shortcuts page).
+    #[default]
+    Floating,
+    /// Initiated from the main window's Result page: hide `main` during capture,
+    /// then restore `main` and present the new capture in-page without popping up
+    /// the floating `result` / `result-tools` windows.
+    InMain,
+}
+
 #[derive(Default)]
 pub struct WindowLifecycle {
     ready: HashSet<String>,
@@ -1077,6 +1088,7 @@ fn selection_in_use(app: &AppHandle) -> bool {
 
 fn cancel_capture_with(app: &AppHandle, restore: bool, clear_selections: bool) {
     let state = app.state::<AppState>();
+    *lock(&state.capture_mode) = CaptureMode::Floating;
     if restore && selection_in_use(app) {
         state.jobs.cancel("visual");
         lock(&state.window_lifecycle).forget("result");
@@ -1093,7 +1105,9 @@ fn cancel_capture_with(app: &AppHandle, restore: bool, clear_selections: bool) {
     if restore {
         let previous: Vec<_> = lock(&state.return_windows).drain(..).collect();
         for label in previous {
-            if let Some(window) = app.get_webview_window(&label) {
+            if label == "main" {
+                let _ = show_main(app);
+            } else if let Some(window) = app.get_webview_window(&label) {
                 let _ = window.show();
             }
         }
@@ -1265,11 +1279,20 @@ async fn wait_for_tray_overflow_to_close() {
 }
 
 pub fn begin_capture(app: AppHandle, monitor: Option<String>) {
-    begin_capture_with_source(app, monitor, false);
+    begin_capture_with_options(app, monitor, false, false, CaptureMode::Floating);
 }
 
 pub fn begin_capture_from_tray(app: AppHandle) {
-    begin_capture_with_source(app, None, true);
+    begin_capture_with_options(app, None, true, false, CaptureMode::Floating);
+}
+
+pub fn begin_capture_from_window(
+    app: AppHandle,
+    monitor: Option<String>,
+    hide_main: bool,
+    mode: CaptureMode,
+) {
+    begin_capture_with_options(app, monitor, false, hide_main, mode);
 }
 
 fn hash_rgba(width: u32, height: u32, bytes: &[u8]) -> (u32, u32, u64) {
@@ -1352,18 +1375,59 @@ async fn picker_capture(app: &AppHandle, ticket: &screentrans_core::jobs::JobTic
         return Err(AppError::cancelled());
     }
     let metadata = lock(&state.frames).insert(frame, &[])?;
-    lock(&state.return_windows).clear();
-    pipeline::start_visual(app.clone(), metadata, true, true);
+    finish_captured_frame(app, metadata, false);
     Ok(())
 }
 
-pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_tray: bool) {
+fn finish_captured_frame(app: &AppHandle, metadata: FrameMetadata, retire_selection: bool) {
+    let state = app.state::<AppState>();
+    let mode = std::mem::take(&mut *lock(&state.capture_mode));
+    match mode {
+        CaptureMode::InMain => {
+            if retire_selection {
+                // No floating result window will emit `result_presented`, so
+                // retire the fullscreen selection overlay immediately without
+                // restoring previous overlays or cancelling the visual job.
+                cancel_capture_with(app, false, true);
+            } else {
+                lock(&state.return_windows).clear();
+            }
+            lock(&state.frames).retain_current(&metadata.id);
+            pipeline::start_visual(app.clone(), metadata, true, false);
+            let _ = app.emit_to("main", "navigate", "capture");
+            let _ = show_main(app);
+        }
+        CaptureMode::Floating => {
+            if !retire_selection {
+                lock(&state.return_windows).clear();
+            }
+            pipeline::start_visual(app.clone(), metadata, true, true);
+        }
+    }
+}
+
+/// Delay after hiding the main window so desktop compositors (Windows DWM,
+/// macOS WindowServer, GNOME Mutter, Hyprland) finish unmapping/fading it out
+/// before the screen is captured.
+const MAIN_HIDE_SETTLE_DELAY: Duration = Duration::from_millis(180);
+
+pub fn begin_capture_with_options(
+    app: AppHandle,
+    monitor: Option<String>,
+    from_tray: bool,
+    hide_main: bool,
+    mode: CaptureMode,
+) {
     // Hide any overlay now: it must not appear in the screenshot taken next.
     cancel_capture_with(&app, true, false);
     let state = app.state::<AppState>();
     let ticket = state.jobs.begin("capture");
-    // Capture exactly what is visible. Hiding or capture-excluding the main
-    // window changed the desktop at both ends of every capture in alpha.9.
+    *lock(&state.capture_mode) = mode;
+    // Capture exactly what is visible for global-hotkey captures. Hiding the
+    // main window unconditionally changed the desktop at both ends of every
+    // capture in alpha.9, so only hide `main` when the capture was explicitly
+    // initiated from inside `main` (or on native Wayland where overlays cannot
+    // be positioned).
     lock(&state.return_windows).clear();
     for label in ["quick", "result", "result-tools"] {
         if let Some(window) = app.get_webview_window(label)
@@ -1374,16 +1438,24 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
             let _ = window.hide();
         }
     }
-    #[cfg(target_os = "linux")]
-    {
-        let can_position = lock(&state.capabilities).window_positioning;
-        if !can_position
-            && let Some(window) = app.get_webview_window("main")
-            && window.is_visible().unwrap_or(false)
+    let should_hide_main = hide_main || {
+        #[cfg(target_os = "linux")]
         {
-            lock(&state.return_windows).push("main".into());
-            let _ = window.hide();
+            !lock(&state.capabilities).window_positioning
         }
+        #[cfg(not(target_os = "linux"))]
+        {
+            false
+        }
+    };
+    let mut hid_main = false;
+    if should_hide_main
+        && let Some(window) = app.get_webview_window("main")
+        && window.is_visible().unwrap_or(false)
+    {
+        lock(&state.return_windows).push("main".into());
+        let _ = window.hide();
+        hid_main = true;
     }
     #[cfg(windows)]
     let overflow_visible = from_tray && tray_overflow_visible();
@@ -1404,8 +1476,18 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
             if overflow_visible {
                 wait_for_tray_overflow_to_close().await;
             }
+            if hid_main {
+                tokio::select! {
+                    _ = ticket.stop.cancelled() => return Err(AppError::cancelled()),
+                    _ = tokio::time::sleep(MAIN_HIDE_SETTLE_DELAY) => {}
+                }
+                flush_compositor();
+            }
 
             let state = app.state::<AppState>();
+            if !state.jobs.is_current("capture", &ticket) {
+                return Err(AppError::cancelled());
+            }
             if !lock(&state.capabilities).window_positioning {
                 return picker_capture(&app, &ticket).await;
             }
@@ -1495,12 +1577,17 @@ pub fn begin_capture_with_source(app: AppHandle, monitor: Option<String>, from_t
         }
         .await;
         if let Err(error) = result
-            && error.code != ErrorCode::Cancelled
             && app.state::<AppState>().jobs.is_current("capture", &ticket)
         {
-            // A late OS/portal error from an abandoned capture must not tear
-            // down selection windows that belong to its replacement.
-            abort_capture(&app, error);
+            if error.code == ErrorCode::Cancelled {
+                // The OS screenshot picker (e.g. Wayland slurp/portal) was
+                // dismissed by the user; restore any hidden windows quietly.
+                cancel_capture(&app, true);
+            } else {
+                // A late OS/portal error from an abandoned capture must not tear
+                // down selection windows that belong to its replacement.
+                abort_capture(&app, error);
+            }
         }
     });
 }
@@ -1545,7 +1632,7 @@ pub fn accept_selection(app: &AppHandle, label: &str, rect: Rect) -> Result<()> 
         lock(&state.frames).remove(&id);
     }
     let metadata = lock(&state.frames).insert(crop, &[])?;
-    pipeline::start_visual(app.clone(), metadata, true, true);
+    finish_captured_frame(app, metadata, true);
     Ok(())
 }
 

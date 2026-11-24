@@ -498,4 +498,18 @@ describe('proofreading dialog', () => {
     // The old bottom status line changed the dialog's rows and made it jump.
     expect(dialog.querySelector('.editor-pending')).toBeNull();
   });
+
+  it('requests in-main capture when starting or retaking a screenshot from the main result page', async () => {
+    app.data!.visual.frame = null;
+    const emptyView = render(ResultView);
+    await fireEvent.click(emptyView.getByRole('button', { name: '开始截图' }));
+    expect(call).toHaveBeenCalledWith('begin_capture', { monitor: null, returnToMain: true });
+    emptyView.unmount();
+
+    call.mockClear();
+    app.data!.visual.frame = { id: 'frame-1', width: 200, height: 100, scaleFactor: 1, screenBounds: null, cleanId: null };
+    const resultView = render(ResultView);
+    await fireEvent.click(resultView.getByRole('button', { name: /重新截图/ }));
+    expect(call).toHaveBeenCalledWith('begin_capture', { monitor: null, returnToMain: true });
+  });
 });

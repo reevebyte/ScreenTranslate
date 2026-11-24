@@ -246,8 +246,19 @@ pub async fn cancel_job(app: AppHandle, session: String) -> Result<()> {
 }
 
 #[tauri::command]
-pub async fn begin_capture(app: AppHandle, monitor: Option<String>) -> Result<()> {
-    windows::begin_capture(app, monitor);
+pub async fn begin_capture(
+    app: AppHandle,
+    window: WebviewWindow,
+    monitor: Option<String>,
+    return_to_main: Option<bool>,
+) -> Result<()> {
+    let from_main = window.label() == "main";
+    let mode = if from_main && return_to_main.unwrap_or(false) {
+        windows::CaptureMode::InMain
+    } else {
+        windows::CaptureMode::Floating
+    };
+    windows::begin_capture_from_window(app, monitor, from_main, mode);
     Ok(())
 }
 

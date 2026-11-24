@@ -655,7 +655,7 @@ import { onMount, onDestroy, tick } from 'svelte';
     <div class="capture-empty">
       <span class="capture-empty-symbol" aria-hidden="true"><ScanLine size={28}/></span>
       <div class="empty-actions">
-        <Button onclick={() => act(call('begin_capture', { monitor: null }))}>
+        <Button onclick={() => act(call('begin_capture', { monitor: null, returnToMain: true }))}>
           {t("开始截图")}
         </Button>
         <Button variant="outline" onclick={() => act(call('open_image'))}>
@@ -794,7 +794,7 @@ import { onMount, onDestroy, tick } from 'svelte';
         <Button
           variant="outline"
           size="sm"
-          onclick={() => act(call('begin_capture', { monitor: null }))}
+          onclick={() => act(call('begin_capture', { monitor: null, returnToMain: true }))}
         >
           <ScanLine size={14} />{t("重新截图")}
         </Button>
