@@ -172,7 +172,7 @@ fn destroy(handles: &[isize]) {
     for &raw in handles {
         unsafe {
             let hwnd = HWND(raw as *mut _);
-            if windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)).as_bool() {
+            if IsWindow(hwnd).as_bool() {
                 let _ = DestroyWindow(hwnd);
             }
         }
