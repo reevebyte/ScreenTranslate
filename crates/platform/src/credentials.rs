@@ -35,9 +35,14 @@ fn credentials_error() -> AppError {
     .action("providers")
 }
 
+struct SessionSecret {
+    value: String,
+    durable: bool,
+}
+
 pub struct CredentialVault {
     persistent: Box<dyn SecretStore>,
-    session: Mutex<HashMap<String, String>>,
+    session: Mutex<HashMap<String, SessionSecret>>,
 }
 
 impl Default for CredentialVault {
@@ -81,7 +86,7 @@ impl CredentialVault {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(name)
-            .cloned()
+            .map(|entry| entry.value.clone())
     }
 
     /// Returns whether the credential is durable. A failed keyring write never creates a plaintext file.
@@ -89,24 +94,39 @@ impl CredentialVault {
         if secret.is_empty() {
             return Err(AppError::new(ErrorCode::InvalidInput, "密钥不能为空"));
         }
-        let saved = persistent && self.persistent.set(name, secret).is_ok();
+        let saved = if persistent {
+            self.persistent.set(name, secret).is_ok()
+        } else {
+            // Switching an existing key to session-only must not leave a stale
+            // copy in the OS keyring that would resurrect on next launch.
+            let _ = self.persistent.delete(name);
+            false
+        };
         self.session
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(name.into(), secret.into());
+            .insert(
+                name.into(),
+                SessionSecret {
+                    value: secret.into(),
+                    durable: saved,
+                },
+            );
         Ok(saved)
     }
 
     pub fn delete(&self, name: &str) -> Result<()> {
-        let removed_session = self
+        let removed = self
             .session
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .remove(name)
-            .is_some();
+            .remove(name);
+        let session_only = removed.as_ref().is_some_and(|entry| !entry.durable);
         match self.persistent.delete(name) {
             Ok(()) => Ok(()),
-            Err(_) if removed_session => Ok(()),
+            // Only ignore persistent deletion errors when the secret was never
+            // durably stored in the keyring (e.g. keyring locked/unavailable).
+            Err(_) if session_only => Ok(()),
             Err(error) => Err(error),
         }
     }
@@ -144,10 +164,17 @@ pub fn decode_legacy(value: &str) -> Result<String> {
                 &mut output,
             )
             .map_err(|_| credentials_error())?;
-            let decoded = String::from_utf8(
-                std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec(),
-            );
-            let _ = LocalFree(HLOCAL(output.pbData as *mut _));
+            let decoded = if output.pbData.is_null() || output.cbData == 0 {
+                Ok(String::new())
+            } else {
+                let len = output.cbData as usize;
+                let plain = std::slice::from_raw_parts(output.pbData, len).to_vec();
+                std::ptr::write_bytes(output.pbData, 0, len);
+                String::from_utf8(plain)
+            };
+            if !output.pbData.is_null() {
+                let _ = LocalFree(HLOCAL(output.pbData as *mut _));
+            }
             decoded.map_err(|_| credentials_error())
         }
     }
@@ -187,5 +214,58 @@ mod tests {
         assert_eq!(vault.get_session("deepl"), None);
         vault.delete("openai").unwrap();
         assert!(vault.get("openai").is_err());
+    }
+
+    #[test]
+    fn durable_secret_delete_surfaces_keyring_failure_and_session_only_clears_persistent() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        struct ControlledStore {
+            data: Mutex<HashMap<String, String>>,
+            fail_delete: AtomicBool,
+        }
+        struct SharedStore(Arc<ControlledStore>);
+        impl SecretStore for SharedStore {
+            fn get(&self, name: &str) -> Result<Option<String>> {
+                Ok(self.0.data.lock().unwrap().get(name).cloned())
+            }
+            fn set(&self, name: &str, secret: &str) -> Result<()> {
+                self.0
+                    .data
+                    .lock()
+                    .unwrap()
+                    .insert(name.into(), secret.into());
+                Ok(())
+            }
+            fn delete(&self, name: &str) -> Result<()> {
+                if self.0.fail_delete.load(Ordering::Relaxed) {
+                    return Err(credentials_error());
+                }
+                self.0.data.lock().unwrap().remove(name);
+                Ok(())
+            }
+        }
+
+        let store = Arc::new(ControlledStore {
+            data: Mutex::new(HashMap::new()),
+            fail_delete: AtomicBool::new(false),
+        });
+        let vault = CredentialVault {
+            persistent: Box::new(SharedStore(store.clone())),
+            session: Mutex::new(HashMap::new()),
+        };
+
+        assert!(vault.set("openai", "sk-durable", true).unwrap());
+        store.fail_delete.store(true, Ordering::Relaxed);
+        assert!(vault.delete("openai").is_err());
+        store.fail_delete.store(false, Ordering::Relaxed);
+
+        // Switching to session-only must also clear the old durable entry.
+        assert!(!vault.set("openai", "sk-session", false).unwrap());
+        assert_eq!(store.data.lock().unwrap().get("openai"), None);
+        assert_eq!(vault.get("openai").unwrap().as_deref(), Some("sk-session"));
     }
 }

@@ -32,8 +32,7 @@ pub struct Sessions {
 
 pub struct AppState {
     pub route: Mutex<String>,
-    #[cfg(feature = "e2e")]
-    _test_directory: tempfile::TempDir,
+    _temp_directory: Option<tempfile::TempDir>,
     pub config: Mutex<Config>,
     pub theme_preview: Mutex<crate::theme_preview::ThemePreview>,
     pub config_path: PathBuf,
@@ -65,18 +64,31 @@ pub struct AppState {
 impl AppState {
     pub fn new(app: &AppHandle) -> Self {
         let mut warnings = Vec::new();
+        let mut temp_directory: Option<tempfile::TempDir> = None;
         #[cfg(not(feature = "e2e"))]
-        let directory = app.path().app_config_dir().unwrap_or_else(|_| {
-            warnings.push("无法找到系统配置目录，本次运行的设置无法持久保存".into());
-            std::env::temp_dir().join("screentranslate-v2")
-        });
+        let directory = match app.path().app_config_dir() {
+            Ok(dir) => dir,
+            Err(_) => {
+                warnings.push("无法找到系统配置目录，本次运行的设置无法持久保存".into());
+                match tempfile::tempdir() {
+                    Ok(dir) => {
+                        let path = dir.path().to_path_buf();
+                        temp_directory = Some(dir);
+                        path
+                    }
+                    Err(_) => std::env::temp_dir()
+                        .join(format!("screentranslate-v2-{}", std::process::id())),
+                }
+            }
+        };
         #[cfg(feature = "e2e")]
-        let test_directory =
-            tempfile::tempdir().expect("Could not create isolated E2E configuration");
-        #[cfg(feature = "e2e")]
-        let directory = test_directory.path().to_path_buf();
-        #[cfg(feature = "e2e")]
-        let _ = app;
+        let directory = {
+            let dir = tempfile::tempdir().expect("Could not create isolated E2E configuration");
+            let path = dir.path().to_path_buf();
+            temp_directory = Some(dir);
+            let _ = app;
+            path
+        };
         let config_path = directory.join("config.json");
         #[cfg(not(feature = "e2e"))]
         let rapid_ocr_dir = app
@@ -117,8 +129,7 @@ impl AppState {
         };
         Self {
             route: Mutex::new("translate".into()),
-            #[cfg(feature = "e2e")]
-            _test_directory: test_directory,
+            _temp_directory: temp_directory,
             config: Mutex::new(config),
             theme_preview: Mutex::new(crate::theme_preview::ThemePreview::default()),
             config_path,
@@ -184,17 +195,21 @@ impl AppState {
         credentials.insert("custom_ocr".into(), has_secret("custom_ocr"));
         let mut config = lock(&self.config).clone();
         config.appearance.theme = lock(&self.theme_preview).effective(config.appearance.theme);
-        let sessions = lock(&self.sessions);
+        let (text, visual) = {
+            let sessions = lock(&self.sessions);
+            (sessions.text.clone(), sessions.visual.clone())
+        };
+        let monitors = SystemCapture.monitors().unwrap_or_default();
         Bootstrap {
             version: env!("CARGO_PKG_VERSION").into(),
             initial_route: lock(&self.route).clone(),
             config,
             capabilities: lock(&self.capabilities).clone(),
-            text: sessions.text.clone(),
-            visual: sessions.visual.clone(),
+            text,
+            visual,
             credentials,
             warnings: lock(&self.warnings).clone(),
-            monitors: SystemCapture.monitors().unwrap_or_default(),
+            monitors,
             legacy_available: self.legacy_path.is_some(),
             updater_ready: !crate::updater::public_key().is_empty(),
         }

@@ -121,7 +121,9 @@ pub fn focus_app() {
     }
 }
 
-pub fn prepare_selection_window(window_ptr: *mut std::ffi::c_void) {
+/// # Safety
+/// `window_ptr` must be a valid `NSWindow *` pointer accessed on the AppKit main thread.
+pub unsafe fn prepare_selection_window(window_ptr: *mut std::ffi::c_void) {
     unsafe {
         st_prepare_selection_window(window_ptr);
     }
@@ -137,19 +139,25 @@ pub fn mouse_button_down() -> bool {
     unsafe { st_mouse_button_down() }
 }
 
-pub fn attach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void) {
+/// # Safety
+/// `parent` and `child` must be valid `NSWindow *` pointers accessed on the AppKit main thread.
+pub unsafe fn attach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void) {
     unsafe {
         st_attach_child_window(parent, child);
     }
 }
 
-pub fn detach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void) {
+/// # Safety
+/// `parent` and `child` must be valid `NSWindow *` pointers accessed on the AppKit main thread.
+pub unsafe fn detach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void) {
     unsafe {
         st_detach_child_window(parent, child);
     }
 }
 
-pub fn configure_transparent_window(window_ptr: *mut std::ffi::c_void) {
+/// # Safety
+/// `window_ptr` must be a valid `NSWindow *` pointer accessed on the AppKit main thread.
+pub unsafe fn configure_transparent_window(window_ptr: *mut std::ffi::c_void) {
     unsafe {
         st_configure_transparent_window(window_ptr);
     }
@@ -159,7 +167,12 @@ pub fn system_dark() -> bool {
     unsafe { st_system_dark() }
 }
 
-pub fn configure_window(window_ptr: *mut std::ffi::c_void, theme: screentrans_core::config::Theme) {
+/// # Safety
+/// `window_ptr` must be a valid `NSWindow *` pointer accessed on the AppKit main thread.
+pub unsafe fn configure_window(
+    window_ptr: *mut std::ffi::c_void,
+    theme: screentrans_core::config::Theme,
+) {
     let mode = match theme {
         screentrans_core::config::Theme::System => 0,
         screentrans_core::config::Theme::Dark => 1,

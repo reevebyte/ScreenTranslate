@@ -8,8 +8,8 @@
 
 // Small ABI bridge for Apple frameworks. All application state stays in Rust.
 @interface STCaptureReply : NSObject
-@property(nonatomic, strong) NSData *data;
-@property(nonatomic, strong) NSError *error;
+@property(atomic, strong) NSData *data;
+@property(atomic, strong) NSError *error;
 @end
 @implementation STCaptureReply
 @end
@@ -109,10 +109,16 @@ unsigned char *st_capture_display(uint32_t displayID, size_t *length, char **err
                         dispatch_semaphore_signal(semaphore);
                     }];
             }];
-        if (dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC)) != 0 || !reply.data) {
-            if (reply.error) {
-                NSInteger code = reply.error.code;
-                NSString *desc = [reply.error localizedDescription];
+        if (dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC)) != 0) {
+            *error = strdup("capture_failed");
+            return NULL;
+        }
+        NSData *capturedData = reply.data;
+        NSError *capturedError = reply.error;
+        if (!capturedData) {
+            if (capturedError) {
+                NSInteger code = capturedError.code;
+                NSString *desc = [capturedError localizedDescription];
                 if (code == -3801 || (desc && ([desc localizedCaseInsensitiveContainsString:@"declined"] ||
                                                [desc localizedCaseInsensitiveContainsString:@"denied"] ||
                                                [desc localizedCaseInsensitiveContainsString:@"permission"]))) {
@@ -125,9 +131,9 @@ unsigned char *st_capture_display(uint32_t displayID, size_t *length, char **err
             return NULL;
         }
         st_mark_screen_tcc_verified();
-        *length = reply.data.length;
+        *length = capturedData.length;
         unsigned char *result = malloc(*length);
-        if (result) { memcpy(result, reply.data.bytes, *length); }
+        if (result) { memcpy(result, capturedData.bytes, *length); }
         return result;
     }
 }

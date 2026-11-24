@@ -53,6 +53,7 @@
     confirmReset = false;
   }
   async function importOld() {
+    if (importing) return;
     importing = true;
     try {
       queueDraft();
@@ -100,5 +101,5 @@
   </Tabs.Root>
 </div>
 
-<Dialog.Root bind:open={confirmImport}><Dialog.Portal><Dialog.Overlay class="dialog-overlay"/><Dialog.Content class="reading-dialog compact-dialog"><Dialog.Title>{t("导入旧版设置")}</Dialog.Title><Dialog.Description>{t("替换当前设置并导入密钥，原文件保留。加密密钥需使用原 Windows 账户。")}</Dialog.Description><div class="dialog-actions"><Dialog.Close class="button button-outline button-size-default">{t("取消")}</Dialog.Close><Button onclick={importOld}>{t("导入")}</Button></div></Dialog.Content></Dialog.Portal></Dialog.Root>
+<Dialog.Root open={confirmImport} onOpenChange={open => { if (!importing) confirmImport = open; }}><Dialog.Portal><Dialog.Overlay class="dialog-overlay"/><Dialog.Content class="reading-dialog compact-dialog" onEscapeKeydown={event => { if (importing) event.preventDefault(); }} onInteractOutside={event => { if (importing) event.preventDefault(); }}><Dialog.Title>{t("导入旧版设置")}</Dialog.Title><Dialog.Description>{t("替换当前设置并导入密钥，原文件保留。加密密钥需使用原 Windows 账户。")}</Dialog.Description><div class="dialog-actions"><Dialog.Close class="button button-outline button-size-default" disabled={importing}>{t("取消")}</Dialog.Close><Button disabled={importing} onclick={importOld}>{#if importing}<LoaderCircle class="spin" size={15}/>{/if}{t("导入")}</Button></div></Dialog.Content></Dialog.Portal></Dialog.Root>
 <Dialog.Root bind:open={confirmReset}><Dialog.Portal><Dialog.Overlay class="dialog-overlay"/><Dialog.Content class="reading-dialog compact-dialog"><Dialog.Title>{t("恢复默认设置")}</Dialog.Title><Dialog.Description>{t("所有设置将恢复为默认值，已保存的密钥会保留。")}</Dialog.Description><div class="dialog-actions"><Dialog.Close class="button button-outline button-size-default">{t("取消")}</Dialog.Close><Button onclick={resetDefaults}>{t("恢复")}</Button></div></Dialog.Content></Dialog.Portal></Dialog.Root>

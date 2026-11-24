@@ -54,8 +54,15 @@ pub struct FrameCache {
     order: VecDeque<String>,
 }
 
+pub struct PreparedFrame {
+    frame: CaptureFrame,
+    preview: Vec<u8>,
+    preview_format: PreviewFormat,
+    cost: usize,
+}
+
 impl FrameCache {
-    pub fn insert(&mut self, frame: CaptureFrame, protected: &[String]) -> Result<FrameMetadata> {
+    pub fn prepare(frame: CaptureFrame) -> Result<PreparedFrame> {
         if frame.image.width() == 0
             || frame.image.height() == 0
             || frame.image.as_raw().len() > CACHE_LIMIT
@@ -73,6 +80,31 @@ impl FrameCache {
                 "截图超过缓存上限，请选择更小的区域",
             ));
         }
+        Ok(PreparedFrame {
+            frame,
+            preview,
+            preview_format,
+            cost,
+        })
+    }
+
+    #[cfg(test)]
+    pub fn insert(&mut self, frame: CaptureFrame, protected: &[String]) -> Result<FrameMetadata> {
+        let prepared = Self::prepare(frame)?;
+        self.insert_prepared(prepared, protected)
+    }
+
+    pub fn insert_prepared(
+        &mut self,
+        prepared: PreparedFrame,
+        protected: &[String],
+    ) -> Result<FrameMetadata> {
+        let PreparedFrame {
+            frame,
+            preview,
+            preview_format,
+            cost,
+        } = prepared;
         let candidates: Vec<_> = self
             .order
             .iter()
@@ -119,6 +151,12 @@ impl FrameCache {
         let RenderedImage { png } = rendered;
         let preview = Arc::new(png);
         let cost = preview.len();
+        if cost > CACHE_LIMIT {
+            return Err(AppError::new(
+                ErrorCode::InvalidInput,
+                "截图超过缓存上限，请缩小选区",
+            ));
+        }
         let old_id = self
             .frames
             .get(parent_id)
@@ -129,6 +167,20 @@ impl FrameCache {
             .map_or(0, |frame| {
                 frame.preview.len() + frame.image.as_ref().map_or(0, |image| image.as_raw().len())
             });
+        if self.bytes - old_cost + cost > CACHE_LIMIT {
+            let candidates: Vec<_> = self
+                .order
+                .iter()
+                .filter(|id| id.as_str() != parent_id && old_id.as_deref() != Some(id.as_str()))
+                .cloned()
+                .collect();
+            for id in candidates {
+                if self.bytes - old_cost + cost <= CACHE_LIMIT {
+                    break;
+                }
+                self.remove(&id);
+            }
+        }
         if self.bytes - old_cost + cost > CACHE_LIMIT {
             return Err(AppError::new(
                 ErrorCode::InvalidInput,

@@ -155,6 +155,14 @@ pub fn start_visual(app: AppHandle, metadata: FrameMetadata, recognize: bool, sh
     if show_floating && let Err(e) = windows::show_result(&app, &metadata) {
         tracing::error!("show_result failed: {e:?}");
         state.jobs.finish("visual", &ticket);
+        {
+            let mut sessions = lock(&state.sessions);
+            if sessions.visual.revision == revision {
+                sessions.visual.job.stage = JobStage::Error;
+                sessions.visual.job.error = Some(e.clone());
+            }
+        }
+        state.publish_visual(&app);
         // Without a result window nothing would retire the frozen selection
         // overlay; end the capture (same as Esc) and report the failure.
         windows::abort_capture(&app, e);
@@ -450,13 +458,14 @@ pub fn retranslate_block(app: AppHandle, id: String, text: String, target: Strin
         }
         .await;
         let current = state.jobs.is_current(&lane, &ticket);
-        state.jobs.finish(&lane, &ticket);
         if !current {
+            state.jobs.finish(&lane, &ticket);
             return;
         }
         let error = {
             let mut sessions = lock(&state.sessions);
             if sessions.visual.revision != visual_revision || ticket.stop.is_cancelled() {
+                state.jobs.finish(&lane, &ticket);
                 return;
             }
             let Some(block) = sessions
@@ -465,6 +474,7 @@ pub fn retranslate_block(app: AppHandle, id: String, text: String, target: Strin
                 .iter_mut()
                 .find(|block| block.id == id && block.revision == revision)
             else {
+                state.jobs.finish(&lane, &ticket);
                 return;
             };
             match result {
@@ -475,9 +485,21 @@ pub fn retranslate_block(app: AppHandle, id: String, text: String, target: Strin
                 Err(error) => Some(error),
             }
         };
+        let render_result = crate::visual_render::render(
+            &state.frames,
+            &state.sessions,
+            visual_revision,
+            ticket.stop.clone(),
+        )
+        .await;
+        let current_after_render = state.jobs.is_current(&lane, &ticket);
+        state.jobs.finish(&lane, &ticket);
+        if !current_after_render || ticket.stop.is_cancelled() {
+            return;
+        }
         {
             let mut sessions = lock(&state.sessions);
-            if sessions.visual.revision != visual_revision || ticket.stop.is_cancelled() {
+            if sessions.visual.revision != visual_revision {
                 return;
             }
             sessions.visual.input = sessions
@@ -494,30 +516,21 @@ pub fn retranslate_block(app: AppHandle, id: String, text: String, target: Strin
                 .map(|b| b.translation.as_str())
                 .collect::<Vec<_>>()
                 .join("\n\n");
+            let final_error = error.or_else(|| render_result.err());
             let other_blocks_running = state.jobs.has_running_prefix("block:");
-            sessions.visual.job.stage = if error.is_some() {
-                JobStage::Error
+            if let Some(err) = final_error {
+                sessions.visual.job.stage = JobStage::Error;
+                sessions.visual.job.error = Some(err);
             } else if other_blocks_running {
-                JobStage::Translating
-            } else {
-                JobStage::Complete
-            };
-            sessions.visual.job.error = error;
+                if sessions.visual.job.stage != JobStage::Error {
+                    sessions.visual.job.stage = JobStage::Translating;
+                }
+            } else if sessions.visual.job.stage != JobStage::Error {
+                sessions.visual.job.stage = JobStage::Complete;
+                sessions.visual.job.error = None;
+            }
         }
-
-        if crate::visual_render::render(
-            &state.frames,
-            &state.sessions,
-            visual_revision,
-            ticket.stop.clone(),
-        )
-        .await
-        .is_ok()
-            && lock(&state.sessions).visual.revision == visual_revision
-            && !ticket.stop.is_cancelled()
-        {
-            state.publish_visual(&app);
-        }
+        state.publish_visual(&app);
     });
     Ok(())
 }

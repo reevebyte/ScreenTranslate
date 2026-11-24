@@ -42,9 +42,10 @@ pub async fn begin_result_drag(window: WebviewWindow) -> Result<()> {
         // Keep focus and the native drag request in one backend turn. Starting them
         // from separate IPC calls made the first drag only focus the window.
         let _ = window.set_focus();
-        window
-            .start_dragging()
-            .map_err(|_| AppError::new(ErrorCode::Internal, "无法移动截图，请重试"))?;
+        if window.start_dragging().is_err() {
+            let _ = crate::result_tools::finish_image_gesture(window.app_handle());
+            return Err(AppError::new(ErrorCode::Internal, "无法移动截图，请重试"));
+        }
     }
     Ok(())
 }
@@ -296,8 +297,11 @@ pub async fn select_region(app: AppHandle, window: WebviewWindow, rect: Rect) ->
 
 #[tauri::command]
 pub async fn retry_visual(app: AppHandle, window: WebviewWindow) -> Result<()> {
+    let state = app.state::<AppState>();
+    if state.jobs.is_running("capture") {
+        return Err(AppError::new(ErrorCode::InvalidInput, "正在截图中，请稍候"));
+    }
     let (metadata, recognize) = {
-        let state = app.state::<AppState>();
         let sessions = lock(&state.sessions);
         (
             sessions
@@ -340,7 +344,7 @@ pub async fn copy_text(app: AppHandle, text: String) -> Result<()> {
         if app.clipboard().write_text(text.clone()).is_ok() {
             return Ok(());
         }
-        if screentrans_platform::is_wayland() && write_wayland_clipboard(&text) {
+        if screentrans_platform::is_wayland() && write_wayland_clipboard(&text).await {
             return Ok(());
         }
         Err(AppError::new(ErrorCode::Internal, "无法写入系统剪贴板"))
@@ -354,33 +358,36 @@ pub async fn copy_text(app: AppHandle, text: String) -> Result<()> {
 }
 
 #[cfg(all(target_os = "linux", not(feature = "e2e")))]
-fn write_wayland_clipboard(text: &str) -> bool {
-    write_wayland_clipboard_bytes("text/plain;charset=utf-8", text.as_bytes())
+async fn write_wayland_clipboard(text: &str) -> bool {
+    write_wayland_clipboard_bytes("text/plain;charset=utf-8", text.as_bytes()).await
 }
 
 #[cfg(all(target_os = "linux", not(feature = "e2e")))]
-fn write_wayland_clipboard_bytes(mime: &str, bytes: &[u8]) -> bool {
-    use std::{
-        io::Write,
-        process::{Command, Stdio},
-    };
-    let Ok(mut child) = Command::new("wl-copy")
+async fn write_wayland_clipboard_bytes(mime: &str, bytes: &[u8]) -> bool {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+    let Ok(mut child) = tokio::process::Command::new("wl-copy")
         .args(["--type", mime])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
+        .kill_on_drop(true)
         .spawn()
     else {
         return false;
     };
     if let Some(mut stdin) = child.stdin.take()
-        && stdin.write_all(bytes).is_err()
+        && tokio::time::timeout(std::time::Duration::from_secs(3), stdin.write_all(bytes))
+            .await
+            .map_or(true, |r| r.is_err())
     {
-        let _ = child.kill();
-        let _ = child.wait();
         return false;
     }
-    child.wait().is_ok_and(|status| status.success())
+    tokio::time::timeout(std::time::Duration::from_secs(3), child.wait())
+        .await
+        .ok()
+        .and_then(|res| res.ok())
+        .is_some_and(|status| status.success())
 }
 
 fn decode_png_limited(png: &[u8]) -> Result<image::DynamicImage> {
@@ -425,7 +432,7 @@ pub async fn copy_image(app: AppHandle, png: Vec<u8>) -> Result<()> {
                 return Ok(());
             }
             if screentrans_platform::is_wayland()
-                && write_wayland_clipboard_bytes("image/png", &png_fallback)
+                && write_wayland_clipboard_bytes("image/png", &png_fallback).await
             {
                 return Ok(());
             }
@@ -610,9 +617,10 @@ pub async fn begin_toolbar_drag(app: AppHandle, window: WebviewWindow) -> Result
     #[cfg(target_os = "linux")]
     if !screentrans_platform::native_wayland_windows() {
         let _ = window.set_focus();
-        window
-            .start_dragging()
-            .map_err(|_| AppError::new(ErrorCode::Internal, "无法移动工具栏"))?;
+        if window.start_dragging().is_err() {
+            crate::result_tools::cancel_toolbar_drag(&app);
+            return Err(AppError::new(ErrorCode::Internal, "无法移动工具栏"));
+        }
     }
     Ok(())
 }
@@ -898,7 +906,11 @@ pub async fn test_provider(
             CancellationToken::new(),
         )
         .await?;
-    Ok(output[0].text.clone())
+    output
+        .into_iter()
+        .next()
+        .map(|item| item.text)
+        .ok_or_else(|| AppError::new(ErrorCode::InvalidResponse, "翻译服务未返回结果"))
 }
 
 #[tauri::command]
@@ -1016,15 +1028,19 @@ pub async fn open_image(app: AppHandle, fixture_path: Option<String>) -> Result<
             .decode()
             .map_err(|_| AppError::new(ErrorCode::InvalidInput, "图片格式不支持或图像尺寸过大"))?
             .to_rgba8();
-        Ok::<_, AppError>(CaptureFrame {
+        let frame = CaptureFrame {
             image,
             screen_bounds: None,
             scale_factor: 1.0,
-        })
+        };
+        crate::cache::FrameCache::prepare(frame)
     })
     .await
     .map_err(|_| AppError::new(ErrorCode::Internal, "图片读取线程异常"))??;
-    let metadata = lock(&app.state::<AppState>().frames).insert(frame, &[])?;
+    let state = app.state::<AppState>();
+    let metadata = lock(&state.frames).insert_prepared(frame, &[])?;
+    lock(&state.frames).retain_current(&metadata.id);
+    let _ = crate::result_tools::hide(&app);
     pipeline::start_visual(app, metadata, true, false);
     Ok(())
 }

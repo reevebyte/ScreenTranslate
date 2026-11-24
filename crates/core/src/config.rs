@@ -444,7 +444,7 @@ pub fn validate_api_url(value: &str) -> Result<url::Url> {
         || !url.username().is_empty()
         || url.password().is_some()
         || url.fragment().is_some()
-        || !url.query().unwrap_or_default().is_empty()
+        || url.query().is_some()
         || !(url.scheme() == "https" || (url.scheme() == "http" && local))
     {
         return Err(invalid());
@@ -761,5 +761,11 @@ mod tests {
         old["ocr"].as_object_mut().unwrap().remove("rapid");
         let parsed: Config = serde_json::from_value(old).unwrap();
         assert_eq!(parsed.ocr.rapid.idle_unload_secs, 180);
+    }
+
+    #[test]
+    fn validate_api_url_rejects_trailing_empty_query() {
+        assert!(validate_api_url("https://api.openai.com/v1?").is_err());
+        assert!(validate_api_url("https://api.openai.com/v1").is_ok());
     }
 }

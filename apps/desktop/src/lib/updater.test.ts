@@ -120,3 +120,24 @@ it('switches to About when clicking the tray update entry',async()=>{
  expect(call).toHaveBeenCalledWith('download_update',{version:'2.0.42'});
  expect(call).toHaveBeenCalledWith('install_update',{version:'2.0.42'});
 });
+it('keeps existing automatic check timer on repeated enabled calls and unlocks installing on Windows cancel',async()=>{
+ vi.useFakeTimers();
+ call.mockResolvedValue({available:false});
+ scheduleAutomaticCheck(true);
+ // Simulate unrelated config save re-triggering the effect while already enabled.
+ await vi.advanceTimersByTimeAsync(5_000);
+ scheduleAutomaticCheck(true);
+ await vi.advanceTimersByTimeAsync(5_000);
+ expect(call).toHaveBeenCalledTimes(1);
+
+ updates.stage = 'ready';
+ updates.version = '2.0.45';
+ app.configPending = false;
+ app.data!.text.job.stage = 'idle';
+ app.data!.visual.job.stage = 'idle';
+ call.mockResolvedValueOnce(undefined);
+ await installUpdate();
+ expect(updates.stage).toBe('installing');
+ await vi.advanceTimersByTimeAsync(3_000);
+ expect(updates.stage).toBe('ready');
+});

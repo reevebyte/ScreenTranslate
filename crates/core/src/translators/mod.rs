@@ -82,14 +82,17 @@ pub struct HttpTranslator {
 }
 
 impl HttpTranslator {
-    pub fn new(provider: ProviderId, options: ProviderConfig, key: String) -> Result<Self> {
+    pub fn new(provider: ProviderId, mut options: ProviderConfig, key: String) -> Result<Self> {
         if provider.needs_key() && key.trim().is_empty() {
             return Err(
                 AppError::new(ErrorCode::Credentials, "请先为当前翻译服务填写 API 密钥")
                     .action("providers"),
             );
         }
-        if !options.base_url.is_empty() {
+        if options.base_url.trim().is_empty() {
+            options.base_url = crate::config::provider_defaults(provider).base_url;
+        }
+        if !options.base_url.trim().is_empty() {
             validate_api_url(&options.base_url)?;
         }
         // Only BingFree's keyless web page may geo-redirect (e.g. cn.bing.com -> www.bing.com).
@@ -237,6 +240,42 @@ pub async fn json_response(
         .map_err(|_| AppError::new(ErrorCode::InvalidResponse, "服务返回的内容不是有效 JSON"))
 }
 
+fn redact_error_detail(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len().min(240));
+    let mut redact_next = false;
+    for (idx, token) in raw.split_whitespace().enumerate() {
+        if idx > 0 {
+            out.push(' ');
+        }
+        let lower = token.to_ascii_lowercase();
+        let trimmed = token
+            .trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | ';' | ')' | '(' | '.' | ':'));
+        let lower_trimmed = trimmed.to_ascii_lowercase();
+        if redact_next {
+            out.push_str("[REDACTED]");
+            redact_next = false;
+        } else if lower == "bearer" {
+            out.push_str(token);
+            redact_next = true;
+        } else if lower_trimmed.starts_with("sk-")
+            || lower_trimmed.starts_with("aiza")
+            || lower_trimmed.starts_with("nvapi-")
+            || lower_trimmed.starts_with("bearer:")
+            || lower_trimmed.contains("api_key=")
+            || lower_trimmed.contains("apikey=")
+            || lower_trimmed.contains("token=")
+        {
+            out.push_str("[REDACTED]");
+        } else {
+            out.push_str(token);
+        }
+        if out.chars().count() >= 240 {
+            break;
+        }
+    }
+    out.chars().take(240).collect()
+}
+
 pub(crate) async fn response_bytes(
     response: Response,
     stop: &CancellationToken,
@@ -266,7 +305,7 @@ pub(crate) async fn response_bytes(
                         .pointer("/error/message")
                         .and_then(|v| v.as_str())
                         .or_else(|| value.get("message").and_then(|v| v.as_str()))
-                        .map(|s| s.trim().chars().take(240).collect::<String>())
+                        .map(redact_error_detail)
                 })
         } else {
             None
@@ -549,5 +588,16 @@ mod tests {
         assert_eq!(results[0].text, "你好");
         assert_eq!(results[1].text, "—");
         assert!(validate_batch(&batch, vec![item("a", ""), item("b", "")]).is_err());
+    }
+
+    #[test]
+    fn redacts_tokens_and_keys_in_remote_error_details() {
+        let scrubbed = redact_error_detail(
+            "Invalid key sk-secret123456 with Bearer eyJhbGciOi and api_key=abc999",
+        );
+        assert!(!scrubbed.contains("sk-secret123456"));
+        assert!(!scrubbed.contains("eyJhbGciOi"));
+        assert!(!scrubbed.contains("abc999"));
+        assert!(scrubbed.contains("[REDACTED]"));
     }
 }

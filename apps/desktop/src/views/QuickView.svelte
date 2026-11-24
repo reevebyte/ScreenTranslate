@@ -25,7 +25,12 @@
   let windowHeight = $state(320);
   let activePane = $state('source');
   let compactReading = $derived(windowHeight < 300 || ((app.data?.config.appearance.fontScale ?? 1) > 1.2 && windowHeight < 380));
-  async function submit() { await translateNow(); if (compactReading) activePane = 'target'; }
+  $effect(() => { void compactReading; composing = false; });
+  async function submit() {
+    if (!app.input.trim() || composing || app.data?.text.job.stage === 'translating') return;
+    await translateNow();
+    if (compactReading) activePane = 'target';
+  }
 
   onMount(() => {
     textarea?.focus();
@@ -105,7 +110,8 @@
     <textarea bind:this={textarea} class="spotlight-textarea" aria-label={t("快速翻译输入")} value={app.input} placeholder={t("输入或粘贴文字…")} spellcheck="false" rows="2"
       oninput={event => editText(event.currentTarget.value,app.source,app.target,composing)}
       oncompositionstart={() => { composing = true; editText(app.input,app.source,app.target,true); }}
-      oncompositionend={event => { composing = false; editText(event.currentTarget.value,app.source,app.target,false); }}></textarea>
+      oncompositionend={event => { composing = false; editText(event.currentTarget.value,app.source,app.target,false); }}
+      onblur={() => { if (composing) { composing = false; editText(app.input,app.source,app.target,false); } }}></textarea>
   </div>
 {/snippet}
 {#snippet targetEditor()}

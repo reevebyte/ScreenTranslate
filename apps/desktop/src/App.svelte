@@ -79,7 +79,11 @@
     return () => { disposed = true; cleanup?.(); navigateCleanup?.(); quitCleanup?.(); searchCleanup?.(); media.removeEventListener('change', themeChange); };
   });
   function keydown(event: KeyboardEvent) {
-    if (mode === 'main' && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); app.commandOpen = !app.commandOpen; }
+    if (mode !== 'main' || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return;
+    if (event.target instanceof Element && event.target.closest('.shortcut-key')) return;
+    if (!app.commandOpen && document.querySelector('[role="dialog"]')) return;
+    event.preventDefault();
+    app.commandOpen = !app.commandOpen;
   }
 </script>
 

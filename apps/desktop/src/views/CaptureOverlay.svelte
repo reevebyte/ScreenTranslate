@@ -9,15 +9,20 @@
   import { isTauri } from '@tauri-apps/api/core';
   let frame = $state<FrameMetadata | null>(null);
   let anchor = $state<{ x: number; y: number } | null>(null);
+  let activePointerId: number | null = null;
   let selection = $state<Rect | null>(null);
   let error = $state('');
   let submitting = $state(false);
   let surface: HTMLDivElement;
   let width = $state(0); let height = $state(0);
+  let disposed = false;
+  let frameVersion = 0;
   function useFrame(value: FrameMetadata | null) {
+    frameVersion++;
     frame = value;
     error = '';
     anchor = null;
+    activePointerId = null;
     selection = null;
     submitting = false;
   }
@@ -39,7 +44,7 @@
     void call('selection_cleared', { token }).catch(() => {});
   }
   onMount(() => {
-    let disposed = false;
+    disposed = false;
     const stops: (() => void)[] = [];
     function onKeydown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
@@ -56,9 +61,10 @@
         .catch(() => {});
     }
     // A prewarmed window has no selection yet and stays idle (renders nothing).
+    const initialVersion = frameVersion;
     void call<FrameMetadata>('selection_frame')
-      .then(value => { if (!disposed) useFrame(value); })
-      .catch(() => { if (!disposed) imageReady(null); });
+      .then(value => { if (!disposed && frameVersion === initialVersion) useFrame(value); })
+      .catch(() => { if (!disposed && frameVersion === initialVersion) imageReady(null); });
     if (isTauri()) {
       subscribe<FrameMetadata>('selection-frame', useFrame);
       subscribe<string>('selection-theme', useTheme);
@@ -71,31 +77,37 @@
     };
   });
   function down(event: PointerEvent) {
-    if (event.button !== 0 || submitting || !frame || !width || !height) return;
+    if (event.button !== 0 || submitting || error || !frame || !width || !height || activePointerId !== null) return;
+    if (event.target instanceof Element && event.target.closest('button')) return;
+    activePointerId = event.pointerId;
     anchor = { x: event.clientX, y: event.clientY };
     selection = { x: event.clientX, y: event.clientY, width: 0, height: 0 };
-    surface.setPointerCapture(event.pointerId);
+    try { surface.setPointerCapture(event.pointerId); } catch { /* Test pointers may not have native capture. */ }
   }
   function move(event: PointerEvent) {
-    if (!anchor) return;
+    if (!anchor || event.pointerId !== activePointerId) return;
     const x = Math.max(0, Math.min(width, event.clientX)); const y = Math.max(0, Math.min(height, event.clientY));
     selection = { x: Math.min(anchor.x, x), y: Math.min(anchor.y, y), width: Math.abs(x - anchor.x), height: Math.abs(y - anchor.y) };
   }
   async function up(event: PointerEvent) {
-    if (!anchor || !selection || !frame) return;
-    move(event); anchor = null;
-    if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId);
+    if (!anchor || !selection || !frame || event.pointerId !== activePointerId) return;
+    move(event); anchor = null; activePointerId = null;
+    try { if (surface.hasPointerCapture(event.pointerId)) surface.releasePointerCapture(event.pointerId); } catch { /* Ignore capture release failure. */ }
     if (selection.width < 4 || selection.height < 4) { selection = null; return; }
     submitting = true;
     try { await call('select_region', { rect: { x: selection.x * frame.width / width, y: selection.y * frame.height / height, width: selection.width * frame.width / width, height: selection.height * frame.height / height } }); }
     catch (reason) { error = errorMessage(reason); submitting = false; }
   }
   function cancel() { void call('cancel_capture'); }
-  function reset() { anchor = null; if (!submitting) selection = null; }
+  function reset() { anchor = null; activePointerId = null; if (!submitting) selection = null; }
   async function imageReady(frameId = frame?.id ?? null) {
+    const version = frameVersion;
     await tick();
+    if (disposed || frameVersion !== version || (frame?.id ?? null) !== frameId) return;
     await call('window_ready', { frameId }).catch(() => {});
+    if (disposed || frameVersion !== version || (frame?.id ?? null) !== frameId) return;
     await nextPaint();
+    if (disposed || frameVersion !== version || (frame?.id ?? null) !== frameId) return;
     window.focus();
     surface?.focus();
     void call('selection_presented').catch(() => {});

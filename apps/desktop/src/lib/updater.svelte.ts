@@ -68,10 +68,20 @@ export async function downloadUpdate() {
   catch(error) { updates.error = errorMessage(error); updates.stage = 'error'; }
   finally { operation = false; }
 }
+let installFallbackTimer: ReturnType<typeof setTimeout> | undefined;
 export async function installUpdate() {
   if (operation || updates.stage !== 'ready' || updateBlockReason()) return;
   operation = true; updates.stage = 'installing'; updates.error = '';
-  try { await call('install_update',{version:updates.version}); }
+  clearTimeout(installFallbackTimer);
+  try {
+    await call('install_update', { version: updates.version });
+    // On Windows the installer runs out-of-process and `install_update` returns
+    // `Ok(())` without exiting. If the app is still open (for example UAC or
+    // the installer was cancelled), unlock the modal instead of trapping focus.
+    installFallbackTimer = setTimeout(() => {
+      if (updates.stage === 'installing') updates.stage = 'ready';
+    }, 3000);
+  }
   catch(error) { updates.error = errorMessage(error); updates.stage = 'ready'; }
   finally { operation = false; }
 }
@@ -102,9 +112,15 @@ async function runAutomaticCheck() {
   }
 }
 export function scheduleAutomaticCheck(enabled: boolean, delay = AUTO_CHECK_INITIAL_DELAY_MS) {
+  if (enabled && autoEnabled && timer !== undefined && delay === AUTO_CHECK_INITIAL_DELAY_MS) {
+    return;
+  }
   clearTimeout(timer);
+  timer = undefined;
   autoEnabled = enabled;
   if (!enabled) {
+    clearTimeout(installFallbackTimer);
+    installFallbackTimer = undefined;
     autoRetried = false;
     return;
   }

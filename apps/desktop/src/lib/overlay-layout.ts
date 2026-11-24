@@ -83,7 +83,11 @@ function canvasToPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> {
     if (typeof canvas.toBlob === 'function') {
       canvas.toBlob(async blob => {
         if (!blob) { reject(new Error('canvas-export-failed')); return; }
-        resolve(new Uint8Array(await blob.arrayBuffer()));
+        try {
+          resolve(new Uint8Array(await blob.arrayBuffer()));
+        } catch (error) {
+          reject(error);
+        }
       }, 'image/png');
       return;
     }

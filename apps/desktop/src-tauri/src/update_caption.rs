@@ -521,6 +521,12 @@ unsafe extern "system" fn button_proc(
     unsafe {
         if message == WM_NCDESTROY {
             let _ = RemoveWindowSubclass(hwnd, Some(button_proc), id);
+            if ptr != 0 {
+                let action = &*(ptr as *const CaptionAction);
+                if action.button.get() == hwnd {
+                    action.button.set(HWND::default());
+                }
+            }
             return DefSubclassProc(hwnd, message, w, l);
         }
         let action = &*(ptr as *const CaptionAction);
@@ -745,10 +751,11 @@ unsafe extern "system" fn caption_proc(
 ) -> LRESULT {
     // SAFETY: Called on the owning UI thread; subclass state lives until WM_NCDESTROY.
     unsafe {
-        let action = &*(ptr as *const CaptionAction);
         if message == WM_NCDESTROY {
             let _ = RemoveWindowSubclass(hwnd, Some(caption_proc), id);
-            let button = action.button.replace(HWND::default());
+            let button = (*(ptr as *const CaptionAction))
+                .button
+                .replace(HWND::default());
             if !button.0.is_null() {
                 let _ = DestroyWindow(button);
             }
@@ -761,7 +768,8 @@ unsafe extern "system" fn caption_proc(
         if matches!(
             message,
             WM_WINDOWPOSCHANGED | WM_SIZE | WM_DPICHANGED | WM_SHOWWINDOW | WM_THEMECHANGED
-        ) {
+        ) && let Some(action) = state(hwnd)
+        {
             sync(hwnd, action);
         }
         result

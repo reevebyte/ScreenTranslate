@@ -179,7 +179,11 @@ import { onMount, onDestroy, tick } from 'svelte';
       setTextMenu(false);
       notice = null;
       lastNotice = '';
-      clearTimeout(noticeTimer);
+      if (noticeTimer) {
+        clearTimeout(noticeTimer);
+        noticeTimer = undefined;
+        if (desktop && floating) void call('quiet_result_toolbar', { quiet: false }).catch(() => {});
+      }
       presented = '';
     }
   });
@@ -369,12 +373,25 @@ import { onMount, onDestroy, tick } from 'svelte';
   });
 
   function edit(id: string) { selectedId = id; editorTab='source'; }
+  let submittingEdit = $state(false);
   let edited = $derived(!!selected && (draftText !== selected.text || draftTarget !== (selected.targetLanguage || 'auto')));
-  let blockBusy = $derived(!!selected && submittedEdit?.id === selected.id && selected.text === submittedEdit.text && selected.targetLanguage === submittedEdit.target && ['recognizing','translating'].includes(session?.job.stage ?? ''));
+  let blockBusy = $derived(
+    submittingEdit
+      || (!!selected
+        && submittedEdit?.id === selected.id
+        && selected.text === submittedEdit.text
+        && (selected.targetLanguage || 'auto') === submittedEdit.target
+        && ['recognizing','translating'].includes(session?.job.stage ?? ''))
+  );
   async function retranslateBlock() {
-    if(!selected || !draftText.trim() || blockBusy) return;
-    submittedEdit={id:selected.id,text:draftText,target:draftTarget};
-    await act(call('edit_block',{id:selected.id,text:draftText,target:draftTarget}));
+    if (!selected || !draftText.trim() || blockBusy) return;
+    submittingEdit = true;
+    submittedEdit = { id: selected.id, text: draftText, target: draftTarget };
+    try {
+      await act(call('edit_block', { id: selected.id, text: draftText, target: draftTarget }));
+    } finally {
+      submittingEdit = false;
+    }
   }
 
 
@@ -383,7 +400,7 @@ import { onMount, onDestroy, tick } from 'svelte';
     clearTimeout(noticeTimer);
     notice = { text, tone };
     if (desktop && floating && contentHeight < 60) void call('quiet_result_toolbar',{quiet:true}).catch(()=>{});
-    noticeTimer = setTimeout(() => { notice=null; if(desktop&&floating)void call('quiet_result_toolbar',{quiet:false}).catch(()=>{}); }, 2600);
+    noticeTimer = setTimeout(() => { noticeTimer = undefined; notice=null; if(desktop&&floating)void call('quiet_result_toolbar',{quiet:false}).catch(()=>{}); }, 2600);
   }
   $effect(() => {
     if (!floating || toolsOnly) return;
@@ -394,7 +411,15 @@ import { onMount, onDestroy, tick } from 'svelte';
       showNotice(imageError ? t("截图读取失败") : error ? screenshotNotice(error) : t("已取消"), error || imageError ? 'error' : 'normal');
     }
   });
-  onDestroy(() => clearTimeout(noticeTimer));
+  onDestroy(() => {
+    if (noticeTimer) {
+      clearTimeout(noticeTimer);
+      noticeTimer = undefined;
+      if (desktop && floating) void call('quiet_result_toolbar', { quiet: false }).catch(() => {});
+    }
+  });
+  let copyingImage = false;
+  let savingImage = false;
   async function renderCurrentImagePng() {
     if (!frame) throw new Error('no-frame');
     const drawBlocks = !showOriginal && !!frame.cleanId && (session?.blocks?.length ?? 0) > 0;
@@ -402,7 +427,8 @@ import { onMount, onDestroy, tick } from 'svelte';
     return renderTranslatedImagePng(url, frame.width, frame.height, session?.blocks ?? [], drawBlocks);
   }
   async function handleCopyImage() {
-    if (!frame) return;
+    if (!frame || copyingImage) return;
+    copyingImage = true;
     setTextMenu(false);
     try {
       const bytes = await renderCurrentImagePng();
@@ -417,10 +443,13 @@ import { onMount, onDestroy, tick } from 'svelte';
     } catch {
       if (floating) showNotice(t("复制失败，请重试"), 'error');
       else toast.error(t("复制失败，请重试"));
+    } finally {
+      copyingImage = false;
     }
   }
   async function handleSaveImage() {
-    if (!frame || floating) return;
+    if (!frame || floating || savingImage) return;
+    savingImage = true;
     setTextMenu(false);
     try {
       const bytes = await renderCurrentImagePng();
@@ -438,6 +467,8 @@ import { onMount, onDestroy, tick } from 'svelte';
       }
     } catch {
       toast.error(t("保存失败，请重试"));
+    } finally {
+      savingImage = false;
     }
   }
   async function handleCopyTextChoice(kind: 'source' | 'translation') {
@@ -607,13 +638,13 @@ import { onMount, onDestroy, tick } from 'svelte';
     }
     if (event.target instanceof Element && event.target.closest('button, input, textarea, select, [contenteditable="true"], [role="button"], [role="combobox"], [role="listbox"], [role="menu"], [role="menuitem"], [role="dialog"]')) return;
     if (selectedId) return;
-    if (event.key.toLowerCase() === 'r' && !busy) { event.preventDefault(); void act(call('retry_visual')); return; }
+    if (event.key.toLowerCase() === 'r' && !busy && frame && !event.repeat) { event.preventDefault(); void act(call('retry_visual')); return; }
     if (event.key === ' ') {
       event.preventDefault();
-      setDisplay(original, comparing, true);
+      if (!event.repeat) setDisplay(original, comparing, true);
     }
     if (floating) {
-      if (event.key.toLowerCase() === 'c' && !event.ctrlKey && !event.metaKey && frame) {
+      if (event.key.toLowerCase() === 'c' && !event.ctrlKey && !event.metaKey && frame && !event.repeat) {
         event.preventDefault();
         void handleCopyImage();
       }

@@ -13,6 +13,7 @@ struct Pending {
     update: Option<Update>,
     bytes: Option<Vec<u8>>,
     downloading: bool,
+    installing: bool,
 }
 
 pub fn public_key() -> &'static str {
@@ -382,11 +383,11 @@ fn install_linux_deb(update: &Update, bytes: &[u8]) -> Result<()> {
         .map_err(|_| write_error())?;
 
     let run_result = (|| -> Result<()> {
-        if let Ok(output) = Command::new("pkexec")
+        if let Ok(output) = Command::new("/usr/bin/pkexec")
             .args([
-                "env",
+                "/usr/bin/env",
                 "DEBIAN_FRONTEND=noninteractive",
-                "dpkg",
+                "/usr/bin/dpkg",
                 "--force-confdef",
                 "--force-confold",
                 "-i",
@@ -420,32 +421,26 @@ fn install_linux_deb(update: &Update, bytes: &[u8]) -> Result<()> {
             }
         }
 
-        let zenity = Command::new("zenity")
+        let mut zenity = Command::new("/usr/bin/zenity")
             .args(["--password", "--title=Authentication Required"])
             .output()
             .map_err(|_| AppError::new(ErrorCode::Internal, "无法启动系统密码验证窗口，请重试"))?;
         if !zenity.status.success() {
+            zenity.stdout.fill(0);
             return Err(AppError::new(
                 ErrorCode::PermissionDenied,
                 "已取消管理员密码验证",
             ));
         }
-        let stdout = String::from_utf8_lossy(&zenity.stdout);
-        let password = stdout
-            .lines()
-            .rev()
-            .find(|line| !line.is_empty())
-            .unwrap_or_else(|| stdout.trim_end_matches(['\r', '\n']));
-
-        let mut child = Command::new("sudo")
+        let mut child = Command::new("/usr/bin/sudo")
             .args([
                 "-S",
                 "-k",
                 "-p",
                 "",
-                "env",
+                "/usr/bin/env",
                 "DEBIAN_FRONTEND=noninteractive",
-                "dpkg",
+                "/usr/bin/dpkg",
                 "--force-confdef",
                 "--force-confold",
                 "-i",
@@ -455,11 +450,21 @@ fn install_linux_deb(update: &Update, bytes: &[u8]) -> Result<()> {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|_| AppError::new(ErrorCode::Internal, "无法调用 sudo 安装更新包"))?;
+            .map_err(|_| {
+                zenity.stdout.fill(0);
+                AppError::new(ErrorCode::Internal, "无法调用 sudo 安装更新包")
+            })?;
         if let Some(mut stdin) = child.stdin.take() {
+            let stdout = String::from_utf8_lossy(&zenity.stdout);
+            let password = stdout
+                .lines()
+                .rev()
+                .find(|line| !line.is_empty())
+                .unwrap_or_else(|| stdout.trim_end_matches(['\r', '\n']));
             let _ = writeln!(stdin, "{password}");
             let _ = stdin.flush();
         }
+        zenity.stdout.fill(0);
         let output = child
             .wait_with_output()
             .map_err(|_| AppError::new(ErrorCode::Internal, "更新安装进程异常中断，请重试"))?;
@@ -515,11 +520,17 @@ fn pkexec_failure(code: Option<i32>) -> PkexecFailure {
 pub async fn install_update(app: AppHandle, window: WebviewWindow, version: String) -> Result<()> {
     authorize(window.label())?;
     let pending_state = app.state::<PendingUpdate>();
-    let pending = pending_state.0.lock().await;
+    let mut pending = pending_state.0.lock().await;
     if pending.downloading {
         return Err(AppError::new(
             ErrorCode::InvalidInput,
             "更新正在下载中，请稍候",
+        ));
+    }
+    if pending.installing {
+        return Err(AppError::new(
+            ErrorCode::InvalidInput,
+            "更新正在安装中，请稍候",
         ));
     }
     {
@@ -548,10 +559,16 @@ pub async fn install_update(app: AppHandle, window: WebviewWindow, version: Stri
         .as_ref()
         .cloned()
         .ok_or_else(|| AppError::new(ErrorCode::InvalidInput, "请先下载更新"))?;
+    pending.installing = true;
     drop(pending);
-    tokio::task::spawn_blocking(move || install_package(&update, &bytes))
+    let outcome = tokio::task::spawn_blocking(move || install_package(&update, &bytes))
         .await
-        .map_err(|_| AppError::new(ErrorCode::Internal, "无法启动更新安装，请重试"))??;
+        .map_err(|_| AppError::new(ErrorCode::Internal, "无法启动更新安装，请重试"))
+        .and_then(|res| res);
+    if outcome.is_err() || cfg!(windows) {
+        pending_state.0.lock().await.installing = false;
+    }
+    outcome?;
     #[cfg(not(windows))]
     app.restart();
     #[cfg(windows)]

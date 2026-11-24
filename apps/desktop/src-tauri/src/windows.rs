@@ -86,10 +86,15 @@ fn reveal(window: &tauri::WebviewWindow) -> Result<()> {
         } else {
             screentrans_platform::focus_app();
         }
-        if window.label().starts_with("selection-")
-            && let Ok(ns_window) = window.ns_window()
-        {
-            screentrans_platform::prepare_selection_window(ns_window);
+        if window.label().starts_with("selection-") {
+            let win_clone = window.clone();
+            let _ = window.run_on_main_thread(move || {
+                if let Ok(ns_window) = win_clone.ns_window() {
+                    unsafe {
+                        screentrans_platform::prepare_selection_window(ns_window);
+                    }
+                }
+            });
         }
     }
     window.show().map_err(|_| window_error())?;
@@ -118,8 +123,12 @@ pub(crate) fn request_show(window: &tauri::WebviewWindow) -> Result<()> {
 }
 
 pub fn window_destroyed(window: &tauri::Window) {
+    let state = window.state::<AppState>();
+    if window.label() == "result" {
+        *lock(&state.result_resize) = None;
+    }
     // Windows also destroys the owned toolbar when its image owner is reaped.
-    lock(&window.state::<AppState>().window_lifecycle).forget(window.label());
+    lock(&state.window_lifecycle).forget(window.label());
 }
 
 pub fn window_ready(window: &tauri::WebviewWindow, frame_id: Option<&str>) -> Result<()> {
@@ -162,8 +171,12 @@ pub fn result_presented(window: &tauri::WebviewWindow, frame_id: &str) {
     let state = window.state::<AppState>();
     let current = lock(&state.result_frame_id).clone();
     if window.label() == "result" && current == frame_id {
+        if state.jobs.is_running("capture") {
+            return;
+        }
         flush_compositor();
-        cancel_capture(window.app_handle(), false);
+        retire_selections(window.app_handle(), true);
+        lock(&state.return_windows).clear();
         lock(&state.frames).retain_current(frame_id);
         let _ = crate::result_tools::sync(window.app_handle());
     }
@@ -287,6 +300,16 @@ pub fn apply_theme(app: &AppHandle, theme: screentrans_core::config::Theme) {
     }
 }
 
+pub fn refresh_system_theme(app: &AppHandle, theme: screentrans_core::config::Theme) {
+    if theme == screentrans_core::config::Theme::System {
+        for window in app.webview_windows().values() {
+            caption_color(window, theme);
+        }
+    } else {
+        apply_theme(app, theme);
+    }
+}
+
 #[cfg(windows)]
 pub fn caption_palette(theme: screentrans_core::config::Theme) -> (bool, u32, u32) {
     let dark = match theme {
@@ -362,8 +385,15 @@ fn caption_color(window: &tauri::WebviewWindow, theme: screentrans_core::config:
         }
     }
     #[cfg(target_os = "macos")]
-    if let Ok(ns_window) = window.ns_window() {
-        screentrans_platform::configure_window(ns_window, theme);
+    {
+        let win_clone = window.clone();
+        let _ = window.run_on_main_thread(move || {
+            if let Ok(ns_window) = win_clone.ns_window() {
+                unsafe {
+                    screentrans_platform::configure_window(ns_window, theme);
+                }
+            }
+        });
     }
     let _ = (window, theme);
 }
@@ -539,8 +569,8 @@ pub fn update_result_resize(
     }
     #[cfg(target_os = "linux")]
     let (delta_x, delta_y) = (
-        dx.unwrap_or(0.0) * gesture.scale,
-        dy.unwrap_or(0.0) * gesture.scale,
+        dx.filter(|v| v.is_finite()).unwrap_or(0.0) * gesture.scale,
+        dy.filter(|v| v.is_finite()).unwrap_or(0.0) * gesture.scale,
     );
     #[cfg(not(target_os = "linux"))]
     let (delta_x, delta_y) = {
@@ -560,6 +590,12 @@ pub fn update_result_resize(
     if bounds == gesture.current {
         return Ok(Some(bounds));
     }
+    if lock(&state.result_resize)
+        .as_ref()
+        .is_none_or(|active| active.frame_id != gesture.frame_id)
+    {
+        return Ok(None);
+    }
     let outer = result_outer(bounds, gesture.scale, &layout);
     #[cfg(windows)]
     gesture
@@ -567,12 +603,20 @@ pub fn update_result_resize(
         .update(window, outer, bounds, gesture.scale)?;
     #[cfg(not(windows))]
     set_client_rect(window, outer)?;
-    *lock(&state.result_layout) = layout.clone();
-    let _ = window.emit("result-layout-changed", layout);
-    if let Some(active) = lock(&state.result_resize).as_mut()
-        && active.frame_id == gesture.frame_id
-    {
-        active.current = bounds;
+    let still_active = {
+        let mut active_guard = lock(&state.result_resize);
+        if let Some(active) = active_guard.as_mut()
+            && active.frame_id == gesture.frame_id
+        {
+            active.current = bounds;
+            true
+        } else {
+            false
+        }
+    };
+    if still_active {
+        *lock(&state.result_layout) = layout.clone();
+        let _ = window.emit("result-layout-changed", layout);
     }
     Ok(Some(bounds))
 }
@@ -750,10 +794,8 @@ pub(crate) fn builder<'a>(
     .visible(false)
     .on_navigation(|url| {
         url.scheme() == "tauri"
-            || matches!(
-                url.host_str(),
-                Some("tauri.localhost" | "127.0.0.1" | "localhost")
-            )
+            || url.host_str() == Some("tauri.localhost")
+            || (cfg!(debug_assertions) && matches!(url.host_str(), Some("127.0.0.1" | "localhost")))
     });
     if label == "main" {
         builder = builder.background_color(theme_background_color(theme));
@@ -816,8 +858,15 @@ fn selection_window(app: &AppHandle, label: &str) -> Result<tauri::WebviewWindow
     #[cfg(target_os = "linux")]
     tune_linux_webview(&window);
     #[cfg(target_os = "macos")]
-    if let Ok(ns_window) = window.ns_window() {
-        screentrans_platform::prepare_selection_window(ns_window);
+    {
+        let win_clone = window.clone();
+        let _ = window.run_on_main_thread(move || {
+            if let Ok(ns_window) = win_clone.ns_window() {
+                unsafe {
+                    screentrans_platform::prepare_selection_window(ns_window);
+                }
+            }
+        });
     }
     Ok(window)
 }
@@ -929,8 +978,15 @@ pub fn show_result(app: &AppHandle, frame: &FrameMetadata) -> Result<()> {
             #[cfg(target_os = "linux")]
             tune_linux_webview(&window);
             #[cfg(target_os = "macos")]
-            if let Ok(ns_window) = window.ns_window() {
-                screentrans_platform::configure_transparent_window(ns_window);
+            {
+                let win_clone = window.clone();
+                let _ = window.run_on_main_thread(move || {
+                    if let Ok(ns_window) = win_clone.ns_window() {
+                        unsafe {
+                            screentrans_platform::configure_transparent_window(ns_window);
+                        }
+                    }
+                });
             }
             window
         }
@@ -1087,11 +1143,42 @@ fn selection_in_use(app: &AppHandle) -> bool {
 }
 
 fn cancel_capture_with(app: &AppHandle, restore: bool, clear_selections: bool) {
+    cancel_capture_internal(app, restore, clear_selections, false);
+}
+
+fn cancel_capture_internal(
+    app: &AppHandle,
+    restore: bool,
+    clear_selections: bool,
+    preserve_return_windows: bool,
+) {
     let state = app.state::<AppState>();
     *lock(&state.capture_mode) = CaptureMode::Floating;
-    if restore && selection_in_use(app) {
+    let awaiting_result = restore
+        && selection_in_use(app)
+        && ((lock(&state.selections).is_empty() && !state.jobs.is_running("capture"))
+            || lock(&state.window_lifecycle).pending.contains("result"));
+    if awaiting_result {
         state.jobs.cancel("visual");
         lock(&state.window_lifecycle).forget("result");
+        let cancelled_active = {
+            let mut sessions = lock(&state.sessions);
+            if matches!(
+                sessions.visual.job.stage,
+                screentrans_core::JobStage::Capturing
+                    | screentrans_core::JobStage::Recognizing
+                    | screentrans_core::JobStage::Translating
+            ) {
+                sessions.visual.job.stage = screentrans_core::JobStage::Cancelled;
+                sessions.visual.job.error = None;
+                true
+            } else {
+                false
+            }
+        };
+        if cancelled_active {
+            state.publish_visual(app);
+        }
     }
     state.jobs.cancel("capture");
     retire_selections(app, clear_selections);
@@ -1111,7 +1198,7 @@ fn cancel_capture_with(app: &AppHandle, restore: bool, clear_selections: bool) {
                 let _ = window.show();
             }
         }
-    } else {
+    } else if !preserve_return_windows {
         lock(&state.return_windows).clear();
     }
 }
@@ -1371,10 +1458,18 @@ async fn picker_capture(app: &AppHandle, ticket: &screentrans_core::jobs::JobTic
         }
         Err(err) => return Err(err),
     };
+    let prepared = tokio::task::spawn_blocking(move || crate::cache::FrameCache::prepare(frame))
+        .await
+        .map_err(|_| AppError::new(ErrorCode::Internal, "截图处理线程异常"))??;
     if !state.jobs.is_current("capture", ticket) {
         return Err(AppError::cancelled());
     }
-    let metadata = lock(&state.frames).insert(frame, &[])?;
+    let metadata = lock(&state.frames).insert_prepared(prepared, &[])?;
+    if !state.jobs.is_current("capture", ticket) {
+        lock(&state.frames).remove(&metadata.id);
+        return Err(AppError::cancelled());
+    }
+    state.jobs.finish("capture", ticket);
     finish_captured_frame(app, metadata, false);
     Ok(())
 }
@@ -1419,7 +1514,9 @@ pub fn begin_capture_with_options(
     mode: CaptureMode,
 ) {
     // Hide any overlay now: it must not appear in the screenshot taken next.
-    cancel_capture_with(&app, true, false);
+    // Preserve already-recorded `return_windows` instead of flashing hidden
+    // windows back on screen right before capturing again.
+    cancel_capture_internal(&app, false, false, true);
     let state = app.state::<AppState>();
     let ticket = state.jobs.begin("capture");
     *lock(&state.capture_mode) = mode;
@@ -1428,12 +1525,15 @@ pub fn begin_capture_with_options(
     // capture in alpha.9, so only hide `main` when the capture was explicitly
     // initiated from inside `main` (or on native Wayland where overlays cannot
     // be positioned).
-    lock(&state.return_windows).clear();
     for label in ["quick", "result", "result-tools"] {
         if let Some(window) = app.get_webview_window(label)
             && window.is_visible().unwrap_or(false)
         {
-            lock(&state.return_windows).push(label.into());
+            let mut returned = lock(&state.return_windows);
+            if !returned.iter().any(|existing| existing == label) {
+                returned.push(label.into());
+            }
+            drop(returned);
             disable_transitions(&window);
             let _ = window.hide();
         }
@@ -1453,7 +1553,11 @@ pub fn begin_capture_with_options(
         && let Some(window) = app.get_webview_window("main")
         && window.is_visible().unwrap_or(false)
     {
-        lock(&state.return_windows).push("main".into());
+        let mut returned = lock(&state.return_windows);
+        if !returned.iter().any(|existing| existing == "main") {
+            returned.push("main".into());
+        }
+        drop(returned);
         let _ = window.hide();
         hid_main = true;
     }
@@ -1520,6 +1624,30 @@ pub fn begin_capture_with_options(
             };
             for (index, frame) in frames.into_iter().enumerate() {
                 if !state.jobs.is_current("capture", &ticket) {
+                    for (_, meta) in &captures {
+                        lock(&state.frames).remove(&meta.id);
+                    }
+                    return Err(AppError::cancelled());
+                }
+                let prepared = match tokio::task::spawn_blocking(move || {
+                    crate::cache::FrameCache::prepare(frame)
+                })
+                .await
+                .map_err(|_| AppError::new(ErrorCode::Internal, "截图处理线程异常"))
+                .and_then(|res| res)
+                {
+                    Ok(prepared) => prepared,
+                    Err(err) => {
+                        for (_, meta) in &captures {
+                            lock(&state.frames).remove(&meta.id);
+                        }
+                        return Err(err);
+                    }
+                };
+                if !state.jobs.is_current("capture", &ticket) {
+                    for (_, meta) in &captures {
+                        lock(&state.frames).remove(&meta.id);
+                    }
                     return Err(AppError::cancelled());
                 }
                 let mut protected: Vec<_> = captures
@@ -1532,11 +1660,26 @@ pub fn begin_capture_with_options(
                     // so cancelling this capture leaves that result intact.
                     protected.extend(previous.clean_id.clone());
                 }
-                let metadata = lock(&state.frames).insert(frame, &protected)?;
+                let metadata = match lock(&state.frames).insert_prepared(prepared, &protected) {
+                    Ok(metadata) => metadata,
+                    Err(err) => {
+                        for (_, meta) in &captures {
+                            lock(&state.frames).remove(&meta.id);
+                        }
+                        return Err(err);
+                    }
+                };
                 captures.push((index, metadata));
             }
             {
                 let mut selections = lock(&state.selections);
+                if !state.jobs.is_current("capture", &ticket) {
+                    drop(selections);
+                    for (_, meta) in &captures {
+                        lock(&state.frames).remove(&meta.id);
+                    }
+                    return Err(AppError::cancelled());
+                }
                 for (index, metadata) in &captures {
                     selections.insert(format!("selection-{index}"), metadata.id.clone());
                 }
@@ -1555,13 +1698,16 @@ pub fn begin_capture_with_options(
                 let bounds = metadata.screen_bounds.ok_or_else(|| {
                     AppError::new(ErrorCode::Internal, "截图显示器边界无效，请重试")
                 })?;
+                let created_fresh;
                 let window = if let Some(window) = app.get_webview_window(&label) {
+                    created_fresh = false;
                     lock(&state.window_lifecycle).forget(&label);
                     // `emit` would broadcast to every monitor's overlay.
                     let _ = window.emit_to(label.as_str(), "selection-theme", theme_str);
                     let _ = window.emit_to(label.as_str(), "selection-frame", metadata.clone());
                     window
                 } else {
+                    created_fresh = true;
                     selection_window(&app, &label)?
                 };
                 place_on_desktop(&window, bounds, &metadata)?;
@@ -1570,6 +1716,14 @@ pub fn begin_capture_with_options(
                 #[cfg(target_os = "linux")]
                 if screentrans_platform::is_wayland() {
                     let _ = window.set_fullscreen(true);
+                }
+                if !state.jobs.is_current("capture", &ticket) {
+                    if created_fresh {
+                        lock(&state.window_lifecycle).forget(&label);
+                        #[cfg(not(windows))]
+                        let _ = window.destroy();
+                    }
+                    return Err(AppError::cancelled());
                 }
                 request_show(&window)?;
             }
@@ -1607,6 +1761,9 @@ pub fn abort_capture(app: &AppHandle, error: AppError) {
 
 pub fn accept_selection(app: &AppHandle, label: &str, rect: Rect) -> Result<()> {
     let state = app.state::<AppState>();
+    let Some(ticket) = state.jobs.current("capture") else {
+        return Err(AppError::new(ErrorCode::InvalidInput, "截图选区已过期"));
+    };
     let current = SystemCapture.monitors()?;
     let changed = {
         let previous = lock(&state.capture_layout);
@@ -1631,7 +1788,28 @@ pub fn accept_selection(app: &AppHandle, label: &str, rect: Rect) -> Result<()> 
     for id in selected_frames {
         lock(&state.frames).remove(&id);
     }
-    let metadata = lock(&state.frames).insert(crop, &[])?;
+    let prepared = match crate::cache::FrameCache::prepare(crop) {
+        Ok(prepared) => prepared,
+        Err(err) => {
+            cancel_capture(app, true);
+            return Err(err);
+        }
+    };
+    if !state.jobs.is_current("capture", &ticket) {
+        return Ok(());
+    }
+    let metadata = match lock(&state.frames).insert_prepared(prepared, &[]) {
+        Ok(metadata) => metadata,
+        Err(err) => {
+            cancel_capture(app, true);
+            return Err(err);
+        }
+    };
+    if !state.jobs.is_current("capture", &ticket) {
+        lock(&state.frames).remove(&metadata.id);
+        return Ok(());
+    }
+    state.jobs.finish("capture", &ticket);
     finish_captured_frame(app, metadata, true);
     Ok(())
 }
@@ -1717,7 +1895,10 @@ pub fn reap_hidden_windows(app: AppHandle) {
         loop {
             timer.tick().await;
             let state = app.state::<AppState>();
-            for (label, window) in app.webview_windows() {
+            let windows = app.webview_windows();
+            hidden.retain(|label, _| windows.contains_key(label));
+            let capturing = selection_in_use(&app) || state.jobs.is_running("capture");
+            for (label, window) in windows {
                 let reapable = if cfg!(target_os = "linux") {
                     matches!(label.as_str(), "result" | "result-tools" | "quick")
                 } else {
@@ -1726,12 +1907,19 @@ pub fn reap_hidden_windows(app: AppHandle) {
                 if !reapable {
                     continue;
                 }
+                let pending_reveal = {
+                    let lifecycle = lock(&state.window_lifecycle);
+                    lifecycle.pending.contains(&label)
+                        || (label == "result-tools" && lifecycle.pending.contains("result"))
+                };
                 let result_active = label == "result-tools"
                     && app
                         .get_webview_window("result")
                         .is_some_and(|w| w.is_visible().unwrap_or(false));
                 if window.is_visible().unwrap_or(true)
                     || result_active
+                    || pending_reveal
+                    || capturing
                     || lock(&state.dirty_windows).contains(&label)
                     || !lock(&state.return_windows).is_empty()
                 {

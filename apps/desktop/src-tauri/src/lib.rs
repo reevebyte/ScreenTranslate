@@ -58,6 +58,9 @@ pub fn run() {
     }
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, arguments, _| {
+            if app.try_state::<AppState>().is_none() {
+                return;
+            }
             if arguments.iter().any(|arg| arg == "--capture") {
                 windows::begin_capture(app.clone(), None);
             } else if arguments.iter().any(|arg| arg == "--quick") {
@@ -94,12 +97,9 @@ pub fn run() {
                 .unwrap_or("");
             let trusted_origin = matches!(
                 origin,
-                "http://tauri.localhost"
-                    | "https://tauri.localhost"
-                    | "tauri://localhost"
-                    | "http://127.0.0.1:1420"
-                    | "http://localhost:1420"
-            );
+                "http://tauri.localhost" | "https://tauri.localhost" | "tauri://localhost"
+            ) || (cfg!(debug_assertions)
+                && matches!(origin, "http://127.0.0.1:1420" | "http://localhost:1420"));
             match preview {
                 Some((bytes, content_type)) => {
                     let mut response = tauri::http::Response::builder()
@@ -128,7 +128,7 @@ pub fn run() {
                     let state = app.state::<AppState>();
                     let saved = lock(&state.config).appearance.theme;
                     let theme = lock(&state.theme_preview).effective(saved);
-                    windows::apply_theme(&app, theme);
+                    windows::refresh_system_theme(&app, theme);
                 });
             }
             if matches!(event, tauri::WindowEvent::Moved(_)) {

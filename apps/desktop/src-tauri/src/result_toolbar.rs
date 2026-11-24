@@ -30,12 +30,15 @@ pub struct ToolbarState {
     #[serde(skip)]
     pub toolbar_moving: bool,
     #[serde(skip)]
-    pub placing: bool,
+    pub placing: usize,
     #[serde(skip)]
     pub realign_attempts: u8,
 }
 
 impl ToolbarState {
+    pub fn is_placing(&self) -> bool {
+        self.placing > 0
+    }
     pub fn suppressed(&self) -> bool {
         self.quiet || self.image_moving || self.image_resizing
     }

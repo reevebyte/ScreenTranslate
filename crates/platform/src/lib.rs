@@ -108,9 +108,13 @@ pub fn focus_app() {
     #[cfg(target_os = "macos")]
     macos::focus_app();
 }
-pub fn prepare_selection_window(window_ptr: *mut std::ffi::c_void) {
+/// # Safety
+/// `window_ptr` must be a valid `NSWindow *` pointer accessed on the AppKit main thread.
+pub unsafe fn prepare_selection_window(window_ptr: *mut std::ffi::c_void) {
     #[cfg(target_os = "macos")]
-    macos::prepare_selection_window(window_ptr);
+    unsafe {
+        macos::prepare_selection_window(window_ptr);
+    }
     #[cfg(not(target_os = "macos"))]
     let _ = window_ptr;
 }
@@ -126,21 +130,33 @@ pub fn mouse_button_down() -> bool {
     #[cfg(not(target_os = "macos"))]
     return false;
 }
-pub fn attach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void) {
+/// # Safety
+/// `parent` and `child` must be valid `NSWindow *` pointers accessed on the AppKit main thread.
+pub unsafe fn attach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void) {
     #[cfg(target_os = "macos")]
-    macos::attach_child_window(parent, child);
+    unsafe {
+        macos::attach_child_window(parent, child);
+    }
     #[cfg(not(target_os = "macos"))]
     let _ = (parent, child);
 }
-pub fn detach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void) {
+/// # Safety
+/// `parent` and `child` must be valid `NSWindow *` pointers accessed on the AppKit main thread.
+pub unsafe fn detach_child_window(parent: *mut std::ffi::c_void, child: *mut std::ffi::c_void) {
     #[cfg(target_os = "macos")]
-    macos::detach_child_window(parent, child);
+    unsafe {
+        macos::detach_child_window(parent, child);
+    }
     #[cfg(not(target_os = "macos"))]
     let _ = (parent, child);
 }
-pub fn configure_transparent_window(window_ptr: *mut std::ffi::c_void) {
+/// # Safety
+/// `window_ptr` must be a valid `NSWindow *` pointer accessed on the AppKit main thread.
+pub unsafe fn configure_transparent_window(window_ptr: *mut std::ffi::c_void) {
     #[cfg(target_os = "macos")]
-    macos::configure_transparent_window(window_ptr);
+    unsafe {
+        macos::configure_transparent_window(window_ptr);
+    }
     #[cfg(not(target_os = "macos"))]
     let _ = window_ptr;
 }
@@ -388,9 +404,16 @@ pub fn system_dark() -> bool {
     return false;
 }
 
-pub fn configure_window(window_ptr: *mut std::ffi::c_void, theme: screentrans_core::config::Theme) {
+/// # Safety
+/// `window_ptr` must be a valid `NSWindow *` pointer accessed on the AppKit main thread.
+pub unsafe fn configure_window(
+    window_ptr: *mut std::ffi::c_void,
+    theme: screentrans_core::config::Theme,
+) {
     #[cfg(target_os = "macos")]
-    macos::configure_window(window_ptr, theme);
+    unsafe {
+        macos::configure_window(window_ptr, theme);
+    }
     #[cfg(not(target_os = "macos"))]
     let _ = (window_ptr, theme);
 }

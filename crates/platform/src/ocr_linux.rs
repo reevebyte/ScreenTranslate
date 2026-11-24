@@ -54,10 +54,16 @@ pub async fn recognize(
     if available.is_empty() {
         return Err(unavailable_for(&mapped, &installed));
     }
-    let mut png = Cursor::new(Vec::new());
-    image
-        .write_to(&mut png, image::ImageFormat::Png)
-        .map_err(|_| unavailable())?;
+    let image = image.clone();
+    let bytes = tokio::task::spawn_blocking(move || {
+        let mut png = Cursor::new(Vec::new());
+        image
+            .write_to(&mut png, image::ImageFormat::Png)
+            .map_err(|_| unavailable())?;
+        Ok::<_, AppError>(png.into_inner())
+    })
+    .await
+    .map_err(|_| unavailable())??;
     // No shell expansion; language names are restricted to the installed engine's own list.
     let mut child = tokio::process::Command::new("tesseract")
         .args(["stdin", "stdout", "-l", &available.join("+"), "tsv"])
@@ -68,7 +74,6 @@ pub async fn recognize(
         .spawn()
         .map_err(|_| unavailable())?;
     let mut stdin = child.stdin.take().ok_or_else(unavailable)?;
-    let bytes = png.into_inner();
     tokio::spawn(async move {
         let _ = stdin.write_all(&bytes).await;
     });

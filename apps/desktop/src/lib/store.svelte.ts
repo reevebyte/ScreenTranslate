@@ -47,6 +47,19 @@ export function previewConfig(config: Config) {
   publishConfigActivity();
 }
 
+export function restoreSavedConfig(config: Config) {
+  configIntent++;
+  stagedConfig = false;
+  failedConfig = undefined;
+  app.configPending = false;
+  app.configError = '';
+  app.configErrorRaw = '';
+  app.configErrorAction = '';
+  if (app.data) app.data.config = structuredClone($state.snapshot(config));
+  applyAppearance(config);
+  publishConfigActivity();
+}
+
 const clientId = crypto.randomUUID();
 let localRevision = 0;
 let pendingRevision = 0;
@@ -106,7 +119,11 @@ export function editText(input: string, source = app.source, target = app.target
 }
 
 export async function translateNow() {
-  await latestSync;
+  let pending: Promise<unknown>;
+  do {
+    pending = latestSync;
+    await pending;
+  } while (pending !== latestSync);
   if (!app.input.trim()) return;
   return act(call('translate_text', { revision: app.data?.text.revision ?? 0 }));
 }

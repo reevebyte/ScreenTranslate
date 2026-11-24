@@ -6,20 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>ScreenTranslate</title>
     <link rel="icon" type="image/png" href="/app-icon.png" />
-    <script>
-      try {
-        const params = new URLSearchParams(location.search);
-        const win = params.get('window') || 'main';
-        if (win !== 'main') {
-          document.documentElement.dataset.transparent = 'true';
-          document.documentElement.dataset.window = win;
-          document.documentElement.style.background = 'transparent';
-        }
-        const theme = params.get('theme') || localStorage.getItem('screentranslate-theme') || 'system';
-        const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
-        document.documentElement.classList.toggle('dark', dark);
-      } catch {}
-    </script>
+    <script src="/early-theme.js"></script>
   </head>
   <body>
     <div id="app"></div>

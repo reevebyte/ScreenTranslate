@@ -32,6 +32,15 @@ impl JobRegistry {
         ticket
     }
 
+    pub fn current(&self, lane: &str) -> Option<JobTicket> {
+        self.lanes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(lane)
+            .filter(|ticket| !ticket.stop.is_cancelled())
+            .cloned()
+    }
+
     pub fn is_current(&self, lane: &str, ticket: &JobTicket) -> bool {
         !ticket.stop.is_cancelled()
             && self

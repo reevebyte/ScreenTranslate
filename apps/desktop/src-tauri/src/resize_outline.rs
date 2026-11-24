@@ -171,7 +171,10 @@ fn create(owner: isize, b: Rect, s: f64) -> Result<Vec<isize>> {
 fn destroy(handles: &[isize]) {
     for &raw in handles {
         unsafe {
-            let _ = DestroyWindow(HWND(raw as *mut _));
+            let hwnd = HWND(raw as *mut _);
+            if windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)).as_bool() {
+                let _ = DestroyWindow(hwnd);
+            }
         }
     }
 }

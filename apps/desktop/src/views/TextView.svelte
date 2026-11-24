@@ -18,11 +18,16 @@
   let composing = $state(false);
   let activePane = $state('source');
   let compactReading = $derived(width < 470 && height < 310 * (app.data?.config.appearance.fontScale ?? 1));
+  $effect(() => { void compactReading; composing = false; });
   let textarea: HTMLTextAreaElement;
   let busy = $derived(app.data?.text.job.stage === 'translating');
   let error = $derived(app.data?.text.job.error);
   function swap() { if (app.data?.text.output) editText(app.data.text.output, app.target, app.source); }
-  async function submit() { await translateNow(); if (compactReading) activePane = 'target'; }
+  async function submit() {
+    if (!app.input.trim() || composing || busy) return;
+    await translateNow();
+    if (compactReading) activePane = 'target';
+  }
   onMount(() => textarea?.focus());
 </script>
 
@@ -58,6 +63,7 @@
     oninput={event => editText(event.currentTarget.value, app.source, app.target, composing)}
     oncompositionstart={() => { composing = true; editText(app.input, app.source, app.target, true); }}
     oncompositionend={event => { composing = false; editText(event.currentTarget.value, app.source, app.target, false); }}
+    onblur={() => { if (composing) { composing = false; editText(app.input, app.source, app.target, false); } }}
     onkeydown={event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && !composing && !event.isComposing) { event.preventDefault(); void submit(); } }}></textarea>
 {/snippet}
 {#snippet targetEditor()}

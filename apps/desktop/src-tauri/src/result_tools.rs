@@ -131,27 +131,51 @@ fn monitor(window: &WebviewWindow, bounds: Rect) -> Result<(Rect, f64)> {
 }
 #[cfg(target_os = "macos")]
 fn detach_macos_child(app: &AppHandle) {
-    if let (Some(image), Some(tool)) = (
-        app.get_webview_window("result"),
-        app.get_webview_window("result-tools"),
-    ) && let (Ok(image_ptr), Ok(tool_ptr)) = (image.ns_window(), tool.ns_window())
-    {
-        screentrans_platform::detach_child_window(image_ptr, tool_ptr);
-    }
+    let app_handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let (Some(image), Some(tool)) = (
+            app_handle.get_webview_window("result"),
+            app_handle.get_webview_window("result-tools"),
+        ) && let (Ok(image_ptr), Ok(tool_ptr)) = (image.ns_window(), tool.ns_window())
+        {
+            unsafe {
+                screentrans_platform::detach_child_window(image_ptr, tool_ptr);
+            }
+        }
+    });
 }
 
 #[cfg(target_os = "macos")]
-fn attach_macos_child(app: &AppHandle, image: &WebviewWindow, tool: &WebviewWindow) {
-    let _ = app;
-    if let (Ok(image_ptr), Ok(tool_ptr)) = (image.ns_window(), tool.ns_window()) {
-        screentrans_platform::attach_child_window(image_ptr, tool_ptr);
-    }
+fn attach_macos_child(app: &AppHandle, _image: &WebviewWindow, _tool: &WebviewWindow) {
+    let app_handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let (Some(image), Some(tool)) = (
+            app_handle.get_webview_window("result"),
+            app_handle.get_webview_window("result-tools"),
+        ) && let (Ok(image_ptr), Ok(tool_ptr)) = (image.ns_window(), tool.ns_window())
+        {
+            unsafe {
+                screentrans_platform::attach_child_window(image_ptr, tool_ptr);
+            }
+        }
+    });
 }
 
-struct PlacingGuard<'a>(&'a AppHandle);
-impl Drop for PlacingGuard<'_> {
+struct PlacingGuard(AppHandle);
+impl PlacingGuard {
+    fn enter(app: &AppHandle, target_x: i32, target_y: i32) -> Self {
+        let state = app.state::<AppState>();
+        let mut bar = lock(&state.result_toolbar);
+        bar.placing += 1;
+        bar.expected = Some((target_x, target_y));
+        Self(app.clone())
+    }
+}
+impl Drop for PlacingGuard {
     fn drop(&mut self) {
-        lock(&self.0.state::<AppState>().result_toolbar).placing = false;
+        let state = self.0.state::<AppState>();
+        let mut bar = lock(&state.result_toolbar);
+        bar.placing = bar.placing.saturating_sub(1);
     }
 }
 
@@ -196,8 +220,15 @@ pub fn prepare(app: &AppHandle) -> Result<WebviewWindow> {
         });
     }
     #[cfg(target_os = "macos")]
-    if let Ok(ns_window) = tool.ns_window() {
-        screentrans_platform::configure_transparent_window(ns_window);
+    {
+        let tool_clone = tool.clone();
+        let _ = tool.run_on_main_thread(move || {
+            if let Ok(ns_window) = tool_clone.ns_window() {
+                unsafe {
+                    screentrans_platform::configure_transparent_window(ns_window);
+                }
+            }
+        });
     }
     Ok(tool)
 }
@@ -212,13 +243,7 @@ fn place_with(
     let target_y = bounds.y.round() as i32;
     let target_w = bounds.width.round() as u32;
     let target_h = bounds.height.round() as u32;
-    {
-        let state = app.state::<AppState>();
-        let mut bar = lock(&state.result_toolbar);
-        bar.placing = true;
-        bar.expected = Some((target_x, target_y));
-    }
-    let _guard = PlacingGuard(app);
+    let guard = PlacingGuard::enter(app, target_x, target_y);
     let pos = tool.inner_position().map_err(|_| windows::window_error())?;
     let size = tool.inner_size().map_err(|_| windows::window_error())?;
     let pos_diff = force || (pos.x - target_x).abs() > 1 || (pos.y - target_y).abs() > 1;
@@ -261,8 +286,11 @@ fn place_with(
                 // pre-map coordinates even after Mutter placed the window elsewhere.
                 // Moving the realized GDK window directly sends an unconditional
                 // X11 ConfigureRequest so the toolbar snaps tightly below the capture.
+                // Keep `guard` alive inside the main-thread closure so `placing > 0`
+                // covers the asynchronous GTK move itself.
                 let tool_clone = tool.clone();
                 let _ = tool.run_on_main_thread(move || {
+                    let _keep = guard;
                     if let Ok(gtk_win) = tool_clone.gtk_window() {
                         use gtk::prelude::{GtkWindowExt, WidgetExt};
                         if size_diff {
@@ -279,6 +307,7 @@ fn place_with(
                         }
                     }
                 });
+                return Ok(());
             }
         }
         #[cfg(windows)]
@@ -292,6 +321,7 @@ fn place_with(
             lock(&app.state::<AppState>().result_toolbar).expected = Some((actual.x, actual.y));
         }
     }
+    drop(guard);
     Ok(())
 }
 pub fn clamp_toolbar(app: &AppHandle) -> Result<()> {
@@ -870,6 +900,18 @@ pub fn quiet(app: &AppHandle, quiet: bool) -> Result<()> {
     lock(&app.state::<AppState>().result_toolbar).quiet = quiet;
     sync(app)
 }
+#[cfg(target_os = "linux")]
+pub fn cancel_toolbar_drag(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    {
+        let mut bar = lock(&state.result_toolbar);
+        bar.toolbar_moving = false;
+        bar.detached = false;
+        bar.gesture_generation += 1;
+    }
+    let _ = sync(app);
+}
+
 pub fn hide(app: &AppHandle) -> Result<()> {
     // Renderer cleanup is not guaranteed after hide/crash; release native resize
     // surfaces here as well as on normal pointer release and owner destruction.
@@ -878,7 +920,7 @@ pub fn hide(app: &AppHandle) -> Result<()> {
         let state = app.state::<AppState>();
         let mut bar = lock(&state.result_toolbar);
         bar.finish_image_gesture();
-        bar.placing = false;
+        bar.placing = 0;
     }
     #[cfg(target_os = "macos")]
     detach_macos_child(app);
@@ -919,7 +961,7 @@ pub fn window_changed(window: &tauri::Window) {
             schedule_linux_toolbar_drag_finish(window);
             return;
         }
-        if label == "result-tools" && (bar.placing || bar.image_moving || bar.image_resizing) {
+        if label == "result-tools" && (bar.is_placing() || bar.image_moving || bar.image_resizing) {
             return;
         }
         // On Linux X11/XWayland, Mutter can emit a late Moved event when
@@ -933,7 +975,7 @@ pub fn window_changed(window: &tauri::Window) {
                 let mut bar = lock(&state.result_toolbar);
                 if bar.detached
                     || bar.toolbar_moving
-                    || bar.placing
+                    || bar.is_placing()
                     || bar.suppressed()
                     || bar.realign_attempts == 0
                 {
@@ -953,7 +995,7 @@ pub fn window_changed(window: &tauri::Window) {
                         bar.generation == generation
                             && !bar.detached
                             && !bar.toolbar_moving
-                            && !bar.placing
+                            && !bar.is_placing()
                             && !bar.suppressed()
                     };
                     if active {
@@ -982,7 +1024,7 @@ pub fn window_changed(window: &tauri::Window) {
             let mut bar = lock(&state.result_toolbar);
             #[cfg(target_os = "linux")]
             let bar = lock(&state.result_toolbar);
-            if bar.toolbar_moving || bar.placing || bar.matches_expected(pos.x, pos.y) {
+            if bar.toolbar_moving || bar.is_placing() || bar.matches_expected(pos.x, pos.y) {
                 return;
             }
             // On Linux X11/XWayland, Mutter emits Moved when applying initial
@@ -995,7 +1037,7 @@ pub fn window_changed(window: &tauri::Window) {
         let generation = {
             let state = app.state::<AppState>();
             let mut bar = lock(&state.result_toolbar);
-            if bar.toolbar_moving || bar.placing {
+            if bar.toolbar_moving || bar.is_placing() {
                 return;
             }
             bar.generation += 1;
@@ -1010,7 +1052,7 @@ pub fn window_changed(window: &tauri::Window) {
         let should_sync = {
             let state = app.state::<AppState>();
             let bar = lock(&state.result_toolbar);
-            bar.generation == generation && !bar.toolbar_moving && !bar.placing
+            bar.generation == generation && !bar.toolbar_moving && !bar.is_placing()
         };
         if should_sync {
             let _ = sync(&app);
