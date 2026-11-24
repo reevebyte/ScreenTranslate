@@ -1,6 +1,6 @@
 # Maintainer: reevebyte <reevebyte@gmail.com>
 pkgname=screentranslate
-pkgver=2.0.44
+pkgver=2.0.45
 pkgrel=1
 pkgdesc="Lightweight cross-platform screenshot and text translation tool"
 arch=('x86_64')
