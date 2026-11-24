@@ -338,5 +338,15 @@
   "删除后将切换回其他识别引擎。": "Switches back to another OCR engine after removal.",
   "删除后需重新下载才能使用。": "You will need to download it again to use it.",
   "本地 OCR 模型正在下载中，请完成后再安装更新": "Local OCR models are downloading. Wait for it to finish before installing the update.",
-  "尚未下载 PP-OCRv5 本地模型，请在服务中心下载后使用": "PP-OCRv5 local models are not installed. Download them in Services first."
+  "尚未下载 PP-OCRv5 本地模型，请在服务中心下载后使用": "PP-OCRv5 local models are not installed. Download them in Services first.",
+  "复制译图": "Copy translated image",
+  "复制翻译后的图片": "Copy translated image",
+  "复制译图 (C)": "Copy translated image (C)",
+  "复制文字": "Copy text",
+  "复制原文或译文": "Copy original or translation",
+  "另存为": "Save as",
+  "保存翻译后的图片": "Save translated image",
+  "保存失败，请重试": "Could not save image. Try again.",
+  "没有可复制的译文": "No translated text to copy",
+  "拖动切换上下左右停靠，双击切换上下": "Drag to dock top/bottom/left/right, double-click to flip"
 }

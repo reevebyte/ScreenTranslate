@@ -636,7 +636,8 @@ fn hyprland_window_rules_lua() -> &'static str {
          or function(m, r) r.match = m; hl.window_rule(r) end; \
        for _, title in ipairs({'^ScreenTranslate · 截图$', '^ScreenTranslate · 快速翻译$'}) do \
          apply({ title = title }, { float = true, center = true, pin = true, border_size = 0, no_shadow = true, no_blur = true }); \
-       end \
+       end; \
+       apply({ title = '^ScreenTranslate · 工具条$' }, { float = true, pin = true, border_size = 0, no_shadow = true, no_blur = true }); \
      end"
 }
 

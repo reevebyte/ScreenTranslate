@@ -3,11 +3,21 @@ import { render, fireEvent, cleanup, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { previewBootstrap } from '$lib/preview';
 
-const { call, startDragging, startResizeDragging, events } = vi.hoisted(() => ({ call: vi.fn().mockResolvedValue(undefined), startDragging: vi.fn().mockResolvedValue(undefined), startResizeDragging: vi.fn().mockResolvedValue(undefined), events: new Map<string,Set<(event:{payload:unknown})=>void>>() }));
+const { call, startDragging, startResizeDragging, renderTranslatedImagePng, events } = vi.hoisted(() => ({
+  call: vi.fn().mockResolvedValue(undefined),
+  startDragging: vi.fn().mockResolvedValue(undefined),
+  startResizeDragging: vi.fn().mockResolvedValue(undefined),
+  renderTranslatedImagePng: vi.fn().mockResolvedValue(new Uint8Array([137, 80, 78, 71])),
+  events: new Map<string,Set<(event:{payload:unknown})=>void>>(),
+}));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async (name:string, fn:(event:{payload:unknown})=>void) => {
   const listeners=events.get(name)??new Set();listeners.add(fn);events.set(name,listeners);return ()=>listeners.delete(fn);
 }) }));
 vi.mock('$lib/api', () => ({ desktop: true, call, loadBootstrap: vi.fn() }));
+vi.mock('$lib/overlay-layout', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('$lib/overlay-layout')>();
+  return { ...actual, renderTranslatedImagePng };
+});
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ startDragging, startResizeDragging, innerSize: vi.fn(async () => ({width:window.innerWidth*devicePixelRatio,height:window.innerHeight*devicePixelRatio})) }) }));
 vi.mock('svelte/motion', () => ({ prefersReducedMotion: { current: true } }));
 vi.mock('svelte-sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -51,7 +61,7 @@ describe('floating screenshot recovery', () => {
     const view = renderResult();
     await waitFor(() => expect(events.get('result-display-changed')?.size).toBe(2));
     const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
-    await fireEvent(view.getByRole('button', { name: '复制全部译文' }), event);
+    await fireEvent(view.getByRole('button', { name: '复制译图' }), event);
     expect(event.defaultPrevented).toBe(false);
     expect(call.mock.calls.filter(([command]) => command === 'set_result_display')).toHaveLength(0);
   });
@@ -80,44 +90,55 @@ describe('floating screenshot recovery', () => {
     await waitFor(()=>expect(call).toHaveBeenCalledWith('finish_result_drag'));
     expect(view.getByRole('alert').textContent).toContain('无法移动截图');
   });
-  it('extracts recognized source text without opening a reading dialog or translating again', async () => {
+  it('copies recognized source or translated text from the compact menu without opening a reading dialog', async () => {
     app.data!.visual.input = 'Recognized original';
     app.data!.visual.output = '译文';
     app.data!.visual.job.stage = 'complete';
     const view = renderResult();
     await waitFor(()=>expect(events.get('result-feedback')?.size).toBe(1));
     expect(view.queryByRole('button', { name: '展开阅读' })).toBeNull();
-    await fireEvent.click(view.getByRole('button', { name: '提取文字' }));
+    expect(view.queryByRole('button', { name: '另存为' })).toBeNull();
+    await fireEvent.click(view.getByRole('button', { name: '复制文字' }));
+    expect(call).toHaveBeenCalledWith('set_toolbar_menu_open', { open: true });
+    const items = view.getAllByRole('menuitem').map(node => node.textContent?.trim());
+    expect(items).toEqual(['原文', '译文']);
+    await fireEvent.click(view.getByRole('menuitem', { name: '原文' }));
     await waitFor(() => expect(call).toHaveBeenCalledWith('copy_text', { text: 'Recognized original' }));
+    expect(call).toHaveBeenCalledWith('set_toolbar_menu_open', { open: false });
     expect(view.queryByRole('dialog')).toBeNull();
-    expect(call).not.toHaveBeenCalledWith('show_result_notice',expect.objectContaining({text:'识别文字已复制'}));
-    expect(view.getByRole('button',{name:'提取文字'}).querySelector('.copy-done')).not.toBeNull();
-    expect(view.getByRole('button',{name:'复制全部译文'}).querySelector('.copy-done')).toBeNull();
+    expect(view.getByRole('button',{name:'复制文字'}).querySelector('.copy-done')).not.toBeNull();
+    expect(view.getByRole('button',{name:'复制译图'}).querySelector('.copy-done')).toBeNull();
     expect(call).not.toHaveBeenCalledWith('retry_visual');
   });
-  it('keeps source and translation copy feedback timers independent',async()=>{
+  it('keeps image and text copy feedback timers independent',async()=>{
     app.data!.visual.input='Original';app.data!.visual.output='译文';app.data!.visual.job.stage='complete';
     const view=renderResult();
     await waitFor(()=>expect(events.get('result-feedback')?.size).toBe(1));
     vi.useFakeTimers();
-    const translation=view.getByRole('button',{name:'复制全部译文'}),source=view.getByRole('button',{name:'提取文字'});
-    await fireEvent.click(translation);await vi.advanceTimersByTimeAsync(700);
-    await fireEvent.click(source);
-    expect(translation.querySelector('.copy-done')).not.toBeNull();
-    expect(source.querySelector('.copy-done')).not.toBeNull();
-    await vi.advanceTimersByTimeAsync(701);
-    expect(translation.querySelector('.copy-done')).toBeNull();
-    expect(source.querySelector('.copy-done')).not.toBeNull();
+    const imageBtn=view.getByRole('button',{name:'复制译图'}),textBtn=view.getByRole('button',{name:'复制文字'});
+    await fireEvent.click(imageBtn);
+    await waitFor(() => expect(call).toHaveBeenCalledWith('copy_image', { png: [137, 80, 78, 71] }));
     await vi.advanceTimersByTimeAsync(700);
-    expect(source.querySelector('.copy-done')).toBeNull();
+    await fireEvent.click(textBtn);
+    await fireEvent.click(view.getByRole('menuitem', { name: '译文' }));
+    await waitFor(() => expect(call).toHaveBeenCalledWith('copy_text', { text: '译文' }));
+    expect(imageBtn.querySelector('.copy-done')).not.toBeNull();
+    expect(textBtn.querySelector('.copy-done')).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(701);
+    expect(imageBtn.querySelector('.copy-done')).toBeNull();
+    expect(textBtn.querySelector('.copy-done')).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(700);
+    expect(textBtn.querySelector('.copy-done')).toBeNull();
   });
   it('can extract OCR text while the translation request is still pending', async () => {
     app.data!.visual.input = 'Already recognized';
     app.data!.visual.job.stage = 'translating';
     const view = renderResult();
-    const button = view.getByRole('button', { name: '提取文字' }) as HTMLButtonElement;
+    const button = view.getByRole('button', { name: '复制文字' }) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
     await fireEvent.click(button);
+    expect((view.getByRole('menuitem', { name: '译文' }) as HTMLButtonElement).disabled).toBe(true);
+    await fireEvent.click(view.getByRole('menuitem', { name: '原文' }));
     await waitFor(() => expect(call).toHaveBeenCalledWith('copy_text', { text: 'Already recognized' }));
     expect(call).not.toHaveBeenCalledWith('cancel_job', expect.anything());
   });
@@ -257,6 +278,26 @@ describe('floating screenshot recovery', () => {
     await waitFor(() => expect(view.container.querySelector('.floating-controls')?.classList.contains('gesture-active')).toBe(false));
   });
 
+  it('clamps embedded Wayland toolbar drag offsets inside the result window so the pill never clips', async () => {
+    app.data!.capabilities.wayland = true;
+    app.data!.capabilities.windowPositioning = false;
+    const view = render(ResultView, { floating: true });
+    await waitFor(() => expect(events.get('result-layout-changed')?.size).toBe(1));
+    const shell = view.container.querySelector('.floating-shell') as HTMLElement;
+    const hud = view.container.querySelector('.floating-hud') as HTMLElement;
+    const grip = view.getByRole('button', { name: '移动工具栏' });
+    vi.spyOn(shell, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, right: 256, bottom: 160, width: 256, height: 160, x: 0, y: 0, toJSON() {} });
+    vi.spyOn(hud, 'getBoundingClientRect').mockReturnValue({ left: 60, top: 108, right: 248, bottom: 148, width: 188, height: 40, x: 60, y: 108, toJSON() {} });
+    await fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientX: 70, clientY: 128 });
+    // Dragging downward/rightward past the bottom-right dock stays clamped at 0px.
+    await fireEvent.pointerMove(grip, { pointerId: 1, clientX: 220, clientY: 260 });
+    expect(hud.style.transform).toBe('translate(0px, 0px)');
+    // Dragging upward/leftward stays within the image height and horizontal dock range.
+    await fireEvent.pointerMove(grip, { pointerId: 1, clientX: -120, clientY: -120 });
+    expect(hud.style.transform).toBe('translate(-52px, -96px)');
+    await fireEvent.pointerUp(grip, { button: 0, pointerId: 1, clientX: -120, clientY: -120 });
+  });
+
   it('starts the next Wayland drag even when the compositor swallowed the previous release', async () => {
     app.data!.capabilities.wayland = true;
     app.data!.capabilities.windowPositioning = false;
@@ -321,7 +362,7 @@ describe('floating screenshot recovery', () => {
     app.data!.visual.output = 'translation';
     app.data!.visual.job.stage = 'complete';
     const view = renderResult();
-    const copyButton = view.getByRole('button', { name: '复制全部译文' });
+    const copyButton = view.getByRole('button', { name: '复制译图' });
     copyButton.focus();
     await fireEvent.keyDown(copyButton, { key: 'Escape' });
     expect(call).toHaveBeenCalledWith('hide_window');
@@ -409,10 +450,35 @@ describe('proofreading dialog', () => {
     app.data!.visual.blocks = [{ id: 'block-0', bounds, sourceLines: [bounds], text: 'Hello world', translation: '你好，世界', targetLanguage: 'zh-Hans', confidence: null, revision: 0, backgroundColor: null, foregroundColor: null, fontSize: null, lineHeight: null }];
   }
 
-  it('keeps edit and translation status in the card headers instead of a status line', async () => {
+  it('keeps edit and translation status in the card headers and omits the redundant toolbar edit button', async () => {
     withBlock();
+    app.data!.visual.frame!.cleanId = 'clean-frame';
+    app.data!.visual.input = 'Hello world';
+    app.data!.visual.output = '你好，世界';
+    call.mockImplementation(async (command) => {
+      if (command === 'save_image') return true;
+      return undefined;
+    });
     const view = render(ResultView);
-    await fireEvent.click(view.getByTitle('校对文字 (E)'));
+    expect(view.queryByTitle('校对文字 (E)')).toBeNull();
+    expect(view.getByRole('button', { name: '另存为' })).toBeTruthy();
+
+    await fireEvent.click(view.getByRole('button', { name: '复制译图' }));
+    await waitFor(() => expect(call).toHaveBeenCalledWith('copy_image', { png: [137, 80, 78, 71] }));
+    await waitFor(() => expect(view.getByRole('button', { name: '复制译图' }).querySelector('.copy-done')).not.toBeNull());
+
+    await fireEvent.click(view.getByRole('button', { name: '复制文字' }));
+    expect(view.getAllByRole('menuitem').map(node => node.textContent?.trim())).toEqual(['原文', '译文']);
+    await fireEvent.click(view.getByRole('menuitem', { name: '译文' }));
+    await waitFor(() => expect(call).toHaveBeenCalledWith('copy_text', { text: '你好，世界' }));
+    await waitFor(() => expect(view.getByRole('button', { name: '复制文字' }).querySelector('.copy-done')).not.toBeNull());
+
+    await fireEvent.click(view.getByRole('button', { name: '另存为' }));
+    await waitFor(() => expect(call).toHaveBeenCalledWith('save_image', { png: [137, 80, 78, 71], defaultName: 'ScreenTranslate.png' }));
+    await waitFor(() => expect(view.getByRole('button', { name: '另存为' }).querySelector('.copy-done')).not.toBeNull());
+
+    await fireEvent.load(view.getByAltText('截图与翻译结果'));
+    await fireEvent.click(view.getByRole('button', { name: '你好，世界' }));
     const dialog = await view.findByRole('dialog');
     const cards = dialog.querySelectorAll('.correction-card');
     expect(cards).toHaveLength(2);

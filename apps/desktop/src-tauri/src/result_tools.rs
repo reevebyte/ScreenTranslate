@@ -167,7 +167,10 @@ pub fn prepare(app: &AppHandle) -> Result<WebviewWindow> {
         builder
     };
     let tool = builder
-        .inner_size(248.0, 48.0)
+        .inner_size(
+            crate::result_toolbar::TOOLBAR_WIDTH,
+            crate::result_toolbar::TOOLBAR_HEIGHT,
+        )
         .decorations(false)
         .transparent(true)
         .shadow(false)
@@ -177,17 +180,27 @@ pub fn prepare(app: &AppHandle) -> Result<WebviewWindow> {
         .accept_first_mouse(true)
         .build()
         .map_err(|_| windows::window_error())?;
+    #[cfg(target_os = "linux")]
+    {
+        windows::tune_linux_webview(&tool);
+        let tool_clone = tool.clone();
+        let _ = tool.run_on_main_thread(move || {
+            if let Ok(gtk_win) = tool_clone.gtk_window() {
+                use gtk::prelude::GtkWindowExt;
+                // Utility hint lets GNOME Mutter / XWayland honor exact docked
+                // placement over the transparent bottom strip of `result` while
+                // keeping the floating toolbar freely draggable.
+                gtk_win.set_type_hint(gtk::gdk::WindowTypeHint::Utility);
+                gtk_win.set_gravity(gtk::gdk::Gravity::NorthWest);
+            }
+        });
+    }
     #[cfg(target_os = "macos")]
     if let Ok(ns_window) = tool.ns_window() {
         screentrans_platform::configure_transparent_window(ns_window);
     }
     Ok(tool)
 }
-fn place(app: &AppHandle, tool: &WebviewWindow, bounds: Rect) -> Result<()> {
-    let scale = tool.scale_factor().unwrap_or(1.0).max(1.0);
-    place_with(app, tool, bounds, scale, false)
-}
-
 fn place_with(
     app: &AppHandle,
     tool: &WebviewWindow,
@@ -233,18 +246,40 @@ fn place_with(
             // newly-created hidden toolbar window with a stale scale factor cannot be
             // placed at 2x coordinates on HiDPI XWayland displays.
             let scale = scale.max(1.0);
+            let lw = (bounds.width / scale).round().max(1.0) as i32;
+            let lh = (bounds.height / scale).round().max(1.0) as i32;
+            let lx = (bounds.x / scale).round() as i32;
+            let ly = (bounds.y / scale).round() as i32;
             if size_diff || force {
-                tool.set_size(tauri::LogicalSize::new(
-                    bounds.width / scale,
-                    bounds.height / scale,
-                ))
-                .map_err(|_| windows::window_error())?;
+                tool.set_size(tauri::LogicalSize::new(lw as f64, lh as f64))
+                    .map_err(|_| windows::window_error())?;
             }
-            tool.set_position(tauri::LogicalPosition::new(
-                bounds.x / scale,
-                bounds.y / scale,
-            ))
-            .map_err(|_| windows::window_error())?;
+            tool.set_position(tauri::LogicalPosition::new(lx as f64, ly as f64))
+                .map_err(|_| windows::window_error())?;
+            if force || size_diff {
+                // GTK3's `gtk_window_move` short-circuits when asked for the same
+                // pre-map coordinates even after Mutter placed the window elsewhere.
+                // Moving the realized GDK window directly sends an unconditional
+                // X11 ConfigureRequest so the toolbar snaps tightly below the capture.
+                let tool_clone = tool.clone();
+                let _ = tool.run_on_main_thread(move || {
+                    if let Ok(gtk_win) = tool_clone.gtk_window() {
+                        use gtk::prelude::{GtkWindowExt, WidgetExt};
+                        if size_diff {
+                            gtk_win.set_size_request(lw, lh);
+                            gtk_win.resize(lw, lh);
+                        }
+                        gtk_win.move_(lx, ly);
+                        if let Some(gdk_win) = gtk_win.window() {
+                            if size_diff {
+                                gdk_win.move_resize(lx, ly, lw, lh);
+                            } else {
+                                gdk_win.move_(lx, ly);
+                            }
+                        }
+                    }
+                });
+            }
         }
         #[cfg(windows)]
         {
@@ -263,16 +298,32 @@ pub fn clamp_toolbar(app: &AppHandle) -> Result<()> {
     let Some(tool) = app.get_webview_window("result-tools") else {
         return Ok(());
     };
+    let menu_open = lock(&app.state::<AppState>().result_toolbar).menu_open;
     let p = tool.inner_position().map_err(|_| windows::window_error())?;
     let s = tool.inner_size().map_err(|_| windows::window_error())?;
-    let bounds = Rect {
+    let current = Rect {
         x: p.x as f64,
         y: p.y as f64,
         width: s.width as f64,
         height: s.height as f64,
     };
-    let (area, _) = monitor(&tool, bounds)?;
-    place(app, &tool, crate::result_toolbar::clamp(bounds, area))
+    let (area, scale) = monitor(&tool, current)?;
+    let bounds = if menu_open {
+        current
+    } else {
+        Rect {
+            width: crate::result_toolbar::TOOLBAR_WIDTH * scale,
+            height: crate::result_toolbar::TOOLBAR_HEIGHT * scale,
+            ..current
+        }
+    };
+    place_with(
+        app,
+        &tool,
+        crate::result_toolbar::clamp(bounds, area),
+        scale,
+        false,
+    )
 }
 pub fn sync(app: &AppHandle) -> Result<()> {
     if uses_embedded_toolbar() {
@@ -304,11 +355,17 @@ pub fn sync(app: &AppHandle) -> Result<()> {
         detach_macos_child(app);
         let bounds = image_bounds(&image)?;
         let (area, scale) = monitor(&image, bounds)?;
-        let rect = crate::result_toolbar::placement(bounds, scale, &settings, area);
+        let base = crate::result_toolbar::placement(bounds, scale, &settings, area);
+        let (rect, menu_above) = if settings.menu_open {
+            crate::result_toolbar::menu_rect(base, scale, area)
+        } else {
+            (base, false)
+        };
         place_with(app, &tool, rect, scale, false)?;
         {
             let mut bar = lock(&state.result_toolbar);
-            bar.above = rect.bottom() <= bounds.y;
+            bar.above = base.bottom() <= bounds.y;
+            bar.menu_above = menu_above;
             #[cfg(target_os = "linux")]
             {
                 bar.realign_attempts = 4;
@@ -323,6 +380,90 @@ pub fn sync(app: &AppHandle) -> Result<()> {
         windows::request_show(&tool)?;
     }
     Ok(())
+}
+
+pub fn set_menu_open(app: &AppHandle, open: bool) -> Result<bool> {
+    let state = app.state::<AppState>();
+    if uses_embedded_toolbar() {
+        let mut bar = lock(&state.result_toolbar);
+        bar.menu_open = open;
+        bar.menu_above = false;
+        return Ok(false);
+    }
+    let Some(tool) = app.get_webview_window("result-tools") else {
+        return Ok(false);
+    };
+    let settings = {
+        let mut bar = lock(&state.result_toolbar);
+        if bar.toolbar_moving || bar.suppressed() {
+            bar.menu_open = false;
+            bar.menu_above = false;
+            return Ok(false);
+        }
+        let prev = bar.clone();
+        bar.menu_open = open;
+        prev
+    };
+    let (base, area, scale, image_top) = if !settings.detached
+        && let Some(image) = app.get_webview_window("result")
+        && let Ok(bounds) = image_bounds(&image)
+        && let Ok((area, scale)) = monitor(&image, bounds)
+    {
+        (
+            crate::result_toolbar::placement(bounds, scale, &settings, area),
+            area,
+            scale,
+            Some(bounds.y),
+        )
+    } else {
+        let pos = tool.inner_position().map_err(|_| windows::window_error())?;
+        let size = tool.inner_size().map_err(|_| windows::window_error())?;
+        let current = Rect {
+            x: pos.x as f64,
+            y: pos.y as f64,
+            width: size.width as f64,
+            height: size.height as f64,
+        };
+        let (area, scale) = monitor(&tool, current)?;
+        let pill_height = crate::result_toolbar::TOOLBAR_HEIGHT * scale;
+        let extra = crate::result_toolbar::TOOLBAR_MENU_EXTRA * scale;
+        let base_y = if settings.menu_open && settings.menu_above {
+            current.y + extra
+        } else {
+            current.y
+        };
+        (
+            crate::result_toolbar::clamp(
+                Rect {
+                    x: current.x,
+                    y: base_y,
+                    width: crate::result_toolbar::TOOLBAR_WIDTH * scale,
+                    height: pill_height,
+                },
+                area,
+            ),
+            area,
+            scale,
+            None,
+        )
+    };
+    let (target, menu_above) = if open {
+        crate::result_toolbar::menu_rect(base, scale, area)
+    } else {
+        (base, false)
+    };
+    place_with(app, &tool, target, scale, true)?;
+    let placement_state = {
+        let mut bar = lock(&state.result_toolbar);
+        if let Some(top) = image_top {
+            bar.above = base.bottom() <= top;
+        }
+        bar.menu_open = open;
+        bar.menu_above = menu_above;
+        bar.clone()
+    };
+    let _ = tool.emit("toolbar-placement-changed", placement_state);
+    Ok(menu_above)
 }
 
 #[cfg(target_os = "linux")]
@@ -361,12 +502,22 @@ fn realign_docked_toolbar(app: &AppHandle, force: bool) -> bool {
     let Ok((area, scale)) = monitor(&image, bounds) else {
         return false;
     };
-    let rect = crate::result_toolbar::placement(bounds, scale, &settings, area);
+    let base = crate::result_toolbar::placement(bounds, scale, &settings, area);
+    let (rect, menu_above) = if settings.menu_open {
+        crate::result_toolbar::menu_rect(base, scale, area)
+    } else {
+        (base, false)
+    };
     if !force && tool_matches_rect_logical(&tool, rect, scale) {
         return true;
     }
     let _ = place_with(app, &tool, rect, scale, true);
-    lock(&app.state::<AppState>().result_toolbar).above = rect.bottom() <= bounds.y;
+    {
+        let state = app.state::<AppState>();
+        let mut bar = lock(&state.result_toolbar);
+        bar.above = base.bottom() <= bounds.y;
+        bar.menu_above = menu_above;
+    }
     false
 }
 
@@ -419,6 +570,8 @@ pub fn dock(app: &AppHandle, above: bool, align_left: bool) -> Result<windows::R
         bar.align_left = align_left;
         bar.detached = false;
         bar.toolbar_moving = false;
+        bar.menu_open = false;
+        bar.menu_above = false;
         bar.generation += 1;
         bar.realign_attempts = 4;
     }
@@ -442,6 +595,8 @@ pub fn begin_drag(app: &AppHandle) {
         let mut bar = lock(&state.result_toolbar);
         bar.detached = true;
         bar.toolbar_moving = true;
+        bar.menu_open = false;
+        bar.menu_above = false;
         bar.expected = None;
         bar.realign_attempts = 0;
         bar.generation += 1;
@@ -454,6 +609,8 @@ pub fn begin_drag(app: &AppHandle) {
         let mut bar = lock(&state.result_toolbar);
         bar.detached = true;
         bar.toolbar_moving = true;
+        bar.menu_open = false;
+        bar.menu_above = false;
         bar.expected = None;
         bar.realign_attempts = 0;
         bar.generation += 1;

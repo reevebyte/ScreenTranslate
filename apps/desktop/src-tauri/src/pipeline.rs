@@ -124,7 +124,7 @@ pub fn schedule_text(app: AppHandle, delay: bool) {
     });
 }
 
-pub fn start_visual(app: AppHandle, metadata: FrameMetadata, recognize: bool) {
+pub fn start_visual(app: AppHandle, metadata: FrameMetadata, recognize: bool, show_floating: bool) {
     let state = app.state::<AppState>();
     state.jobs.cancel_prefix("block:");
     let ticket = state.jobs.begin("visual");
@@ -152,7 +152,7 @@ pub fn start_visual(app: AppHandle, metadata: FrameMetadata, recognize: bool) {
         revision
     };
     state.publish_visual(&app);
-    if let Err(e) = windows::show_result(&app, &metadata) {
+    if show_floating && let Err(e) = windows::show_result(&app, &metadata) {
         tracing::error!("show_result failed: {e:?}");
         state.jobs.finish("visual", &ticket);
         // Without a result window nothing would retire the frozen selection

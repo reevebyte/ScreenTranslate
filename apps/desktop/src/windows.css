@@ -1206,7 +1206,99 @@
   user-select: none;
 }
 
-.toolbar-window { width:100%;height:100%;padding:4px;display:flex;align-items:center; }
-.toolbar-window .floating-hud { width:100%;justify-content:space-between;box-shadow:0 1px 2px #00000014; }
-.dark .toolbar-window .floating-hud { box-shadow:0 1px 2px #00000038; }
+.toolbar-window {
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+}
+.toolbar-window.menu-above {
+  justify-content: flex-end;
+}
+.toolbar-window .floating-hud {
+  width: 100%;
+  justify-content: space-between;
+  box-shadow: 0 1px 2px #00000014;
+}
+.dark .toolbar-window .floating-hud {
+  box-shadow: 0 1px 2px #00000038;
+}
+
+.icon-button .copy-done {
+  color: var(--success);
+}
+
+.copy-menu-anchor {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.copy-text-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  min-width: 76px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow);
+}
+
+.copy-text-menu.open-above {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+.copy-text-menu.compact-row {
+  flex-direction: row;
+  min-width: auto;
+}
+
+.copy-text-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 24px;
+  padding: 3px 10px;
+  border-radius: var(--radius-compact);
+  font-size: var(--text-small);
+  font-weight: 500;
+  color: var(--foreground);
+  white-space: nowrap;
+  transition: background-color var(--motion-fast), color var(--motion-fast), scale var(--motion-fast) var(--ease);
+}
+
+.copy-text-option:hover:not(:disabled),
+.copy-text-option:focus-visible {
+  background: var(--surface-muted);
+  outline: none;
+}
+
+.copy-text-option:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.copy-text-option:active:not(:disabled) {
+  scale: .98;
+}
+
+.toolbar-window .copy-text-menu {
+  box-shadow: 0 4px 12px #0000001c;
+}
+
+.dark .toolbar-window .copy-text-menu {
+  box-shadow: 0 4px 14px #00000048;
+}
 

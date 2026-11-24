@@ -202,8 +202,12 @@ impl FrameCache {
             return;
         };
         let stale: Vec<_> = self.order.iter().take(index).cloned().collect();
+        let evicted = !stale.is_empty();
         for key in stale {
             self.remove(&key);
+        }
+        if evicted {
+            crate::windows::trim_linux_heap();
         }
     }
     pub fn crop(&self, id: &str, selection: Rect) -> Result<CaptureFrame> {

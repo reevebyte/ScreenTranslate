@@ -13,7 +13,7 @@ import { onMount, onDestroy, tick } from 'svelte';
     ScanLine,
     Copy,
     RotateCcw,
-    PencilLine,
+    Download,
     X,
     TextScan, Settings2,
     BrandHandle,
@@ -22,10 +22,11 @@ import { onMount, onDestroy, tick } from 'svelte';
     Eye, FolderOpen,
     Check, ArrowRightLeft, Languages,
   } from '$lib/icons';
+  import { toast } from 'svelte-sonner';
   import { app, act, copy, recover } from '$lib/store.svelte';
   import { call } from '$lib/api';
   import { frameUrl, languageOptions, formatHotkeyParts } from '$lib/utils';
-  import { fitOverlayText, sourceFontSize } from '$lib/overlay-layout';
+  import { fitOverlayText, sourceFontSize, renderTranslatedImagePng } from '$lib/overlay-layout';
   import Button from '$lib/components/ui/button.svelte';
   import Choice from '$lib/components/ui/choice.svelte';
 
@@ -62,14 +63,37 @@ import { onMount, onDestroy, tick } from 'svelte';
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
   let lastNotice = '';
   let dockWrite: Promise<void> = Promise.resolve();
-  let toolbarGesture: { id: number; node: HTMLElement; x: number; y: number } | null = null;
+  let toolbarGesture: { id: number; node: HTMLElement; x: number; y: number; bounds: { minX: number; maxX: number; minY: number; maxY: number } | null } | null = null;
   let workspaceWidth = $state(800);
   let editorTab = $state('source');
   let compactEditor = $derived(workspaceWidth < 470 && (app.data?.config.appearance.fontScale ?? 1) > 1.2);
   let submittedEdit = $state<{id:string;text:string;target:string}|null>(null);
-  let copied = $state({ source: false, translation: false });
-  const copyTimers: Partial<Record<'source' | 'translation', ReturnType<typeof setTimeout>>> = {};
-  onDestroy(() => { clearTimeout(copyTimers.source); clearTimeout(copyTimers.translation); });
+  let copied = $state({ image: false, text: false, saved: false });
+  const copyTimers: Partial<Record<'image' | 'text' | 'saved', ReturnType<typeof setTimeout>>> = {};
+  let textMenuOpen = $state(false);
+  let toolbarMenuAbove = $state(false);
+  let textMenuAnchor: HTMLElement | null = $state(null);
+  function flashDone(kind: 'image' | 'text' | 'saved') {
+    clearTimeout(copyTimers[kind]);
+    copied[kind] = true;
+    copyTimers[kind] = setTimeout(() => { copied[kind] = false; }, 1400);
+  }
+  function setTextMenu(open: boolean) {
+    if (textMenuOpen === open) return;
+    textMenuOpen = open;
+    if (!open) toolbarMenuAbove = false;
+    if (toolsOnly && desktop) {
+      void call<boolean>('set_toolbar_menu_open', { open }).then(above => {
+        if (textMenuOpen === open) toolbarMenuAbove = open && Boolean(above);
+      }).catch(() => {});
+    }
+  }
+  onDestroy(() => {
+    clearTimeout(copyTimers.image);
+    clearTimeout(copyTimers.text);
+    clearTimeout(copyTimers.saved);
+    if (textMenuOpen && toolsOnly && desktop) void call('set_toolbar_menu_open', { open: false }).catch(() => {});
+  });
   let presented = '';
   let width = $state(typeof window !== 'undefined' ? Math.max(300, window.innerWidth - 180) : 800);
   let height = $state(typeof window !== 'undefined' ? Math.max(200, window.innerHeight - 80) : 440);
@@ -121,7 +145,7 @@ import { onMount, onDestroy, tick } from 'svelte';
       await subscribe('result-display-changed', applyDisplay);
       applyDisplay(await call('result_display'));
       if (toolsOnly) {
-        const apply = (value:{above:boolean;alignLeft:boolean}) => { if(value){controlsAbove=value.above;toolbarAlignLeft=value.alignLeft;} };
+        const apply = (value:{above:boolean;alignLeft:boolean;menuAbove?:boolean}) => { if(value){controlsAbove=value.above;toolbarAlignLeft=value.alignLeft;if(textMenuOpen)toolbarMenuAbove=Boolean(value.menuAbove);} };
         await subscribe('toolbar-placement-changed',apply);
         apply(await call('toolbar_placement'));
       } else {
@@ -152,6 +176,7 @@ import { onMount, onDestroy, tick } from 'svelte';
       originalReady = floating ? '' : frame.id;
       imageError = false;
       selectedId = '';
+      setTextMenu(false);
       notice = null;
       lastNotice = '';
       clearTimeout(noticeTimer);
@@ -370,16 +395,70 @@ import { onMount, onDestroy, tick } from 'svelte';
     }
   });
   onDestroy(() => clearTimeout(noticeTimer));
-  async function handleCopy(text: string, extracted = false) {
-    if (!text) { if (extracted) showNotice(t("没有可提取的文字")); return; }
+  async function renderCurrentImagePng() {
+    if (!frame) throw new Error('no-frame');
+    const drawBlocks = !showOriginal && !!frame.cleanId && (session?.blocks?.length ?? 0) > 0;
+    const url = frameUrl(drawBlocks ? frame.cleanId! : frame.id);
+    return renderTranslatedImagePng(url, frame.width, frame.height, session?.blocks ?? [], drawBlocks);
+  }
+  async function handleCopyImage() {
+    if (!frame) return;
+    setTextMenu(false);
+    try {
+      const bytes = await renderCurrentImagePng();
+      if (desktop) {
+        await call('copy_image', { png: Array.from(bytes) });
+      } else if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': new Blob([bytes.buffer as ArrayBuffer], { type: 'image/png' }) })]);
+      } else {
+        throw new Error('clipboard-unavailable');
+      }
+      flashDone('image');
+    } catch {
+      if (floating) showNotice(t("复制失败，请重试"), 'error');
+      else toast.error(t("复制失败，请重试"));
+    }
+  }
+  async function handleSaveImage() {
+    if (!frame || floating) return;
+    setTextMenu(false);
+    try {
+      const bytes = await renderCurrentImagePng();
+      if (desktop) {
+        const saved = await call<boolean>('save_image', { png: Array.from(bytes), defaultName: 'ScreenTranslate.png' });
+        if (saved) flashDone('saved');
+      } else {
+        const url = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: 'image/png' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'ScreenTranslate.png';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        flashDone('saved');
+      }
+    } catch {
+      toast.error(t("保存失败，请重试"));
+    }
+  }
+  async function handleCopyTextChoice(kind: 'source' | 'translation') {
+    setTextMenu(false);
+    const text = kind === 'source' ? sourceText : (session?.output ?? '');
+    if (!text) {
+      const emptyMessage = kind === 'source' ? t("没有可提取的文字") : t("没有可复制的译文");
+      if (floating) showNotice(emptyMessage);
+      else toast.error(emptyMessage);
+      return;
+    }
     if (floating) {
       try { await call('copy_text', { text }); }
       catch { showNotice(t("复制失败，请重试"), 'error'); return; }
     } else if (!await copy(text)) return;
-    const kind = extracted ? 'source' : 'translation';
-    clearTimeout(copyTimers[kind]);
-    copied[kind] = true;
-    copyTimers[kind] = setTimeout(() => copied[kind] = false, 1400);
+    flashDone('text');
+  }
+  function closeTextMenuOnOutsidePointer(event: PointerEvent) {
+    if (!textMenuOpen) return;
+    if (event.target instanceof Node && textMenuAnchor?.contains(event.target)) return;
+    setTextMenu(false);
   }
   async function dockToolbar(above: boolean, alignLeft: boolean) {
     const frameId = frame?.id;
@@ -393,6 +472,7 @@ import { onMount, onDestroy, tick } from 'svelte';
     await dockWrite;
   }
   function beginToolbar(event: PointerEvent) {
+    setTextMenu(false);
     if (desktop && toolsOnly && event.button === 0) {
       event.preventDefault();event.stopPropagation();
       if (!nativeWindowGestures && toolbarDragging) return;
@@ -416,13 +496,31 @@ import { onMount, onDestroy, tick } from 'svelte';
     event.preventDefault(); event.stopPropagation();
     const node = event.currentTarget as HTMLElement;
     try { node.setPointerCapture(event.pointerId); } catch { /* Synthetic pointer. */ }
-    toolbarGesture = { id: event.pointerId, node, x: event.clientX, y: event.clientY };
+    const shellRect = node.closest('.floating-shell')?.getBoundingClientRect();
+    const hudRect = node.closest('.floating-hud')?.getBoundingClientRect();
+    const verticalTravel = Math.max(0, imageHeight > 0 ? imageHeight : (shellRect ? shellRect.height - controlsHeight - imagePadding * 2 : 0));
+    const horizontalTravel = shellRect && hudRect && shellRect.width > 0 && hudRect.width > 0
+      ? Math.max(0, shellRect.width - imagePadding * 2 - hudRect.width)
+      : 0;
+    const bounds = {
+      minX: toolbarAlignLeft ? 0 : -horizontalTravel,
+      maxX: toolbarAlignLeft ? horizontalTravel : 0,
+      minY: controlsAbove ? 0 : -verticalTravel,
+      maxY: controlsAbove ? verticalTravel : 0,
+    };
+    toolbarGesture = { id: event.pointerId, node, x: event.clientX, y: event.clientY, bounds };
   }
   function moveToolbar(event: PointerEvent) {
     if (toolbarGesture?.id !== event.pointerId) return;
-    const x = event.clientX - toolbarGesture.x, y = event.clientY - toolbarGesture.y;
+    let x = event.clientX - toolbarGesture.x, y = event.clientY - toolbarGesture.y;
     if (Math.hypot(x, y) >= 5) toolbarDragging = true;
-    if (toolbarDragging) toolbarOffset = { x, y };
+    if (toolbarDragging) {
+      if (toolbarGesture.bounds) {
+        x = Math.min(toolbarGesture.bounds.maxX, Math.max(toolbarGesture.bounds.minX, x));
+        y = Math.min(toolbarGesture.bounds.maxY, Math.max(toolbarGesture.bounds.minY, y));
+      }
+      toolbarOffset = { x, y };
+    }
   }
   function endToolbar(event: PointerEvent) {
     const gesture = toolbarGesture;
@@ -496,6 +594,11 @@ import { onMount, onDestroy, tick } from 'svelte';
 
   function keydown(event: KeyboardEvent) {
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.key === 'Escape' && textMenuOpen) {
+      event.preventDefault();
+      setTextMenu(false);
+      return;
+    }
     if (floating && event.key === 'Escape' && !selectedId) {
       if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"], [role="combobox"], [role="listbox"], [role="menu"], [role="menuitem"], [role="dialog"]')) return;
       event.preventDefault();
@@ -505,15 +608,14 @@ import { onMount, onDestroy, tick } from 'svelte';
     if (event.target instanceof Element && event.target.closest('button, input, textarea, select, [contenteditable="true"], [role="button"], [role="combobox"], [role="listbox"], [role="menu"], [role="menuitem"], [role="dialog"]')) return;
     if (selectedId) return;
     if (event.key.toLowerCase() === 'r' && !busy) { event.preventDefault(); void act(call('retry_visual')); return; }
-    if (event.key.toLowerCase() === 'e' && session?.blocks[0] && !floating) { event.preventDefault(); edit(session.blocks[0].id); return; }
     if (event.key === ' ') {
       event.preventDefault();
       setDisplay(original, comparing, true);
     }
     if (floating) {
-      if (event.key.toLowerCase() === 'c' && !event.ctrlKey && !event.metaKey && session?.output) {
+      if (event.key.toLowerCase() === 'c' && !event.ctrlKey && !event.metaKey && frame) {
         event.preventDefault();
-        handleCopy(session.output);
+        void handleCopyImage();
       }
       if (event.key === 'Escape' || event.key.toLowerCase() === 'm') {
         void act(call('hide_window'));
@@ -535,16 +637,20 @@ import { onMount, onDestroy, tick } from 'svelte';
 
 <svelte:window
   onkeydown={keydown}
+  onpointerdown={closeTextMenuOnOutsidePointer}
   onpointerup={releaseImageDrag}
   onpointercancel={releaseImageDrag}
   onkeyup={event => {
     if (event.key === ' ' && holdingOriginal) setDisplay(original, comparing, false);
   }}
-  onblur={() => { if(holdingOriginal)setDisplay(original,comparing,false); }}
+  onblur={() => {
+    if (holdingOriginal) setDisplay(original, comparing, false);
+    if (textMenuOpen) setTextMenu(false);
+  }}
 />
 
 <div class="result-workspace" class:floating bind:clientWidth={workspaceWidth}>
-  {#if toolsOnly}<div class="toolbar-window">{@render floatingToolbar()}</div>
+  {#if toolsOnly}<div class="toolbar-window" class:menu-open={textMenuOpen} class:menu-above={toolbarMenuAbove}>{@render floatingToolbar()}</div>
   {:else if !frame}
     <div class="capture-empty">
       <span class="capture-empty-symbol" aria-hidden="true"><ScanLine size={28}/></span>
@@ -618,7 +724,7 @@ import { onMount, onDestroy, tick } from 'svelte';
       <div class="result-selection-border">{#each handles as [position,label,direction]}<button class={`resize-handle ${position}`} aria-label={t("调整{0}大小",label)} onpointerdown={event => resize(event,direction)} onpointermove={resizeMove} onpointerup={endResize} onpointercancel={endResize} onlostpointercapture={endResize}></button>{/each}</div>
 
     </div>
-    <div class="floating-controls" class:toolbar-left={toolbarAlignLeft} class:gesture-active={(isWayland && imageDragging) || !!resizing} class:notice-compact={!!notice && contentHeight < 60} inert={!!notice && contentHeight < 60 || (isWayland && imageDragging) || !!resizing} style:top={controlsAbove ? `${imagePadding}px` : `${frame.height * scaleY + imagePadding}px`}>
+    <div class="floating-controls" class:toolbar-left={toolbarAlignLeft} class:gesture-active={(isWayland && imageDragging) || !!resizing} class:notice-compact={!!notice && contentHeight < 60} inert={!!notice && contentHeight < 60 || (isWayland && imageDragging) || !!resizing} style:top={controlsAbove ? `${imagePadding}px` : undefined} style:bottom={controlsAbove ? undefined : `${imagePadding}px`}>
       {#if embeddedToolbar}{@render floatingToolbar()}{/if}
 
     </div>
@@ -640,29 +746,51 @@ import { onMount, onDestroy, tick } from 'svelte';
         </button>
         <button
           class="icon-button"
-          title={t("复制全部译文")}
-          disabled={!session?.output}
-          onclick={() => session?.output && handleCopy(session.output)}
+          aria-label={t("复制译图")}
+          title={t("复制翻译后的图片")}
+          disabled={!frame}
+          onclick={handleCopyImage}
         >
-          <Copy size={20} />
+          {#if copied.image}<Check class="copy-done" size={20}/>{:else}<Copy size={20} />{/if}
+        </button>
+        <div class="copy-menu-anchor" bind:this={textMenuAnchor}>
+          <button
+            class="icon-button"
+            class:active={textMenuOpen}
+            aria-label={t("复制文字")}
+            aria-haspopup="menu"
+            aria-expanded={textMenuOpen}
+            title={t("复制原文或译文")}
+            disabled={!sourceText && !session?.output}
+            onclick={() => setTextMenu(!textMenuOpen)}
+          >
+            {#if copied.text}<Check class="copy-done" size={20}/>{:else}<TextScan size={20}/>{/if}
+          </button>
+          {#if textMenuOpen}
+            <div class="copy-text-menu" role="menu" aria-label={t("复制文字")}>
+              <button class="copy-text-option" role="menuitem" disabled={!sourceText} onclick={() => handleCopyTextChoice('source')}>{t("原文")}</button>
+              <button class="copy-text-option" role="menuitem" disabled={!session?.output} onclick={() => handleCopyTextChoice('translation')}>{t("译文")}</button>
+            </div>
+          {/if}
+        </div>
+        <button
+          class="icon-button"
+          aria-label={t("另存为")}
+          title={t("保存翻译后的图片")}
+          disabled={!frame}
+          onclick={handleSaveImage}
+        >
+          {#if copied.saved}<Check class="copy-done" size={20}/>{:else}<Download size={20} />{/if}
         </button>
         <button
           class="icon-button"
           title={t("重新翻译 (R)")}
+          aria-label={t("重新翻译")}
           disabled={busy}
           onclick={() => act(call('retry_visual'))}
         >
           <RotateCcw size={20} class={busy ? 'spin' : ''} />
         </button>
-        <button
-          class="icon-button"
-          title={t("校对文字 (E)")}
-          disabled={!(session?.blocks?.length)}
-          onclick={() => session?.blocks?.[0] && edit(session.blocks[0].id)}
-        >
-          <PencilLine size={20} />
-        </button>
-        <button class="icon-button" aria-label={t("提取文字")} title={t("提取并复制识别的原文")} disabled={!sourceText} onclick={() => handleCopy(sourceText, true)}><TextScan size={20}/></button>
         <Button
           variant="outline"
           size="sm"
@@ -802,7 +930,7 @@ import { onMount, onDestroy, tick } from 'svelte';
 
 {#snippet floatingToolbar()}
       <div class="floating-hud" class:dragging={toolbarDragging} style:transform={toolbarDragging ? `translate(${toolbarOffset.x}px, ${toolbarOffset.y}px)` : undefined} role="toolbar" aria-label={t("截图操作")}>
-        <button class="hud-grip" aria-label={t("移动工具栏")} title={t("拖动自由放置，双击靠回图片")} onpointerdown={beginToolbar} onpointermove={moveToolbar} onpointerup={endToolbar} onpointercancel={endToolbar} onlostpointercapture={endToolbar} ondblclick={() => dockToolbar(!controlsAbove, toolbarAlignLeft)} onkeydown={toolbarKey}><BrandHandle size={20}/></button>
+        <button class="hud-grip" aria-label={t("移动工具栏")} title={embeddedToolbar ? t("拖动切换上下左右停靠，双击切换上下") : t("拖动自由放置，双击靠回图片")} onpointerdown={beginToolbar} onpointermove={moveToolbar} onpointerup={endToolbar} onpointercancel={endToolbar} onlostpointercapture={endToolbar} ondblclick={() => dockToolbar(!controlsAbove, toolbarAlignLeft)} onkeydown={toolbarKey}><BrandHandle size={20}/></button>
         <div class="hud-sep"></div>
         {#if busy}
           <span class="hud-progress" role="status"><LoaderCircle size={14} class="spin"/>{progress}</span>
@@ -820,12 +948,12 @@ import { onMount, onDestroy, tick } from 'svelte';
         </button>
         <button
           class="hud-item"
-          aria-label={t("复制全部译文")}
-          title={t("复制全部译文 (C)")}
-          disabled={!session?.output}
-          onclick={() => session?.output && handleCopy(session.output)}
+          aria-label={t("复制译图")}
+          title={t("复制译图 (C)")}
+          disabled={!frame}
+          onclick={handleCopyImage}
         >
-          {#if copied.translation}<Check class="copy-done" size={20}/>{:else}<Copy size={20}/>{/if}
+          {#if copied.image}<Check class="copy-done" size={20}/>{:else}<Copy size={20}/>{/if}
         </button>
         <button
           class="hud-item"
@@ -838,7 +966,26 @@ import { onMount, onDestroy, tick } from 'svelte';
           {#if session?.job.error?.action}<Settings2 size={20}/>{:else}<RotateCcw size={20}/>{/if}
         </button>
         {/if}
-        <button class="hud-item" aria-label={t("提取文字")} title={t("提取并复制识别的原文")} disabled={!sourceText} onclick={() => handleCopy(sourceText, true)}>{#if copied.source}<Check class="copy-done" size={20}/>{:else}<TextScan size={20}/>{/if}</button>
+        <div class="copy-menu-anchor" bind:this={textMenuAnchor}>
+          <button
+            class="hud-item"
+            class:active={textMenuOpen}
+            aria-label={t("复制文字")}
+            aria-haspopup="menu"
+            aria-expanded={textMenuOpen}
+            title={t("复制原文或译文")}
+            disabled={!sourceText && !session?.output}
+            onclick={() => setTextMenu(!textMenuOpen)}
+          >
+            {#if copied.text}<Check class="copy-done" size={20}/>{:else}<TextScan size={20}/>{/if}
+          </button>
+          {#if textMenuOpen}
+            <div class="copy-text-menu" class:open-above={toolsOnly ? toolbarMenuAbove : !controlsAbove} class:compact-row={!toolsOnly && embeddedToolbar && contentHeight < 68} role="menu" aria-label={t("复制文字")}>
+              <button class="copy-text-option" role="menuitem" disabled={!sourceText} onclick={() => handleCopyTextChoice('source')}>{t("原文")}</button>
+              <button class="copy-text-option" role="menuitem" disabled={!session?.output} onclick={() => handleCopyTextChoice('translation')}>{t("译文")}</button>
+            </div>
+          {/if}
+        </div>
         <div class="hud-sep"></div>
         <button
           class="hud-item hud-close"

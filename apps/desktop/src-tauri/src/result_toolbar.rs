@@ -1,5 +1,9 @@
 use screentrans_core::Rect;
 
+pub const TOOLBAR_WIDTH: f64 = 248.0;
+pub const TOOLBAR_HEIGHT: f64 = 48.0;
+pub const TOOLBAR_MENU_EXTRA: f64 = 88.0;
+
 #[derive(Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolbarState {
@@ -8,6 +12,9 @@ pub struct ToolbarState {
     pub preferred_above: bool,
     pub align_left: bool,
     pub detached: bool,
+    pub menu_above: bool,
+    #[serde(skip)]
+    pub menu_open: bool,
     #[serde(skip)]
     pub quiet: bool,
     #[serde(skip)]
@@ -41,13 +48,15 @@ impl ToolbarState {
         self.image_resizing = false;
         self.toolbar_moving = false;
         self.detached = false;
+        self.menu_open = false;
+        self.menu_above = false;
     }
 }
 
 /// The toolbar is its own OS window, so this placement cannot clip at image edges.
 pub fn placement(image: Rect, scale: f64, state: &ToolbarState, area: Rect) -> Rect {
-    let width = 248.0 * scale;
-    let height = 48.0 * scale;
+    let width = TOOLBAR_WIDTH * scale;
+    let height = TOOLBAR_HEIGHT * scale;
     let gap = 4.0 * scale;
     let above = image.y - height - gap >= area.y;
     let below = image.bottom() + gap + height <= area.bottom();
@@ -72,6 +81,20 @@ pub fn placement(image: Rect, scale: f64, state: &ToolbarState, area: Rect) -> R
         },
         area,
     )
+}
+
+/// Expand the toolbar window vertically so a compact dropdown menu can render
+/// without clipping while keeping the toolbar pill fixed at its screen origin.
+pub fn menu_rect(base: Rect, scale: f64, area: Rect) -> (Rect, bool) {
+    let extra = TOOLBAR_MENU_EXTRA * scale;
+    let open_above = base.bottom() + extra > area.bottom() && base.y - extra >= area.y;
+    let rect = Rect {
+        x: base.x,
+        y: if open_above { base.y - extra } else { base.y },
+        width: base.width,
+        height: base.height + extra,
+    };
+    (clamp(rect, area), open_above)
 }
 pub fn clamp(mut bounds: Rect, area: Rect) -> Rect {
     bounds.x = bounds
@@ -198,5 +221,35 @@ mod tests {
         assert!(!state.matches_expected(1004, 501));
         assert!(!state.matches_expected(1001, 504));
         assert!(!ToolbarState::default().matches_expected(0, 0));
+    }
+    #[test]
+    fn menu_rect_expands_downward_by_default_and_upward_near_bottom_edge() {
+        let area = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 1040.0,
+        };
+        let middle = Rect {
+            x: 600.0,
+            y: 500.0,
+            width: TOOLBAR_WIDTH,
+            height: TOOLBAR_HEIGHT,
+        };
+        let (down, above_down) = menu_rect(middle, 1.0, area);
+        assert!(!above_down);
+        assert_eq!((down.x, down.y), (600.0, 500.0));
+        assert_eq!(down.height, TOOLBAR_HEIGHT + TOOLBAR_MENU_EXTRA);
+
+        let bottom = Rect {
+            x: 600.0,
+            y: 980.0,
+            width: TOOLBAR_WIDTH,
+            height: TOOLBAR_HEIGHT,
+        };
+        let (up, above_up) = menu_rect(bottom, 1.0, area);
+        assert!(above_up);
+        assert_eq!(up.y, 980.0 - TOOLBAR_MENU_EXTRA);
+        assert_eq!(up.bottom(), bottom.bottom());
     }
 }

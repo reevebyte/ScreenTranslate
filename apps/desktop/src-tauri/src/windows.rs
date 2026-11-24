@@ -758,6 +758,33 @@ pub(crate) fn builder<'a>(
     builder
 }
 
+pub(crate) fn trim_linux_heap() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        // Return freed glibc heap pages (such as dropped 4K capture buffers
+        // and destroyed webview allocations) to the OS promptly.
+        let _ = libc::malloc_trim(0);
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn tune_linux_webview(window: &tauri::WebviewWindow) {
+    let _ = window.with_webview(|webview| {
+        use webkit2gtk::{CacheModel, SettingsExt, WebContextExt, WebViewExt};
+        let inner = webview.inner();
+        if let Some(context) = inner.context() {
+            context.set_cache_model(CacheModel::DocumentViewer);
+        }
+        if let Some(settings) = inner.settings() {
+            settings.set_enable_page_cache(false);
+            settings.set_enable_webgl(false);
+            settings.set_enable_media(false);
+            settings.set_enable_mediasource(false);
+            settings.set_enable_dns_prefetching(false);
+        }
+    });
+}
+
 fn selection_window(app: &AppHandle, label: &str) -> Result<tauri::WebviewWindow> {
     let theme = lock(&app.state::<AppState>().config).appearance.theme;
     let theme_name = match theme {
@@ -775,6 +802,8 @@ fn selection_window(app: &AppHandle, label: &str) -> Result<tauri::WebviewWindow
         .accept_first_mouse(true)
         .build()
         .map_err(|_| window_error())?;
+    #[cfg(target_os = "linux")]
+    tune_linux_webview(&window);
     #[cfg(target_os = "macos")]
     if let Ok(ns_window) = window.ns_window() {
         screentrans_platform::prepare_selection_window(ns_window);
@@ -802,6 +831,8 @@ pub fn ensure_main(app: &AppHandle) -> Result<tauri::WebviewWindow> {
         .center()
         .build()
         .map_err(|_| window_error())?;
+    #[cfg(target_os = "linux")]
+    tune_linux_webview(&window);
     caption_color(&window, theme);
     Ok(window)
 }
@@ -821,6 +852,8 @@ pub fn ensure_quick(app: &AppHandle) -> Result<tauri::WebviewWindow> {
         .center()
         .build()
         .map_err(|_| window_error())?;
+    #[cfg(target_os = "linux")]
+    tune_linux_webview(&window);
     Ok(window)
 }
 
@@ -882,6 +915,8 @@ pub fn show_result(app: &AppHandle, frame: &FrameMetadata) -> Result<()> {
                 .accept_first_mouse(true)
                 .build()
                 .map_err(|_| window_error())?;
+            #[cfg(target_os = "linux")]
+            tune_linux_webview(&window);
             #[cfg(target_os = "macos")]
             if let Ok(ns_window) = window.ns_window() {
                 screentrans_platform::configure_transparent_window(ns_window);
@@ -1002,6 +1037,7 @@ fn retire_selections(app: &AppHandle, clear_first: bool) {
             let _ = clear_first;
             lock(&app.state::<AppState>().window_lifecycle).forget(&label);
             let _ = window.destroy();
+            trim_linux_heap();
         }
     }
 }
@@ -1317,7 +1353,7 @@ async fn picker_capture(app: &AppHandle, ticket: &screentrans_core::jobs::JobTic
     }
     let metadata = lock(&state.frames).insert(frame, &[])?;
     lock(&state.return_windows).clear();
-    pipeline::start_visual(app.clone(), metadata, true);
+    pipeline::start_visual(app.clone(), metadata, true, true);
     Ok(())
 }
 
@@ -1509,7 +1545,7 @@ pub fn accept_selection(app: &AppHandle, label: &str, rect: Rect) -> Result<()> 
         lock(&state.frames).remove(&id);
     }
     let metadata = lock(&state.frames).insert(crop, &[])?;
-    pipeline::start_visual(app.clone(), metadata, true);
+    pipeline::start_visual(app.clone(), metadata, true, true);
     Ok(())
 }
 
@@ -1624,6 +1660,7 @@ pub fn reap_hidden_windows(app: AppHandle) {
                     let _ = window.destroy();
                     lock(&state.window_lifecycle).forget(&label);
                     hidden.remove(&label);
+                    trim_linux_heap();
                 }
             }
         }

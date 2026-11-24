@@ -284,7 +284,7 @@ pub async fn select_region(app: AppHandle, window: WebviewWindow, rect: Rect) ->
 }
 
 #[tauri::command]
-pub async fn retry_visual(app: AppHandle) -> Result<()> {
+pub async fn retry_visual(app: AppHandle, window: WebviewWindow) -> Result<()> {
     let (metadata, recognize) = {
         let state = app.state::<AppState>();
         let sessions = lock(&state.sessions);
@@ -297,7 +297,8 @@ pub async fn retry_visual(app: AppHandle) -> Result<()> {
             sessions.visual.blocks.is_empty(),
         )
     };
-    pipeline::start_visual(app, metadata, recognize);
+    let show_floating = matches!(window.label(), "result" | "result-tools");
+    pipeline::start_visual(app, metadata, recognize, show_floating);
     Ok(())
 }
 
@@ -343,11 +344,17 @@ pub async fn copy_text(app: AppHandle, text: String) -> Result<()> {
 
 #[cfg(all(target_os = "linux", not(feature = "e2e")))]
 fn write_wayland_clipboard(text: &str) -> bool {
+    write_wayland_clipboard_bytes("text/plain;charset=utf-8", text.as_bytes())
+}
+
+#[cfg(all(target_os = "linux", not(feature = "e2e")))]
+fn write_wayland_clipboard_bytes(mime: &str, bytes: &[u8]) -> bool {
     use std::{
         io::Write,
         process::{Command, Stdio},
     };
     let Ok(mut child) = Command::new("wl-copy")
+        .args(["--type", mime])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -356,13 +363,143 @@ fn write_wayland_clipboard(text: &str) -> bool {
         return false;
     };
     if let Some(mut stdin) = child.stdin.take()
-        && stdin.write_all(text.as_bytes()).is_err()
+        && stdin.write_all(bytes).is_err()
     {
         let _ = child.kill();
         let _ = child.wait();
         return false;
     }
     child.wait().is_ok_and(|status| status.success())
+}
+
+fn decode_png_limited(png: &[u8]) -> Result<image::DynamicImage> {
+    let mut reader =
+        image::ImageReader::with_format(std::io::Cursor::new(png), image::ImageFormat::Png);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(16000);
+    limits.max_image_height = Some(16000);
+    limits.max_alloc = Some(160 * 1024 * 1024);
+    reader.limits(limits);
+    reader
+        .decode()
+        .map_err(|_| AppError::new(ErrorCode::InvalidInput, "无法解析图片内容"))
+}
+
+const PNG_MAGIC: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+
+#[tauri::command]
+pub async fn copy_image(app: AppHandle, png: Vec<u8>) -> Result<()> {
+    if png.len() < PNG_MAGIC.len() || png.len() > 32 * 1024 * 1024 || !png.starts_with(PNG_MAGIC) {
+        return Err(AppError::new(ErrorCode::InvalidInput, "图片数据无效或过大"));
+    }
+    #[cfg(feature = "e2e")]
+    {
+        let _ = app;
+        Ok(())
+    }
+    #[cfg(not(feature = "e2e"))]
+    {
+        #[cfg(target_os = "linux")]
+        let png_fallback = png.clone();
+        let decoded = tauri::async_runtime::spawn_blocking(move || {
+            let rgba = decode_png_limited(&png)?.to_rgba8();
+            Ok::<_, AppError>((rgba.width(), rgba.height(), rgba.into_raw()))
+        })
+        .await
+        .map_err(|_| AppError::new(ErrorCode::Internal, "图片复制线程异常"))??;
+        let image = tauri::image::Image::new_owned(decoded.2, decoded.0, decoded.1);
+        #[cfg(target_os = "linux")]
+        {
+            if app.clipboard().write_image(&image).is_ok() {
+                return Ok(());
+            }
+            if screentrans_platform::is_wayland()
+                && write_wayland_clipboard_bytes("image/png", &png_fallback)
+            {
+                return Ok(());
+            }
+            Err(AppError::new(
+                ErrorCode::Internal,
+                "无法复制图片到系统剪贴板",
+            ))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            app.clipboard()
+                .write_image(&image)
+                .map_err(|_| AppError::new(ErrorCode::Internal, "无法复制图片到系统剪贴板"))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn save_image(
+    app: AppHandle,
+    window: WebviewWindow,
+    png: Vec<u8>,
+    default_name: Option<String>,
+) -> Result<bool> {
+    main_only(&window)?;
+    if png.len() < PNG_MAGIC.len() || png.len() > 32 * 1024 * 1024 || !png.starts_with(PNG_MAGIC) {
+        return Err(AppError::new(ErrorCode::InvalidInput, "图片数据无效或过大"));
+    }
+    let file_name = default_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| {
+            !name.is_empty() && name.len() <= 120 && !name.contains('/') && !name.contains('\\')
+        })
+        .unwrap_or("ScreenTranslate.png")
+        .to_owned();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_file_name(&file_name)
+        .add_filter("PNG 图片", &["png"])
+        .add_filter("JPEG 图片", &["jpg", "jpeg"])
+        .add_filter("WebP 图片", &["webp"])
+        .save_file(move |selection| {
+            let _ = tx.send(selection);
+        });
+    let Some(selection) = rx.await.ok().flatten() else {
+        return Ok(false);
+    };
+    let path = selection
+        .into_path()
+        .map_err(|_| AppError::new(ErrorCode::InvalidInput, "无法保存至所选路径"))?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_else(|| "png".into());
+        if ext == "png" {
+            std::fs::write(&path, &png).map_err(|_| AppError::storage())?;
+            return Ok::<_, AppError>(());
+        }
+        let img = decode_png_limited(&png)?;
+        match ext.as_str() {
+            "jpg" | "jpeg" => {
+                let mut out = Vec::new();
+                let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 92);
+                encoder
+                    .encode_image(&img.to_rgb8())
+                    .map_err(|_| AppError::storage())?;
+                std::fs::write(&path, out).map_err(|_| AppError::storage())?;
+            }
+            "webp" => {
+                img.save_with_format(&path, image::ImageFormat::WebP)
+                    .map_err(|_| AppError::storage())?;
+            }
+            _ => {
+                std::fs::write(&path, &png).map_err(|_| AppError::storage())?;
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| AppError::new(ErrorCode::Internal, "图片保存线程异常"))??;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -445,6 +582,15 @@ pub async fn toolbar_placement(
 ) -> Result<crate::result_toolbar::ToolbarState> {
     result_only(&window)?;
     Ok(lock(&app.state::<AppState>().result_toolbar).clone())
+}
+#[tauri::command]
+pub async fn set_toolbar_menu_open(
+    app: AppHandle,
+    window: WebviewWindow,
+    open: bool,
+) -> Result<bool> {
+    result_only(&window)?;
+    crate::result_tools::set_menu_open(&app, open)
 }
 #[tauri::command]
 pub async fn begin_toolbar_drag(app: AppHandle, window: WebviewWindow) -> Result<()> {
@@ -868,7 +1014,7 @@ pub async fn open_image(app: AppHandle, fixture_path: Option<String>) -> Result<
     .await
     .map_err(|_| AppError::new(ErrorCode::Internal, "图片读取线程异常"))??;
     let metadata = lock(&app.state::<AppState>().frames).insert(frame, &[])?;
-    pipeline::start_visual(app, metadata, true);
+    pipeline::start_visual(app, metadata, true, false);
     Ok(())
 }
 

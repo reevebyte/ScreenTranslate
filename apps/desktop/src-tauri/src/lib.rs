@@ -43,10 +43,18 @@ pub fn run() {
     // still use the Wayland portal. Set SCREENTRANSLATE_NATIVE_WAYLAND=1 (or
     // GDK_BACKEND) to keep native Wayland windows.
     #[cfg(target_os = "linux")]
-    if screentrans_platform::prefer_xwayland() {
-        // SAFETY: called first in `run`, before GTK, Tauri or any other thread
-        // starts, so nothing else can read the environment concurrently.
-        unsafe { std::env::set_var("GDK_BACKEND", "x11") };
+    {
+        if screentrans_platform::prefer_xwayland() {
+            // SAFETY: called first in `run`, before GTK, Tauri or any other thread
+            // starts, so nothing else can read the environment concurrently.
+            unsafe { std::env::set_var("GDK_BACKEND", "x11") };
+        }
+        // Cap glibc per-thread malloc arenas so multi-threaded Rust + GTK +
+        // WebKitGTK allocations do not hoard dozens of 64MB arenas in RSS.
+        if std::env::var_os("MALLOC_ARENA_MAX").is_none() {
+            // SAFETY: called first in `run`, before any other thread starts.
+            unsafe { std::env::set_var("MALLOC_ARENA_MAX", "2") };
+        }
     }
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, arguments, _| {
@@ -155,6 +163,8 @@ pub fn run() {
             commands::retry_visual,
             commands::edit_block,
             commands::copy_text,
+            commands::copy_image,
+            commands::save_image,
             commands::show_main,
             commands::set_route,
             commands::navigate_main,
@@ -163,6 +173,7 @@ pub fn run() {
             commands::result_layout,
             commands::set_result_toolbar,
             commands::toolbar_placement,
+            commands::set_toolbar_menu_open,
             commands::begin_toolbar_drag,
             commands::finish_toolbar_drag,
             commands::quiet_result_toolbar,

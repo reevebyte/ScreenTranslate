@@ -47,6 +47,9 @@ windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_WindowsA
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 futures-util = "0.3"
+gtk = "0.18"
+webkit2gtk = "2"
+libc = "0.2"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
