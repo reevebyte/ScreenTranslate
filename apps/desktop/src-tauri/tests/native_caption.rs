@@ -1,5 +1,8 @@
 #![cfg(windows)]
 // Run native caption checks in a manifest-bearing integration executable.
+#[allow(dead_code)]
+#[path = "../src/ui_locale.rs"]
+mod ui_locale;
 mod update_ui {
     pub fn request(_: &tauri::AppHandle, _: &str) {}
     pub fn caption_colors(_: &tauri::AppHandle) -> (u32, u32) {
@@ -103,13 +106,34 @@ mod caption {
                 GetClientRect(hwnd, &mut before).unwrap();
                 let menu = GetSystemMenu(hwnd, false);
                 let menu_items = GetMenuItemCount(menu);
-                update(hwnd, true, true, CaptionMode::Download, None, false);
+                update(
+                    hwnd,
+                    true,
+                    true,
+                    CaptionMode::Download,
+                    None,
+                    UiLocale::ZhCn,
+                );
                 SendMessageW(button, BM_CLICK, WPARAM(0), LPARAM(0));
                 assert_eq!(count.get(), 1);
-                update(hwnd, true, false, CaptionMode::Restart, Some(100), false);
+                update(
+                    hwnd,
+                    true,
+                    false,
+                    CaptionMode::Restart,
+                    Some(100),
+                    UiLocale::ZhCn,
+                );
                 SendMessageW(button, BM_CLICK, WPARAM(0), LPARAM(0));
                 assert_eq!(count.get(), 1);
-                update(hwnd, true, true, CaptionMode::Downloading, Some(42), false);
+                update(
+                    hwnd,
+                    true,
+                    true,
+                    CaptionMode::Downloading,
+                    Some(42),
+                    UiLocale::ZhCn,
+                );
                 assert!(!state(hwnd).unwrap().enabled.get());
                 SendMessageW(button, BM_CLICK, WPARAM(0), LPARAM(0));
                 assert_eq!(count.get(), 1);
@@ -126,11 +150,18 @@ mod caption {
                 // Show only the off-screen fixture so a progress sync does not hide it as an inactive owner.
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
                 assert!(bounds(hwnd).is_some());
-                update(hwnd, true, true, CaptionMode::Download, None, false);
+                update(
+                    hwnd,
+                    true,
+                    true,
+                    CaptionMode::Download,
+                    None,
+                    UiLocale::ZhCn,
+                );
                 assert!(IsWindowVisible(button).as_bool());
                 let _ = ValidateRect(button, None);
-                update(hwnd, true, true, CaptionMode::Download, None, true);
-                assert!(state(hwnd).unwrap().english.get());
+                update(hwnd, true, true, CaptionMode::Download, None, UiLocale::En);
+                assert_eq!(state(hwnd).unwrap().locale.get(), UiLocale::En);
                 assert!(GetUpdateRect(button, None, false).as_bool());
                 // Close remains usable while the main download action is disabled.
                 let _ = SetWindowPos(
@@ -146,14 +177,28 @@ mod caption {
                 SendMessageW(button, WM_MOUSEMOVE, WPARAM(0), point);
                 assert!(state(hwnd).unwrap().close_hover.get());
                 SendMessageW(button, WM_LBUTTONDOWN, WPARAM(0), point);
-                update(hwnd, true, false, CaptionMode::Downloading, Some(43), false);
+                update(
+                    hwnd,
+                    true,
+                    false,
+                    CaptionMode::Downloading,
+                    Some(43),
+                    UiLocale::ZhCn,
+                );
                 assert!(state(hwnd).unwrap().pressed.get());
                 assert!(state(hwnd).unwrap().close_pressed.get());
                 SendMessageW(button, WM_LBUTTONUP, WPARAM(0), point);
                 assert_eq!(dismissed.get(), 1);
                 assert_eq!(count.get(), 1);
                 assert!(!state(hwnd).unwrap().visible.get());
-                update(hwnd, false, false, CaptionMode::Download, None, false);
+                update(
+                    hwnd,
+                    false,
+                    false,
+                    CaptionMode::Download,
+                    None,
+                    UiLocale::ZhCn,
+                );
                 assert!(!IsWindowVisible(button).as_bool());
                 let mut after = RECT::default();
                 GetClientRect(hwnd, &mut after).unwrap();
@@ -174,7 +219,7 @@ mod caption {
                     button: Cell::new(HWND::default()),
                     visible: Cell::new(true),
                     enabled: Cell::new(true),
-                    english: Cell::new(false),
+                    locale: Cell::new(UiLocale::ZhCn),
                     hover: Cell::new(false),
                     pressed: Cell::new(false),
                     close_pressed: Cell::new(false),
@@ -243,13 +288,30 @@ mod caption {
         use super::*;
         #[test]
         fn localized_labels_keep_the_same_compact_update_button_states() {
-            assert_eq!(caption_label(CaptionMode::Download, None, true), "Update");
-            assert_eq!(caption_label(CaptionMode::Restart, None, true), "Restart");
             assert_eq!(
-                caption_label(CaptionMode::Downloading, Some(42), true),
+                caption_label(CaptionMode::Download, None, UiLocale::En),
+                "Update"
+            );
+            assert_eq!(
+                caption_label(CaptionMode::Restart, None, UiLocale::En),
+                "Restart"
+            );
+            assert_eq!(
+                caption_label(CaptionMode::Downloading, Some(42), UiLocale::En),
                 "Get 42%"
             );
-            assert_eq!(caption_label(CaptionMode::Restart, None, false), "重启更新");
+            assert_eq!(
+                caption_label(CaptionMode::Restart, None, UiLocale::ZhCn),
+                "重启更新"
+            );
+            assert_eq!(
+                caption_label(CaptionMode::Restart, None, UiLocale::Ja),
+                "再起動"
+            );
+            assert_eq!(
+                caption_label(CaptionMode::Download, None, UiLocale::Fr),
+                "Mettre à jour"
+            );
         }
     }
 }
