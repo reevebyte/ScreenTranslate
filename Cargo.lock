@@ -4518,7 +4518,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "screentrans-core"
-version = "2.0.47"
+version = "2.0.48"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4542,7 +4542,7 @@ dependencies = [
 
 [[package]]
 name = "screentrans-platform"
-version = "2.0.47"
+version = "2.0.48"
 dependencies = [
  "ashpd",
  "async-trait",
@@ -4567,7 +4567,7 @@ dependencies = [
 
 [[package]]
 name = "screentranslate-desktop"
-version = "2.0.47"
+version = "2.0.48"
 dependencies = [
  "futures-util",
  "gtk",
