@@ -864,9 +864,7 @@ mod platform {
                     },
                 );
 
-                // Release mutable borrow of `back_bits` before GDI `DrawTextW`.
-                drop(canvas);
-
+                // NLL ends `canvas`'s mutable borrow of `back_bits` before GDI `DrawTextW`.
                 if let Some((dim_text, dim_rc)) = dim_draw {
                     draw_text_centered(self.back_dc, self.font_dim, 0x00ffffff, &dim_text, dim_rc);
                 }
@@ -1224,28 +1222,36 @@ mod platform {
                 return;
             }
 
+            struct CreatedOverlay {
+                hwnd: HWND,
+                x: i32,
+                y: i32,
+                width: i32,
+                height: i32,
+                contains_cursor: bool,
+            }
+
             let submitting = Arc::new(AtomicBool::new(false));
-            let result = (|| -> Result<Vec<(HWND, i32, i32, i32, i32, bool)>> {
+            let result = (|| -> Result<Vec<CreatedOverlay>> {
                 let instance = ensure_class_registered()?;
                 let mut cursor_pos = POINT::default();
                 let has_cursor = unsafe { GetCursorPos(&mut cursor_pos) }.is_ok();
-                let mut created: Vec<(HWND, i32, i32, i32, i32, bool)> =
-                    Vec::with_capacity(prepared.len());
+                let mut created: Vec<CreatedOverlay> = Vec::with_capacity(prepared.len());
 
                 for (spec, bg_bgra) in prepared {
                     let width = spec.width.max(120);
                     let height = spec.height.max(80);
                     let scale = spec.scale.max(1.0);
-                    let (back_dc, back_bmp, old_bmp, back_bits) = match unsafe {
-                        OverlayWindow::create_backbuffer(width, height)
-                    } {
-                        Ok(parts) => parts,
-                        Err(err) => {
-                            let raw: Vec<isize> = created.iter().map(|c| c.0.0 as isize).collect();
-                            destroy_handles(&raw);
-                            return Err(err);
-                        }
-                    };
+                    let (back_dc, back_bmp, old_bmp, back_bits) =
+                        match unsafe { OverlayWindow::create_backbuffer(width, height) } {
+                            Ok(parts) => parts,
+                            Err(err) => {
+                                let raw: Vec<isize> =
+                                    created.iter().map(|c| c.hwnd.0 as isize).collect();
+                                destroy_handles(&raw);
+                                return Err(err);
+                            }
+                        };
                     let font_guide =
                         unsafe { create_ui_font((13.0 * scale).round() as i32, FW_MEDIUM.0) };
                     let font_kbd =
@@ -1295,7 +1301,8 @@ mod platform {
                         Ok(hwnd) => hwnd,
                         Err(_) => {
                             drop(state);
-                            let raw: Vec<isize> = created.iter().map(|c| c.0.0 as isize).collect();
+                            let raw: Vec<isize> =
+                                created.iter().map(|c| c.hwnd.0 as isize).collect();
                             destroy_handles(&raw);
                             return Err(window_error());
                         }
@@ -1317,14 +1324,21 @@ mod platform {
                         && cursor_pos.y >= spec.y
                         && cursor_pos.x < spec.x + width
                         && cursor_pos.y < spec.y + height;
-                    created.push((hwnd, spec.x, spec.y, width, height, contains_cursor));
+                    created.push(CreatedOverlay {
+                        hwnd,
+                        x: spec.x,
+                        y: spec.y,
+                        width,
+                        height,
+                        contains_cursor,
+                    });
                 }
                 Ok(created)
             })();
 
             match result {
                 Ok(created) => {
-                    let handles: Vec<isize> = created.iter().map(|c| c.0.0 as isize).collect();
+                    let handles: Vec<isize> = created.iter().map(|c| c.hwnd.0 as isize).collect();
                     let previous = {
                         let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
                         if stop.is_cancelled() || reg.generation != generation {
@@ -1337,19 +1351,27 @@ mod platform {
                     };
                     destroy_handles(&previous);
 
-                    let mut focus_hwnd = created.first().map(|c| c.0);
-                    for &(hwnd, x, y, width, height, contains_cursor) in &created {
-                        if contains_cursor {
-                            focus_hwnd = Some(hwnd);
+                    let mut focus_hwnd = created.first().map(|c| c.hwnd);
+                    for item in &created {
+                        if item.contains_cursor {
+                            focus_hwnd = Some(item.hwnd);
                         }
                         unsafe {
-                            let flags = if contains_cursor {
+                            let flags = if item.contains_cursor {
                                 SWP_SHOWWINDOW
                             } else {
                                 SWP_SHOWWINDOW | SWP_NOACTIVATE
                             };
-                            let _ = SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, flags);
-                            let _ = UpdateWindow(hwnd);
+                            let _ = SetWindowPos(
+                                item.hwnd,
+                                HWND_TOPMOST,
+                                item.x,
+                                item.y,
+                                item.width,
+                                item.height,
+                                flags,
+                            );
+                            let _ = UpdateWindow(item.hwnd);
                         }
                     }
                     if let Some(hwnd) = focus_hwnd {
