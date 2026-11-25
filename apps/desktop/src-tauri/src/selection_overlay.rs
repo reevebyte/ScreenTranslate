@@ -54,6 +54,50 @@ impl PixelRect {
     }
 }
 
+fn checked_bgra_len(width: i32, height: i32) -> Option<usize> {
+    const MAX_OVERLAY_BYTES: usize = 256 * 1024 * 1024;
+    let w = usize::try_from(width).ok().filter(|&v| v > 0)?;
+    let h = usize::try_from(height).ok().filter(|&v| v > 0)?;
+    w.checked_mul(h)?
+        .checked_mul(4)
+        .filter(|&bytes| bytes <= MAX_OVERLAY_BYTES)
+}
+
+/// Blits `src` (`src_w × src_h` BGRA) into `dst` (`dst_w × dst_h` BGRA),
+/// zero-filling any padded region if dimensions differ.
+fn copy_bgra_surface(
+    dst: &mut [u8],
+    dst_w: usize,
+    dst_h: usize,
+    src: &[u8],
+    src_w: usize,
+    src_h: usize,
+) {
+    let Some(dst_len) = dst_w.checked_mul(dst_h).and_then(|n| n.checked_mul(4)) else {
+        return;
+    };
+    if dst.len() < dst_len {
+        return;
+    }
+    if dst_w == src_w && dst_h == src_h && src.len() >= dst_len {
+        dst[..dst_len].copy_from_slice(&src[..dst_len]);
+        return;
+    }
+    dst[..dst_len].fill(0);
+    let copy_w = dst_w.min(src_w);
+    let copy_h = dst_h.min(src_h);
+    let row_bytes = copy_w * 4;
+    let src_stride = src_w * 4;
+    let dst_stride = dst_w * 4;
+    for y in 0..copy_h {
+        let s0 = y * src_stride;
+        let d0 = y * dst_stride;
+        if s0 + row_bytes <= src.len() && d0 + row_bytes <= dst_len {
+            dst[d0..d0 + row_bytes].copy_from_slice(&src[s0..s0 + row_bytes]);
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct RoundedBoxStyle {
     radius: f64,
@@ -78,7 +122,7 @@ impl<'a> Canvas<'a> {
         if x < 0 || y < 0 || x >= self.width || y >= self.height || alpha <= 0.0 {
             return;
         }
-        let idx = ((y * self.width + x) * 4) as usize;
+        let idx = ((y as usize) * (self.width as usize) + (x as usize)) * 4;
         if idx + 3 >= self.buf.len() {
             return;
         }
@@ -100,15 +144,21 @@ impl<'a> Canvas<'a> {
     }
 
     fn fill_solid_rect(&mut self, rect: PixelRect, rgb: (u8, u8, u8)) {
-        let left = rect.x0.clamp(0, self.width);
-        let right = rect.x1.clamp(0, self.width);
-        let top = rect.y0.clamp(0, self.height);
-        let bottom = rect.y1.clamp(0, self.height);
-        let stride = self.width * 4;
+        if self.width <= 0 || self.height <= 0 {
+            return;
+        }
+        let left = rect.x0.clamp(0, self.width) as usize;
+        let right = rect.x1.clamp(0, self.width) as usize;
+        let top = rect.y0.clamp(0, self.height) as usize;
+        let bottom = rect.y1.clamp(0, self.height) as usize;
+        let stride = (self.width as usize).saturating_mul(4);
         for y in top..bottom {
-            let row = (y * stride) as usize;
+            let row = y.saturating_mul(stride);
             for x in left..right {
-                let idx = row + (x * 4) as usize;
+                let idx = row.saturating_add(x.saturating_mul(4));
+                if idx + 3 >= self.buf.len() {
+                    break;
+                }
                 self.buf[idx] = rgb.2;
                 self.buf[idx + 1] = rgb.1;
                 self.buf[idx + 2] = rgb.0;
@@ -335,17 +385,18 @@ fn dimensions_badge_rect(
 #[cfg(windows)]
 mod platform {
     use super::*;
-    use crate::windows::window_error;
+    use crate::{ui_locale::UiLocale, windows::window_error};
     use image::RgbaImage;
-    use screentrans_core::Result;
+    use screentrans_core::{AppError, Result};
     use std::{
         sync::{
             Arc, Mutex, OnceLock,
-            atomic::{AtomicU64, Ordering},
+            atomic::{AtomicBool, Ordering},
         },
         time::Duration,
     };
     use tauri::AppHandle;
+    use tokio_util::sync::CancellationToken;
     use windows::{
         Win32::{
             Foundation::{COLORREF, HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
@@ -364,7 +415,9 @@ mod platform {
             },
             System::LibraryLoader::GetModuleHandleW,
             UI::{
-                Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, SetFocus, VK_ESCAPE},
+                Input::KeyboardAndMouse::{
+                    GetCapture, ReleaseCapture, SetCapture, SetFocus, VK_ESCAPE,
+                },
                 WindowsAndMessaging::{
                     CS_HREDRAW, CS_VREDRAW, CreateWindowExW, DefWindowProcW, DestroyWindow,
                     GWLP_USERDATA, GetCursorPos, GetWindowLongPtrW, HMENU, HWND_TOPMOST, IDC_CROSS,
@@ -435,31 +488,62 @@ mod platform {
         }
     }
 
-    static GENERATION: AtomicU64 = AtomicU64::new(0);
-    static ACTIVE_HANDLES: OnceLock<Mutex<Vec<isize>>> = OnceLock::new();
+    #[derive(Default)]
+    struct OverlayRegistry {
+        generation: u64,
+        handles: Vec<isize>,
+    }
 
-    fn handles_lock() -> &'static Mutex<Vec<isize>> {
-        ACTIVE_HANDLES.get_or_init(|| Mutex::new(Vec::new()))
+    static REGISTRY: OnceLock<Mutex<OverlayRegistry>> = OnceLock::new();
+
+    fn registry() -> &'static Mutex<OverlayRegistry> {
+        REGISTRY.get_or_init(|| Mutex::new(OverlayRegistry::default()))
     }
 
     pub fn is_active() -> bool {
-        handles_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
+        let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
+        guard
+            .handles
             .iter()
             .any(|&raw| unsafe { IsWindow(HWND(raw as *mut _)).as_bool() })
     }
 
+    /// Schedules asynchronous destruction of any active native overlays.
     pub fn close(app: &AppHandle) {
-        GENERATION.fetch_add(1, Ordering::SeqCst);
-        let handles: Vec<isize> = {
-            let mut guard = handles_lock().lock().unwrap_or_else(|e| e.into_inner());
-            std::mem::take(&mut *guard)
+        let handles = {
+            let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+            reg.generation = reg.generation.wrapping_add(1);
+            std::mem::take(&mut reg.handles)
         };
         if handles.is_empty() {
             return;
         }
         let _ = app.run_on_main_thread(move || destroy_handles(&handles));
+    }
+
+    /// Destroys any active native overlays on the UI thread and awaits completion
+    /// so a subsequent `BitBlt` screen capture cannot observe stale overlays.
+    /// Returns `true` if at least one overlay was closed.
+    pub async fn close_and_wait(app: &AppHandle) -> bool {
+        let handles = {
+            let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+            reg.generation = reg.generation.wrapping_add(1);
+            std::mem::take(&mut reg.handles)
+        };
+        if handles.is_empty() {
+            return false;
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        if app
+            .run_on_main_thread(move || {
+                destroy_handles(&handles);
+                let _ = tx.send(());
+            })
+            .is_ok()
+        {
+            let _ = tokio::time::timeout(Duration::from_secs(2), rx).await;
+        }
+        true
     }
 
     fn destroy_handles(handles: &[isize]) {
@@ -482,7 +566,7 @@ mod platform {
         img_height: u32,
         scale: f64,
         dark: bool,
-        english: bool,
+        locale: UiLocale,
         bg_bgra: Vec<u8>,
         back_dc: HDC,
         back_bmp: HBITMAP,
@@ -493,7 +577,7 @@ mod platform {
         font_dim: HFONT,
         anchor: Option<(i32, i32)>,
         selection: Option<PixelRect>,
-        submitting: bool,
+        submitting: Arc<AtomicBool>,
     }
 
     impl Drop for OverlayWindow {
@@ -589,6 +673,9 @@ mod platform {
             width: i32,
             height: i32,
         ) -> Result<(HDC, HBITMAP, HGDIOBJ, *mut u8)> {
+            if checked_bgra_len(width, height).is_none() {
+                return Err(window_error());
+            }
             unsafe {
                 let screen_dc = GetDC(HWND::default());
                 let back_dc = CreateCompatibleDC(screen_dc);
@@ -624,15 +711,20 @@ mod platform {
         }
 
         unsafe fn paint(&self, paint_dc: HDC) {
+            let Some(byte_len) = checked_bgra_len(self.width, self.height) else {
+                return;
+            };
             unsafe {
                 let _ = GdiFlush();
-                let byte_len = (self.width as usize) * (self.height as usize) * 4;
-                if self.bg_bgra.len() == byte_len {
-                    std::ptr::copy_nonoverlapping(self.bg_bgra.as_ptr(), self.back_bits, byte_len);
-                } else {
-                    std::ptr::write_bytes(self.back_bits, 0, byte_len);
-                }
                 let buf = std::slice::from_raw_parts_mut(self.back_bits, byte_len);
+                copy_bgra_surface(
+                    buf,
+                    self.width as usize,
+                    self.height as usize,
+                    &self.bg_bgra,
+                    self.img_width as usize,
+                    self.img_height as usize,
+                );
                 let mut canvas = Canvas::new(buf, self.width, self.height);
                 let scale = self.scale;
 
@@ -684,13 +776,13 @@ mod platform {
                 }
 
                 // 2. Top guide pill
-                let main_text = match (self.submitting, self.english) {
-                    (true, true) => "Recognizing…",
-                    (true, false) => "正在识别…",
-                    (false, true) => "Drag to select an area",
-                    (false, false) => "拖动选择区域",
+                let submitting = self.submitting.load(Ordering::Acquire);
+                let main_text = if submitting {
+                    self.locale.selection_recognizing()
+                } else {
+                    self.locale.selection_drag()
                 };
-                let cancel_text = if self.english { "Cancel" } else { "取消" };
+                let cancel_text = self.locale.selection_cancel();
                 let (main_w, main_h) = measure_text(self.back_dc, self.font_guide, main_text);
                 let (esc_w, esc_h) = measure_text(self.back_dc, self.font_kbd, "Esc");
                 let (cancel_w, _) = measure_text(self.back_dc, self.font_guide, cancel_text);
@@ -738,12 +830,10 @@ mod platform {
                     },
                 );
 
-                // Scan icon
                 let icon_cx = f64::from(pill_l + pad_l) + f64::from(icon_w) * 0.5;
                 let pill_cy = f64::from(pill_t + pill_b) * 0.5;
                 canvas.draw_scan_icon(icon_cx, pill_cy, scale, palette.icon_rgb);
 
-                // Divider
                 let main_l = pill_l + pad_l + icon_w + gap;
                 let div_x = main_l + main_w + gap;
                 let div_h = px(14.0);
@@ -755,7 +845,6 @@ mod platform {
                     }
                 }
 
-                // Esc keycap pill
                 let kbd_l = div_x + div_w + gap;
                 let kbd_t = pill_t + (pill_h - kbd_h) / 2;
                 let kbd_r = kbd_l + kbd_w;
@@ -775,7 +864,9 @@ mod platform {
                     },
                 );
 
-                // Text passes via ClearType GDI on back_dc
+                // Release mutable borrow of `back_bits` before GDI `DrawTextW`.
+                drop(canvas);
+
                 if let Some((dim_text, dim_rc)) = dim_draw {
                     draw_text_centered(self.back_dc, self.font_dim, 0x00ffffff, &dim_text, dim_rc);
                 }
@@ -850,6 +941,9 @@ mod platform {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
+        // SAFETY: Never hold `&mut OverlayWindow` or `&OverlayWindow` across any
+        // Win32 call that can synchronously re-enter `selection_wnd_proc`
+        // (`SetFocus`, `SetCapture`, `ReleaseCapture`, `UpdateWindow`, etc.).
         unsafe {
             match msg {
                 WM_ERASEBKGND => LRESULT(1),
@@ -872,24 +966,38 @@ mod platform {
                 }
                 WM_LBUTTONDOWN => {
                     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayWindow;
-                    if !ptr.is_null() {
-                        let state = &mut *ptr;
-                        if !state.submitting {
-                            let _ = SetFocus(hwnd);
-                            let (x, y) = pointer_pos(lparam);
-                            let cx = x.clamp(0, state.width);
-                            let cy = y.clamp(0, state.height);
-                            state.anchor = Some((cx, cy));
-                            state.selection = Some(PixelRect::from_points(
-                                cx,
-                                cy,
-                                cx,
-                                cy,
-                                state.width,
-                                state.height,
-                            ));
+                    let can_start = !ptr.is_null() && !(*ptr).submitting.load(Ordering::Acquire);
+                    if can_start {
+                        let _ = SetFocus(hwnd);
+                        if GetCapture() != hwnd {
                             let _ = SetCapture(hwnd);
-                            let _ = InvalidateRect(hwnd, None, false);
+                        }
+                        // Re-read GWLP_USERDATA in case a synchronous message destroyed the window.
+                        let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayWindow;
+                        if !ptr.is_null() {
+                            let should_redraw = {
+                                let state = &mut *ptr;
+                                if !state.submitting.load(Ordering::Acquire) {
+                                    let (x, y) = pointer_pos(lparam);
+                                    let cx = x.clamp(0, state.width);
+                                    let cy = y.clamp(0, state.height);
+                                    state.anchor = Some((cx, cy));
+                                    state.selection = Some(PixelRect::from_points(
+                                        cx,
+                                        cy,
+                                        cx,
+                                        cy,
+                                        state.width,
+                                        state.height,
+                                    ));
+                                    true
+                                } else {
+                                    false
+                                }
+                            };
+                            if should_redraw {
+                                let _ = InvalidateRect(hwnd, None, false);
+                            }
                         }
                     }
                     LRESULT(0)
@@ -897,17 +1005,24 @@ mod platform {
                 WM_MOUSEMOVE => {
                     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayWindow;
                     if !ptr.is_null() {
-                        let state = &mut *ptr;
-                        if let Some((ax, ay)) = state.anchor {
-                            let (x, y) = pointer_pos(lparam);
-                            state.selection = Some(PixelRect::from_points(
-                                ax,
-                                ay,
-                                x,
-                                y,
-                                state.width,
-                                state.height,
-                            ));
+                        let updated = {
+                            let state = &mut *ptr;
+                            if let Some((ax, ay)) = state.anchor {
+                                let (x, y) = pointer_pos(lparam);
+                                state.selection = Some(PixelRect::from_points(
+                                    ax,
+                                    ay,
+                                    x,
+                                    y,
+                                    state.width,
+                                    state.height,
+                                ));
+                                true
+                            } else {
+                                false
+                            }
+                        };
+                        if updated {
                             let _ = InvalidateRect(hwnd, None, false);
                         }
                     }
@@ -916,25 +1031,44 @@ mod platform {
                 WM_LBUTTONUP => {
                     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayWindow;
                     if !ptr.is_null() {
-                        let state = &mut *ptr;
-                        if let Some((ax, ay)) = state.anchor.take() {
-                            let _ = ReleaseCapture();
-                            let (x, y) = pointer_pos(lparam);
-                            let rect =
-                                PixelRect::from_points(ax, ay, x, y, state.width, state.height);
-                            if rect.meets_minimum(state.scale) {
-                                state.selection = Some(rect);
-                                state.submitting = true;
-                                let _ = InvalidateRect(hwnd, None, false);
+                        let drag_end = {
+                            let state = &mut *ptr;
+                            state.anchor.take().map(|(ax, ay)| {
+                                let (x, y) = pointer_pos(lparam);
+                                let rect =
+                                    PixelRect::from_points(ax, ay, x, y, state.width, state.height);
+                                if rect.meets_minimum(state.scale)
+                                    && state
+                                        .submitting
+                                        .compare_exchange(
+                                            false,
+                                            true,
+                                            Ordering::AcqRel,
+                                            Ordering::Acquire,
+                                        )
+                                        .is_ok()
+                                {
+                                    state.selection = Some(rect);
+                                    let image_rect = rect.to_image_rect(
+                                        state.width,
+                                        state.height,
+                                        state.img_width,
+                                        state.img_height,
+                                    );
+                                    Some((state.app.clone(), state.label.clone(), image_rect))
+                                } else {
+                                    state.selection = None;
+                                    None
+                                }
+                            })
+                        };
+                        if let Some(submission) = drag_end {
+                            if GetCapture() == hwnd {
+                                let _ = ReleaseCapture();
+                            }
+                            let _ = InvalidateRect(hwnd, None, false);
+                            if let Some((app, label, image_rect)) = submission {
                                 let _ = UpdateWindow(hwnd);
-                                let image_rect = rect.to_image_rect(
-                                    state.width,
-                                    state.height,
-                                    state.img_width,
-                                    state.img_height,
-                                );
-                                let app = state.app.clone();
-                                let label = state.label.clone();
                                 tauri::async_runtime::spawn(async move {
                                     if let Err(err) =
                                         crate::windows::accept_selection(&app, &label, image_rect)
@@ -942,9 +1076,6 @@ mod platform {
                                         crate::windows::abort_capture(&app, err);
                                     }
                                 });
-                            } else {
-                                state.selection = None;
-                                let _ = InvalidateRect(hwnd, None, false);
                             }
                         }
                     }
@@ -953,9 +1084,18 @@ mod platform {
                 WM_CAPTURECHANGED => {
                     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayWindow;
                     if !ptr.is_null() {
-                        let state = &mut *ptr;
-                        if state.anchor.take().is_some() && !state.submitting {
-                            state.selection = None;
+                        let cleared = {
+                            let state = &mut *ptr;
+                            if state.anchor.take().is_some()
+                                && !state.submitting.load(Ordering::Acquire)
+                            {
+                                state.selection = None;
+                                true
+                            } else {
+                                false
+                            }
+                        };
+                        if cleared {
                             let _ = InvalidateRect(hwnd, None, false);
                         }
                     }
@@ -965,10 +1105,14 @@ mod platform {
                 WM_RBUTTONUP => {
                     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayWindow;
                     if !ptr.is_null() {
-                        if (*ptr).anchor.take().is_some() {
+                        let (had_anchor, app) = {
+                            let state = &mut *ptr;
+                            (state.anchor.take().is_some(), state.app.clone())
+                        };
+                        if had_anchor && GetCapture() == hwnd {
                             let _ = ReleaseCapture();
                         }
-                        cancel_async((*ptr).app.clone());
+                        cancel_async(app);
                     }
                     LRESULT(0)
                 }
@@ -976,10 +1120,14 @@ mod platform {
                     if wparam.0 == VK_ESCAPE.0 as usize {
                         let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayWindow;
                         if !ptr.is_null() {
-                            if (*ptr).anchor.take().is_some() {
+                            let (had_anchor, app) = {
+                                let state = &mut *ptr;
+                                (state.anchor.take().is_some(), state.app.clone())
+                            };
+                            if had_anchor && GetCapture() == hwnd {
                                 let _ = ReleaseCapture();
                             }
-                            cancel_async((*ptr).app.clone());
+                            cancel_async(app);
                         }
                         return LRESULT(0);
                     }
@@ -988,7 +1136,8 @@ mod platform {
                 WM_CLOSE => {
                     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayWindow;
                     if !ptr.is_null() {
-                        cancel_async((*ptr).app.clone());
+                        let app = (*ptr).app.clone();
+                        cancel_async(app);
                     }
                     LRESULT(0)
                 }
@@ -1033,15 +1182,19 @@ mod platform {
         app: &AppHandle,
         specs: Vec<MonitorOverlaySpec>,
         dark: bool,
-        english: bool,
+        locale: UiLocale,
+        stop: CancellationToken,
     ) -> Result<()> {
         if specs.is_empty() {
             return Ok(());
         }
-        let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-        let previous: Vec<isize> = {
-            let mut guard = handles_lock().lock().unwrap_or_else(|e| e.into_inner());
-            std::mem::take(&mut *guard)
+        if stop.is_cancelled() {
+            return Err(AppError::cancelled());
+        }
+        let generation = {
+            let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+            reg.generation = reg.generation.wrapping_add(1);
+            reg.generation
         };
         // Pre-convert RGBA -> BGRA off the UI thread so main-thread window creation is instant.
         let prepared: Vec<(MonitorOverlaySpec, Vec<u8>)> = specs
@@ -1051,16 +1204,28 @@ mod platform {
                 (spec, bgra)
             })
             .collect();
+        if stop.is_cancelled() {
+            return Err(AppError::cancelled());
+        }
 
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let handle = app.clone();
         app.run_on_main_thread(move || {
-            destroy_handles(&previous);
-            if GENERATION.load(Ordering::SeqCst) != generation {
-                let _ = tx.send(Ok(()));
+            if stop.is_cancelled() {
+                let _ = tx.send(Err(AppError::cancelled()));
                 return;
             }
-            let result = (|| -> Result<Vec<isize>> {
+            let stale_before_create = {
+                let reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+                reg.generation != generation
+            };
+            if stale_before_create {
+                let _ = tx.send(Err(AppError::cancelled()));
+                return;
+            }
+
+            let submitting = Arc::new(AtomicBool::new(false));
+            let result = (|| -> Result<Vec<(HWND, i32, i32, i32, i32, bool)>> {
                 let instance = ensure_class_registered()?;
                 let mut cursor_pos = POINT::default();
                 let has_cursor = unsafe { GetCursorPos(&mut cursor_pos) }.is_ok();
@@ -1097,7 +1262,7 @@ mod platform {
                         img_height: spec.image.height(),
                         scale,
                         dark,
-                        english,
+                        locale,
                         bg_bgra,
                         back_dc,
                         back_bmp,
@@ -1108,7 +1273,7 @@ mod platform {
                         font_dim,
                         anchor: None,
                         selection: None,
-                        submitting: false,
+                        submitting: Arc::clone(&submitting),
                     });
 
                     let hwnd = match unsafe {
@@ -1154,42 +1319,61 @@ mod platform {
                         && cursor_pos.y < spec.y + height;
                     created.push((hwnd, spec.x, spec.y, width, height, contains_cursor));
                 }
-
-                let mut focus_hwnd = created.first().map(|c| c.0);
-                for &(hwnd, x, y, width, height, contains_cursor) in &created {
-                    if contains_cursor {
-                        focus_hwnd = Some(hwnd);
-                    }
-                    unsafe {
-                        let flags = if contains_cursor {
-                            SWP_SHOWWINDOW
-                        } else {
-                            SWP_SHOWWINDOW | SWP_NOACTIVATE
-                        };
-                        let _ = SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, flags);
-                        let _ = UpdateWindow(hwnd);
-                    }
-                }
-                if let Some(hwnd) = focus_hwnd {
-                    unsafe {
-                        let _ = SetForegroundWindow(hwnd);
-                        let _ = SetFocus(hwnd);
-                        if let Ok(cross) = LoadCursorW(HINSTANCE::default(), IDC_CROSS) {
-                            let _ = SetCursor(cross);
-                        }
-                    }
-                }
-                Ok(created.into_iter().map(|c| c.0.0 as isize).collect())
+                Ok(created)
             })();
 
             match result {
-                Ok(handles) => {
-                    if GENERATION.load(Ordering::SeqCst) != generation {
-                        destroy_handles(&handles);
-                    } else {
-                        *handles_lock().lock().unwrap_or_else(|e| e.into_inner()) = handles;
+                Ok(created) => {
+                    let handles: Vec<isize> = created.iter().map(|c| c.0.0 as isize).collect();
+                    let previous = {
+                        let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+                        if stop.is_cancelled() || reg.generation != generation {
+                            drop(reg);
+                            destroy_handles(&handles);
+                            let _ = tx.send(Err(AppError::cancelled()));
+                            return;
+                        }
+                        std::mem::replace(&mut reg.handles, handles.clone())
+                    };
+                    destroy_handles(&previous);
+
+                    let mut focus_hwnd = created.first().map(|c| c.0);
+                    for &(hwnd, x, y, width, height, contains_cursor) in &created {
+                        if contains_cursor {
+                            focus_hwnd = Some(hwnd);
+                        }
+                        unsafe {
+                            let flags = if contains_cursor {
+                                SWP_SHOWWINDOW
+                            } else {
+                                SWP_SHOWWINDOW | SWP_NOACTIVATE
+                            };
+                            let _ = SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, flags);
+                            let _ = UpdateWindow(hwnd);
+                        }
                     }
-                    let _ = tx.send(Ok(()));
+                    if let Some(hwnd) = focus_hwnd {
+                        unsafe {
+                            let _ = SetForegroundWindow(hwnd);
+                            let _ = SetFocus(hwnd);
+                            if let Ok(cross) = LoadCursorW(HINSTANCE::default(), IDC_CROSS) {
+                                let _ = SetCursor(cross);
+                            }
+                        }
+                    }
+                    if tx.send(Ok(())).is_err() {
+                        // Caller timed out; clean up if our handles are still active.
+                        let owned = {
+                            let mut reg = registry().lock().unwrap_or_else(|e| e.into_inner());
+                            if reg.generation == generation {
+                                reg.generation = reg.generation.wrapping_add(1);
+                                std::mem::take(&mut reg.handles)
+                            } else {
+                                Vec::new()
+                            }
+                        };
+                        destroy_handles(&owned);
+                    }
                 }
                 Err(err) => {
                     let _ = tx.send(Err(err));
@@ -1204,7 +1388,7 @@ mod platform {
 }
 
 #[cfg(windows)]
-pub use platform::{MonitorOverlaySpec, close, is_active, show};
+pub use platform::{MonitorOverlaySpec, close, close_and_wait, is_active, show};
 
 #[cfg(test)]
 mod tests {
@@ -1241,6 +1425,26 @@ mod tests {
     fn rgba_to_bgra_swaps_red_and_blue_and_forces_opaque_alpha() {
         let bgra = rgba_to_bgra(&[0x12, 0x34, 0x56, 0x78, 0xff, 0x00, 0x80, 0x00]);
         assert_eq!(bgra, vec![0x56, 0x34, 0x12, 255, 0x80, 0x00, 0xff, 255]);
+    }
+
+    #[test]
+    fn checked_bgra_len_rejects_zero_negative_and_overflow() {
+        assert_eq!(checked_bgra_len(1920, 1080), Some(1920 * 1080 * 4));
+        assert_eq!(checked_bgra_len(0, 1080), None);
+        assert_eq!(checked_bgra_len(-1, 1080), None);
+        assert_eq!(checked_bgra_len(i32::MAX, i32::MAX), None);
+    }
+
+    #[test]
+    fn copy_bgra_surface_handles_padded_small_frames() {
+        let src = vec![0xaa; 2 * 2 * 4];
+        let mut dst = vec![0x55; 4 * 3 * 4];
+        copy_bgra_surface(&mut dst, 4, 3, &src, 2, 2);
+        // Top-left 2x2 copied, padded areas zeroed.
+        assert_eq!(&dst[0..8], &[0xaa; 8]);
+        assert_eq!(&dst[8..16], &[0x00; 8]);
+        assert_eq!(&dst[16..24], &[0xaa; 8]);
+        assert_eq!(&dst[32..48], &[0x00; 16]);
     }
 
     #[test]
@@ -1281,10 +1485,8 @@ mod tests {
             },
             1.0,
         );
-        // Top outline pixel at (50, 19) should be #168bff -> BGR (0xff, 0x8b, 0x16).
         let idx = ((19 * 200) + 50) * 4;
         assert_eq!(&canvas.buf[idx..idx + 4], &[0xff, 0x8b, 0x16, 255]);
-        // Top-left anchor center at (20, 20) should be white.
         let corner = ((20 * 200) + 20) * 4;
         assert_eq!(&canvas.buf[corner..corner + 4], &[255, 255, 255, 255]);
 

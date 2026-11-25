@@ -98,6 +98,22 @@ pub fn parse_response(value: &Value, width: u32, height: u32) -> Result<Vec<OcrL
     Err(invalid())
 }
 
+fn custom_ocr_client() -> Result<&'static reqwest::Client> {
+    static CLIENT: std::sync::OnceLock<std::result::Result<reqwest::Client, ()>> =
+        std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(12))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|_| ())
+        })
+        .as_ref()
+        .map_err(|_| AppError::new(ErrorCode::Internal, "无法初始化 OCR 请求"))
+}
+
 #[async_trait]
 impl OcrBackend for CustomOcr {
     async fn recognize(
@@ -152,12 +168,7 @@ impl OcrBackend for CustomOcr {
                 json!({"model":self.options.model,"messages":[{"role":"user","content":[{"type":"text","text":prompt},{"type":"image_url","image_url":{"url":format!("data:image/png;base64,{encoded}")}}]}]})
             }
         };
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(12))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|_| AppError::new(ErrorCode::Internal, "无法初始化 OCR 请求"))?;
+        let client = custom_ocr_client()?;
         let mut request = client.post(endpoint).json(&body);
         if !self.key.is_empty() {
             request = request.bearer_auth(&self.key);

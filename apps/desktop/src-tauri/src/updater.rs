@@ -190,9 +190,7 @@ fn download_error(error: &tauri_plugin_updater::Error) -> AppError {
         AppError::new(ErrorCode::Network, "更新下载失败，请检查网络或代理后重试")
     }
 }
-#[tauri::command]
-pub async fn check_update(app: AppHandle, window: WebviewWindow) -> Result<serde_json::Value> {
-    authorize(window.label())?;
+async fn perform_check(app: &AppHandle) -> Result<serde_json::Value> {
     let state = app.state::<PendingUpdate>();
     {
         let pending = state.0.lock().await;
@@ -248,6 +246,64 @@ pub async fn check_update(app: AppHandle, window: WebviewWindow) -> Result<serde
         pending.update = update;
     }
     Ok(info(&pending))
+}
+
+/// Lightweight Rust-side periodic update checker so tray update notifications
+/// keep working even after the hidden `main` WebView has been reaped to save RAM.
+pub fn spawn_background_checks(app: AppHandle) {
+    const INITIAL_DELAY: Duration = Duration::from_secs(10);
+    const INTERVAL: Duration = Duration::from_secs(4 * 3600);
+    const RETRY_DELAY: Duration = Duration::from_secs(15 * 60);
+
+    tauri::async_runtime::spawn(async move {
+        let mut delay = INITIAL_DELAY;
+        let mut retried = false;
+        loop {
+            tokio::time::sleep(delay).await;
+            let should_check = {
+                let Some(state) = app.try_state::<AppState>() else {
+                    break;
+                };
+                let cfg = lock(&state.config);
+                cfg.auto_update && cfg.onboarding_complete
+            };
+            // When `main` is alive, its frontend updater scheduler handles checks & UI.
+            if !should_check || app.get_webview_window("main").is_some() {
+                delay = INTERVAL;
+                retried = false;
+                continue;
+            }
+            match perform_check(&app).await {
+                Ok(value) => {
+                    retried = false;
+                    delay = INTERVAL;
+                    if value
+                        .get("available")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                        && let Some(version) = value.get("version").and_then(|v| v.as_str())
+                    {
+                        crate::update_ui::notify_background_available(&app, version).await;
+                    }
+                }
+                Err(_) => {
+                    if !retried {
+                        retried = true;
+                        delay = RETRY_DELAY;
+                    } else {
+                        retried = false;
+                        delay = INTERVAL;
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[tauri::command]
+pub async fn check_update(app: AppHandle, window: WebviewWindow) -> Result<serde_json::Value> {
+    authorize(window.label())?;
+    perform_check(&app).await
 }
 #[tauri::command]
 pub async fn download_update(app: AppHandle, window: WebviewWindow, version: String) -> Result<()> {

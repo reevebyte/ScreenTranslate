@@ -13,6 +13,7 @@ mod selection_overlay;
 mod shortcuts;
 mod state;
 mod theme_preview;
+mod ui_locale;
 #[cfg(windows)]
 mod update_caption;
 mod update_ui;
@@ -292,12 +293,16 @@ pub fn run() {
             } else if !background {
                 windows::show_main(&handle)?;
             } else {
+                #[cfg(target_os = "macos")]
                 let _ = windows::ensure_main(&handle);
             }
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(target_os = "macos")]
             let _ = windows::ensure_quick(&handle);
             if !capture_requested {
                 windows::prewarm_selection(&handle);
+            }
+            if !cfg!(feature = "e2e") && !updater::public_key().is_empty() {
+                updater::spawn_background_checks(handle.clone());
             }
             windows::reap_hidden_windows(handle);
             Ok(())

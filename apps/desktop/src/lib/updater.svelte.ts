@@ -154,13 +154,13 @@ export async function consumeUpdateRequest() {
 }
 export function syncUpdateUi() {
   if (!desktop || !app.data || !updates.connected) return;
-  const version=updates.version||null, blocked=!!updateBlockReason(), english=uiLocale.current==='en';
-  void call('set_tray_update',{stage:updates.stage,version,blocked,english}).catch(()=>{});
+  const version=updates.version||null, blocked=!!updateBlockReason(), locale=uiLocale.current, english=locale==='en';
+  void call('set_tray_update',{stage:updates.stage,version,blocked,english,locale}).catch(()=>{});
   void call('set_update_caption',{
     visible:!!version && version!==updates.dismissed && ['available','downloading','ready','installing','error'].includes(updates.stage),
     enabled:!blocked && ['available','ready','error'].includes(updates.stage),
     mode:updates.stage==='downloading'?'downloading':['ready','installing'].includes(updates.stage)?'restart':'download',
-    progress:updates.progress,version,english,
+    progress:updates.progress,version,english,locale,
   }).catch(()=>{});
 }
 export function initializeUpdates() {
@@ -177,5 +177,5 @@ export function initializeUpdates() {
     subscribe('app-update-requested',()=>{void consumeUpdateRequest();}),
     subscribe<string>('app-update-caption-dismissed',({payload})=>{if(payload===updates.version)updates.dismissed=payload;}),
   ]).then(()=>{if(!disposed)updates.connected=true;}).catch(()=>{});
-  return ()=>{ disposed = true; updates.connected=false; autoEnabled=false; autoRetried=false; clearTimeout(timer); clearTimeout(noticeTimer); cleanup.splice(0).forEach(fn=>fn()); };
+  return ()=>{ disposed = true; updates.connected=false; autoEnabled=false; autoRetried=false; clearTimeout(timer); clearTimeout(noticeTimer); clearTimeout(installFallbackTimer); installFallbackTimer=undefined; cleanup.splice(0).forEach(fn=>fn()); };
 }

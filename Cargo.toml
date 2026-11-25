@@ -1,13 +1,9 @@
 [workspace]
 members = ["crates/core", "crates/platform", "apps/desktop/src-tauri"]
-exclude = ["vendor/zip-4-compat"]
 resolver = "2"
 
-[patch.crates-io]
-zip = { path = "vendor/zip-4-compat" }
-
 [workspace.package]
-version = "2.0.48"
+version = "2.0.49"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT"
@@ -27,4 +23,5 @@ tracing = "0.1"
 codegen-units = 1
 lto = true
 opt-level = "z"
+panic = "abort"
 strip = true

@@ -1162,8 +1162,12 @@ fn cancel_capture_internal(
         .drain()
         .map(|(_, frame)| frame)
         .collect();
+    let had_frames = !frames.is_empty();
     for frame in frames {
         lock(&state.frames).remove(&frame);
+    }
+    if had_frames {
+        trim_linux_heap();
     }
     if restore {
         let previous: Vec<_> = lock(&state.return_windows).drain(..).collect();
@@ -1501,6 +1505,7 @@ pub fn begin_capture_with_options(
     // capture in alpha.9, so only hide `main` when the capture was explicitly
     // initiated from inside `main` (or on native Wayland where overlays cannot
     // be positioned).
+    let mut hid_overlay = false;
     for label in ["quick", "result", "result-tools"] {
         if let Some(window) = app.get_webview_window(label)
             && window.is_visible().unwrap_or(false)
@@ -1512,6 +1517,7 @@ pub fn begin_capture_with_options(
             drop(returned);
             disable_transitions(&window);
             let _ = window.hide();
+            hid_overlay = true;
         }
     }
     let should_hide_main = hide_main || {
@@ -1542,19 +1548,24 @@ pub fn begin_capture_with_options(
     #[cfg(windows)]
     let had_popup = dismiss_transient_popups(from_tray) || overflow_visible;
     #[cfg(windows)]
-    if had_popup {
+    if had_popup || hid_overlay {
         flush_compositor();
     }
     #[cfg(not(windows))]
     {
-        let _ = from_tray;
+        let _ = (from_tray, hid_overlay);
         flush_compositor();
     }
     tauri::async_runtime::spawn(async move {
         let result = async {
             #[cfg(windows)]
-            if overflow_visible {
-                wait_for_tray_overflow_to_close().await;
+            {
+                if crate::selection_overlay::close_and_wait(&app).await {
+                    flush_compositor();
+                }
+                if overflow_visible {
+                    wait_for_tray_overflow_to_close().await;
+                }
             }
             if hid_main {
                 tokio::select! {
@@ -1668,9 +1679,10 @@ pub fn begin_capture_with_options(
                 let saved_theme = lock(&state.config).appearance.theme;
                 let effective_theme = lock(&state.theme_preview).effective(saved_theme);
                 let (dark, _, _) = caption_palette(effective_theme);
-                let english = app
+                let locale = app
                     .try_state::<crate::update_ui::UpdateUi>()
-                    .is_some_and(|ui| ui.english.load(std::sync::atomic::Ordering::Relaxed));
+                    .map(|ui| ui.current_locale())
+                    .unwrap_or_default();
                 let mut specs = Vec::with_capacity(captures.len());
                 for (index, metadata) in captures {
                     let label = format!("selection-{index}");
@@ -1691,7 +1703,7 @@ pub fn begin_capture_with_options(
                 if !state.jobs.is_current("capture", &ticket) {
                     return Err(AppError::cancelled());
                 }
-                crate::selection_overlay::show(&app, specs, dark, english)?;
+                crate::selection_overlay::show(&app, specs, dark, locale, ticket.stop.clone())?;
             }
             #[cfg(not(windows))]
             for (index, metadata) in captures {
@@ -1794,8 +1806,12 @@ pub fn accept_selection(app: &AppHandle, label: &str, rect: Rect) -> Result<()> 
         (crop, selections.drain().map(|(_, id)| id).collect())
     };
     // Keep the frozen selection windows visible until the decoded result is ready.
+    let had_selected = !selected_frames.is_empty();
     for id in selected_frames {
         lock(&state.frames).remove(&id);
+    }
+    if had_selected {
+        trim_linux_heap();
     }
     let prepared = match crate::cache::FrameCache::prepare(crop) {
         Ok(prepared) => prepared,
@@ -1892,16 +1908,19 @@ pub fn close_requested(window: &tauri::Window, api: &tauri::CloseRequestApi) {
 pub fn reap_hidden_windows(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut hidden: HashMap<String, Instant> = HashMap::new();
-        let poll_interval = if cfg!(target_os = "linux") {
-            Duration::from_secs(5)
-        } else {
+        let poll_interval = if cfg!(target_os = "macos") {
             Duration::from_secs(15)
+        } else {
+            Duration::from_secs(5)
         };
-        let idle_limit = if cfg!(target_os = "linux") {
+        let secondary_idle_limit = if cfg!(target_os = "linux") {
             Duration::from_secs(20)
+        } else if cfg!(windows) {
+            Duration::from_secs(30)
         } else {
             Duration::from_secs(60)
         };
+        let main_idle_limit = Duration::from_secs(45);
         let mut timer = tokio::time::interval(poll_interval);
         loop {
             timer.tick().await;
@@ -1909,11 +1928,34 @@ pub fn reap_hidden_windows(app: AppHandle) {
             let windows = app.webview_windows();
             hidden.retain(|label, _| windows.contains_key(label));
             let capturing = selection_in_use(&app) || state.jobs.is_running("capture");
+            let active_work = state.jobs.is_running("text")
+                || state.jobs.is_running("visual")
+                || state.jobs.has_running_prefix("block:");
+            let update_busy = app
+                .try_state::<crate::update_ui::UpdateUi>()
+                .is_some_and(|ui| ui.busy.load(std::sync::atomic::Ordering::Relaxed));
+            let ocr_downloading = state.rapid_ocr.status().state
+                == screentrans_core::LocalOcrInstallState::Downloading;
+            let tray_available = lock(&state.capabilities).tray;
+
+            let mut any_visual_surface_visible = false;
+            for (label, window) in &windows {
+                if matches!(label.as_str(), "main" | "result")
+                    && window.is_visible().unwrap_or(false)
+                {
+                    any_visual_surface_visible = true;
+                }
+            }
+            if !capturing && !active_work && !any_visual_surface_visible {
+                lock(&state.frames).release_idle_raw_images();
+            }
+
             for (label, window) in windows {
-                let reapable = if cfg!(target_os = "linux") {
-                    matches!(label.as_str(), "result" | "result-tools" | "quick")
-                } else {
+                let reapable = if cfg!(target_os = "macos") {
                     matches!(label.as_str(), "result" | "result-tools")
+                } else {
+                    matches!(label.as_str(), "result" | "result-tools" | "quick")
+                        || (label == "main" && tray_available)
                 };
                 if !reapable {
                     continue;
@@ -1927,21 +1969,28 @@ pub fn reap_hidden_windows(app: AppHandle) {
                     && app
                         .get_webview_window("result")
                         .is_some_and(|w| w.is_visible().unwrap_or(false));
+                let main_busy = label == "main" && (update_busy || ocr_downloading || active_work);
                 if window.is_visible().unwrap_or(true)
                     || result_active
                     || pending_reveal
                     || capturing
+                    || main_busy
                     || lock(&state.dirty_windows).contains(&label)
                     || !lock(&state.return_windows).is_empty()
                 {
                     hidden.remove(&label);
                     continue;
                 }
+                let limit = if label == "main" {
+                    main_idle_limit
+                } else {
+                    secondary_idle_limit
+                };
                 if hidden
                     .entry(label.clone())
                     .or_insert_with(Instant::now)
                     .elapsed()
-                    >= idle_limit
+                    >= limit
                 {
                     let _ = window.destroy();
                     lock(&state.window_lifecycle).forget(&label);

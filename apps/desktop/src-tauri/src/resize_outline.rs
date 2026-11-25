@@ -7,7 +7,9 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 use windows::{
     Win32::{
         Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
-        Graphics::Gdi::{CreateEllipticRgn, CreateSolidBrush, SetWindowRgn, UpdateWindow},
+        Graphics::Gdi::{
+            CreateEllipticRgn, CreateSolidBrush, DeleteObject, HGDIOBJ, SetWindowRgn, UpdateWindow,
+        },
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::*,
     },
@@ -158,7 +160,10 @@ fn create(owner: isize, b: Rect, s: f64) -> Result<Vec<isize>> {
             let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA);
             if i >= 4 {
                 let size = (6.0 * s).round().max(6.0) as i32;
-                SetWindowRgn(hwnd, CreateEllipticRgn(0, 0, size, size), true);
+                let rgn = CreateEllipticRgn(0, 0, size, size);
+                if !rgn.is_invalid() && SetWindowRgn(hwnd, rgn, true) == 0 {
+                    let _ = DeleteObject(HGDIOBJ(rgn.0));
+                }
             }
         }
     }

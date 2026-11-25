@@ -24,16 +24,12 @@ impl RenderedImage {
 
 #[derive(Clone, Copy)]
 enum PreviewFormat {
-    #[cfg(windows)]
-    Bmp,
     Png,
 }
 
 impl PreviewFormat {
     fn content_type(self) -> &'static str {
         match self {
-            #[cfg(windows)]
-            Self::Bmp => "image/bmp",
             Self::Png => "image/png",
         }
     }
@@ -44,6 +40,7 @@ pub struct CachedFrame {
     pub image: Option<Arc<RgbaImage>>,
     preview: Arc<Vec<u8>>,
     preview_format: PreviewFormat,
+    is_source: bool,
 }
 
 #[derive(Default)]
@@ -81,7 +78,7 @@ impl FrameCache {
             Ok(PreparedFrame {
                 frame,
                 preview: Vec::new(),
-                preview_format: PreviewFormat::Bmp,
+                preview_format: PreviewFormat::Png,
                 cost,
             })
         }
@@ -168,6 +165,7 @@ impl FrameCache {
                 image: Some(Arc::new(frame.image)),
                 preview: Arc::new(preview),
                 preview_format,
+                is_source: true,
             },
         );
         self.order.push_back(metadata.id.clone());
@@ -235,6 +233,7 @@ impl FrameCache {
                 image: None,
                 preview,
                 preview_format: PreviewFormat::Png,
+                is_source: false,
             },
         );
         self.order.push_back(derived_id.clone());
@@ -246,10 +245,35 @@ impl FrameCache {
     }
 
     pub fn image(&self, id: &str) -> Result<Arc<RgbaImage>> {
-        self.frames
-            .get(id)
-            .and_then(|frame| frame.image.clone())
-            .ok_or_else(missing)
+        let frame = self.frames.get(id).ok_or_else(missing)?;
+        if let Some(image) = &frame.image {
+            return Ok(Arc::clone(image));
+        }
+        if !frame.is_source || frame.preview.is_empty() {
+            return Err(missing());
+        }
+        let decoded = image::load_from_memory(&frame.preview)
+            .map_err(|_| AppError::new(ErrorCode::Internal, "截图解码失败，请重新截图"))?;
+        Ok(Arc::new(decoded.to_rgba8()))
+    }
+    /// Drops raw uncompressed RGBA bitmaps for source frames that already have a
+    /// compressed PNG preview, keeping instant preview/toggle intact while
+    /// reclaiming tens of megabytes when idle in the tray.
+    pub fn release_idle_raw_images(&mut self) -> bool {
+        let mut released = false;
+        for frame in self.frames.values_mut() {
+            if frame.is_source
+                && !frame.preview.is_empty()
+                && let Some(raw) = frame.image.take()
+            {
+                self.bytes = self.bytes.saturating_sub(raw.as_raw().len());
+                released = true;
+            }
+        }
+        if released {
+            crate::windows::trim_linux_heap();
+        }
+        released
     }
     pub fn preview(&self, id: &str) -> Option<(Arc<Vec<u8>>, &'static str)> {
         self.frames
@@ -293,7 +317,7 @@ impl FrameCache {
     }
     pub fn crop(&self, id: &str, selection: Rect) -> Result<CaptureFrame> {
         let cached = self.frames.get(id).ok_or_else(missing)?;
-        let image = cached.image.as_ref().ok_or_else(missing)?;
+        let image = self.image(id)?;
         let (x, y, width, height) = selection.crop_bounds(image.width(), image.height())?;
         let bounds = cached.metadata.screen_bounds.map(|bounds| Rect {
             x: bounds.x + x as f64 * bounds.width / cached.metadata.width as f64,
@@ -327,87 +351,36 @@ fn encode_png(image: &RgbaImage) -> Result<Vec<u8>> {
 }
 
 fn encode_screen_preview(image: &RgbaImage) -> Result<(Vec<u8>, PreviewFormat)> {
-    #[cfg(windows)]
-    {
-        Ok((encode_bmp(image), PreviewFormat::Bmp))
-    }
-    #[cfg(not(windows))]
-    {
-        Ok((encode_png(image)?, PreviewFormat::Png))
-    }
-}
-
-#[cfg(windows)]
-fn encode_bmp(image: &RgbaImage) -> Vec<u8> {
-    const FILE_HEADER_BYTES: u32 = 14;
-    const DIB_HEADER_BYTES: u32 = 40;
-    const PIXEL_OFFSET: u32 = FILE_HEADER_BYTES + DIB_HEADER_BYTES;
-
-    let width = image.width();
-    let height = image.height();
-    let row_bytes = width.saturating_mul(3);
-    let row_stride = row_bytes.saturating_add(3) & !3;
-    let row_padding = row_stride.saturating_sub(row_bytes);
-    let pixel_bytes = row_stride.saturating_mul(height);
-    let file_bytes = PIXEL_OFFSET.saturating_add(pixel_bytes);
-    let mut bmp = Vec::with_capacity(file_bytes as usize);
-    bmp.extend_from_slice(b"BM");
-    bmp.extend_from_slice(&file_bytes.to_le_bytes());
-    bmp.extend_from_slice(&[0; 4]);
-    bmp.extend_from_slice(&PIXEL_OFFSET.to_le_bytes());
-    bmp.extend_from_slice(&DIB_HEADER_BYTES.to_le_bytes());
-    bmp.extend_from_slice(&(width as i32).to_le_bytes());
-    bmp.extend_from_slice(&(height as i32).to_le_bytes());
-    bmp.extend_from_slice(&1_u16.to_le_bytes());
-    bmp.extend_from_slice(&24_u16.to_le_bytes());
-    bmp.extend_from_slice(&0_u32.to_le_bytes());
-    bmp.extend_from_slice(&pixel_bytes.to_le_bytes());
-    bmp.extend_from_slice(&0_i32.to_le_bytes());
-    bmp.extend_from_slice(&0_i32.to_le_bytes());
-    bmp.extend_from_slice(&0_u32.to_le_bytes());
-    bmp.extend_from_slice(&0_u32.to_le_bytes());
-    for row in image.rows().rev() {
-        for pixel in row {
-            bmp.extend_from_slice(&[pixel[2], pixel[1], pixel[0]]);
-        }
-        bmp.extend(std::iter::repeat_n(0, row_padding as usize));
-    }
-    bmp
+    Ok((encode_png(image)?, PreviewFormat::Png))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[cfg(windows)]
     #[test]
-    fn windows_screen_preview_is_a_valid_browser_bmp() {
+    fn idle_raw_image_release_frees_rgba_bytes_and_decodes_on_demand() {
         let mut cache = FrameCache::default();
+        let source = RgbaImage::from_fn(16, 12, |x, y| {
+            image::Rgba([(x * 10) as u8, (y * 15) as u8, 120, 255])
+        });
         let frame = cache
             .insert(
                 CaptureFrame {
-                    image: RgbaImage::new(3, 2),
+                    image: source.clone(),
                     screen_bounds: None,
                     scale_factor: 1.0,
                 },
                 &[],
             )
             .unwrap();
-        let (preview, content_type) = cache.preview(&frame.id).unwrap();
-
-        assert_eq!(content_type, "image/bmp");
-        assert_eq!(&preview[..2], b"BM");
-        assert_eq!(
-            u32::from_le_bytes(preview[2..6].try_into().unwrap()) as usize,
-            preview.len()
-        );
-        assert_eq!(u32::from_le_bytes(preview[10..14].try_into().unwrap()), 54);
-        assert_eq!(u32::from_le_bytes(preview[14..18].try_into().unwrap()), 40);
-        assert_eq!(u32::from_le_bytes(preview[18..22].try_into().unwrap()), 3);
-        assert_eq!(u32::from_le_bytes(preview[22..26].try_into().unwrap()), 2);
-        assert_eq!(u16::from_le_bytes(preview[28..30].try_into().unwrap()), 24);
-        // Two rows are padded from 9 to 12 bytes per row in 24-bit BMP data.
-        assert_eq!(preview.len(), 54 + 24);
+        let before_bytes = cache.bytes;
+        assert!(cache.release_idle_raw_images());
+        assert!(cache.bytes < before_bytes);
+        assert!(!cache.release_idle_raw_images());
+        let restored = cache.image(&frame.id).unwrap();
+        assert_eq!(restored.dimensions(), source.dimensions());
+        assert_eq!(restored.get_pixel(3, 4), source.get_pixel(3, 4));
     }
 
     #[test]

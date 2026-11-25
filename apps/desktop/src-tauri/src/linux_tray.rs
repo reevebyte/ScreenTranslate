@@ -5,7 +5,7 @@
 //! StatusNotifierItem directly over D-Bus lets Waybar / KDE / SNI bars trigger
 //! screenshot capture on left-click while preserving the full right-click menu.
 
-use crate::{shortcuts, state::lock, update_ui, windows};
+use crate::{shortcuts, state::lock, ui_locale::UiLocale, update_ui, windows};
 use futures_util::StreamExt;
 use std::{
     collections::HashMap,
@@ -37,7 +37,7 @@ type MenuLayoutNode = (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>);
 
 #[derive(Clone)]
 struct TrayMenuState {
-    english: bool,
+    locale: UiLocale,
     update_text: String,
     update_enabled: bool,
     revision: u32,
@@ -46,8 +46,8 @@ struct TrayMenuState {
 impl TrayMenuState {
     fn initial() -> Self {
         Self {
-            english: false,
-            update_text: format!("版本 {}", env!("CARGO_PKG_VERSION")),
+            locale: UiLocale::ZhCn,
+            update_text: UiLocale::ZhCn.tray_version(env!("CARGO_PKG_VERSION")),
             update_enabled: false,
             revision: 1,
         }
@@ -63,40 +63,25 @@ impl TrayMenuState {
                 );
             }
             MENU_MAIN => {
-                let label = if self.english {
-                    "Open main window"
-                } else {
-                    "打开主窗口"
-                };
                 props.insert(
                     "label".into(),
-                    OwnedValue::from(zbus::zvariant::Str::from(label)),
+                    OwnedValue::from(zbus::zvariant::Str::from(self.locale.tray_open_main())),
                 );
                 props.insert("enabled".into(), OwnedValue::from(true));
                 props.insert("visible".into(), OwnedValue::from(true));
             }
             MENU_CAPTURE => {
-                let label = if self.english {
-                    "Capture and translate"
-                } else {
-                    "截图翻译"
-                };
                 props.insert(
                     "label".into(),
-                    OwnedValue::from(zbus::zvariant::Str::from(label)),
+                    OwnedValue::from(zbus::zvariant::Str::from(self.locale.tray_capture())),
                 );
                 props.insert("enabled".into(), OwnedValue::from(true));
                 props.insert("visible".into(), OwnedValue::from(true));
             }
             MENU_QUICK => {
-                let label = if self.english {
-                    "Quick translate"
-                } else {
-                    "快速文字翻译"
-                };
                 props.insert(
                     "label".into(),
-                    OwnedValue::from(zbus::zvariant::Str::from(label)),
+                    OwnedValue::from(zbus::zvariant::Str::from(self.locale.tray_quick())),
                 );
                 props.insert("enabled".into(), OwnedValue::from(true));
                 props.insert("visible".into(), OwnedValue::from(true));
@@ -117,10 +102,9 @@ impl TrayMenuState {
                 props.insert("visible".into(), OwnedValue::from(true));
             }
             MENU_QUIT => {
-                let label = if self.english { "Quit" } else { "退出" };
                 props.insert(
                     "label".into(),
-                    OwnedValue::from(zbus::zvariant::Str::from(label)),
+                    OwnedValue::from(zbus::zvariant::Str::from(self.locale.tray_quit())),
                 );
                 props.insert("enabled".into(), OwnedValue::from(true));
                 props.insert("visible".into(), OwnedValue::from(true));
@@ -391,18 +375,18 @@ pub struct LinuxTrayHandle {
 }
 
 impl LinuxTrayHandle {
-    pub fn update(&self, update_text: String, update_enabled: bool, english: bool) {
+    pub fn update(&self, update_text: String, update_enabled: bool, locale: UiLocale) {
         let revision = {
             let mut state = lock(&self.state);
             if state.update_text == update_text
                 && state.update_enabled == update_enabled
-                && state.english == english
+                && state.locale == locale
             {
                 return;
             }
             state.update_text = update_text;
             state.update_enabled = update_enabled;
-            state.english = english;
+            state.locale = locale;
             state.revision = state.revision.saturating_add(1);
             state.revision
         };
@@ -518,7 +502,7 @@ mod tests {
         assert_eq!(root_id, 0);
         assert_eq!(children.len(), 6);
 
-        state.english = true;
+        state.locale = UiLocale::En;
         state.update_text = "Version 2.1.0".into();
         state.update_enabled = true;
         let props = state.item_properties(MENU_CAPTURE).unwrap();

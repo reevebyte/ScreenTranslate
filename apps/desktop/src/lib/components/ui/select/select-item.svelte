@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Check } from "$lib/icons";
 	import { Select as SelectPrimitive } from "bits-ui";
-	import { cn, type WithoutChild } from "$lib/utils";
+	import { cn, type WithoutChild } from "$lib/cn";
 
 	let {
 		ref = $bindable(null),

@@ -10,15 +10,17 @@
   import { call, desktop } from '$lib/api';
   import Brand from '$lib/components/Brand.svelte';
   import Button from '$lib/components/ui/button.svelte';
-  import TextView from './views/TextView.svelte';
-  import ResultView from './views/ResultView.svelte';
-  import CaptureOverlay from './views/CaptureOverlay.svelte';
-  import QuickView from './views/QuickView.svelte';
-  import ServicesView from './views/ServicesView.svelte';
-  import ShortcutsView from './views/ShortcutsView.svelte';
-  import SettingsView from './views/SettingsView.svelte';
-  import UpdateDialog from '$lib/components/UpdateDialog.svelte';
   const mode = new URLSearchParams(location.search).get('window') || 'main';
+  const viewLoaders = {
+    shortcuts: () => import('./views/ShortcutsView.svelte'),
+    translate: () => import('./views/TextView.svelte'),
+    capture: () => import('./views/ResultView.svelte'),
+    providers: () => import('./views/ServicesView.svelte'),
+    settings: () => import('./views/SettingsView.svelte'),
+    quick: () => import('./views/QuickView.svelte'),
+    result: () => import('./views/ResultView.svelte'),
+    selection: () => import('./views/CaptureOverlay.svelte'),
+  } as const;
   const nav = $derived([
     { route: 'shortcuts' as Route, label: t("快捷操作"), icon: Keyboard },
     { route: 'translate' as Route, label: t("文字翻译"), icon: Languages },
@@ -63,6 +65,11 @@
       if (initialRoute && nav.some(item => item.route === initialRoute)) app.route = initialRoute as Route;
       const initialTab = search.get('tab');
       if (initialTab) { app.settingsTab = initialTab; app.servicesTab = initialTab; }
+      const preload = mode === 'quick' ? viewLoaders.quick
+        : mode === 'result-tools' || mode === 'result' ? viewLoaders.result
+        : mode === 'selection' ? viewLoaders.selection
+        : app.route in viewLoaders ? viewLoaders[app.route as keyof typeof viewLoaders] : undefined;
+      if (preload) await preload().catch(() => {});
       if (desktop && !disposed && (mode === 'main' || mode === 'quick' || mode === 'result-tools' || app.fatal)) {
         await tick();
         await document.fonts?.ready;
@@ -93,13 +100,13 @@
 {:else if !app.data}
   <div class="startup-state"><LoaderCircle size={22} class="spin"/><span>{t("正在打开…")}</span></div>
 {:else if mode === 'selection'}
-  <CaptureOverlay/>
+  {#await viewLoaders.selection() then module}<module.default/>{/await}
 {:else if mode === 'quick'}
-  <QuickView/>
+  {#await viewLoaders.quick() then module}<module.default/>{/await}
 {:else if mode === 'result-tools'}
-  <ResultView floating toolsOnly/>
+  {#await viewLoaders.result() then module}<module.default floating toolsOnly/>{/await}
 {:else if mode === 'result'}
-  <ResultView floating/>
+  {#await viewLoaders.result() then module}<module.default floating/>{/await}
 {:else}
   <div class="app-shell" class:sidebar-collapsed={sidebarCollapsed}>
     <aside class="navigation-rail" aria-label={t("主导航")}>
@@ -116,11 +123,11 @@
     <main class="main-content" aria-label={nav.find(item => item.route === app.route)?.label || t("组件")}>
       <div class="page-container" class:settings-page={app.route === 'settings'}>
         <div class="page-body">
-          {#if app.route === 'shortcuts'}<ShortcutsView/>
-          {:else if app.route === 'translate'}<TextView/>
-          {:else if app.route === 'capture'}<ResultView/>
-          {:else if app.route === 'providers'}<ServicesView/>
-          {:else if app.route === 'settings'}<SettingsView onwelcome={() => welcome = true}/>
+          {#if app.route === 'shortcuts'}{#await viewLoaders.shortcuts() then module}<module.default/>{/await}
+          {:else if app.route === 'translate'}{#await viewLoaders.translate() then module}<module.default/>{/await}
+          {:else if app.route === 'capture'}{#await viewLoaders.capture() then module}<module.default/>{/await}
+          {:else if app.route === 'providers'}{#await viewLoaders.providers() then module}<module.default/>{/await}
+          {:else if app.route === 'settings'}{#await viewLoaders.settings() then module}<module.default onwelcome={() => welcome = true}/>{/await}
           {:else if import.meta.env.DEV}{#await import('./views/ComponentsView.svelte') then module}<module.default/>{/await}{/if}
         </div>
       </div>
@@ -129,7 +136,7 @@
       {/if}
     </main>
   </div>
-  <UpdateDialog />
+  {#if updates.confirm}{#await import('$lib/components/UpdateDialog.svelte') then module}<module.default/>{/await}{/if}
   {#if app.commandOpen}{#await import('$lib/components/CommandPalette.svelte') then module}<module.default/>{/await}{/if}
   {#if welcome}{#await import('$lib/components/Onboarding.svelte') then module}<module.default bind:open={welcome}/>{/await}{/if}
 {/if}

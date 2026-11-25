@@ -2,7 +2,7 @@
   import * as Select from './select/index';
   import ProviderIcon from '../ProviderIcon.svelte';
   import type { ProviderBrand } from '$lib/provider-brand';
-  import { cn } from '$lib/utils';
+  import { cn } from '$lib/cn';
   let { value, options, label, onchange, class: className, id, icons }:
     { value: string; options: ReadonlyArray<readonly [string, string]>; label: string; onchange: (value: string) => void; class?: string; id?: string; icons?: Record<string,ProviderBrand> } = $props();
 </script>

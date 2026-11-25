@@ -30,7 +30,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
-tauri-plugin-updater = "2"
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
 tauri-plugin-wdio = { version = "1.5.1", optional = true }
 tauri-plugin-wdio-webdriver = { version = "1.5.1", optional = true }
 serde.workspace = true

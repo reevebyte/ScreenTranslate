@@ -60,11 +60,11 @@ it('shows the centered up-to-date notice only on manual check',async()=>{
 });
 it('treats "no update published" as up to date in the English UI too',async()=>{
  const {setLocale}=await import('./i18n.svelte');
- setLocale('en');
+ await setLocale('en');
  try{
   call.mockRejectedValueOnce({code:'network',message:'尚未发布可用更新'});await checkUpdate(true);
   expect(updates.stage).toBe('current');expect(updates.upToDateNotice).toBe(true);expect(updates.error).toBe('');
- }finally{setLocale('zh-CN');}
+ }finally{await setLocale('zh-CN');}
 });
 it('waits for a running check instead of dropping a tray update request',async()=>{
  let resolve!:(v:unknown)=>void;

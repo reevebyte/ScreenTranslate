@@ -124,6 +124,22 @@ async fn encode_png(image: Arc<RgbaImage>, stop: &CancellationToken) -> Result<V
     }
 }
 
+fn ocr_client() -> Result<&'static reqwest::Client> {
+    static CLIENT: std::sync::OnceLock<std::result::Result<reqwest::Client, ()>> =
+        std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(45))
+                .connect_timeout(Duration::from_secs(12))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|_| ())
+        })
+        .as_ref()
+        .map_err(|_| AppError::new(ErrorCode::Internal, "无法初始化 OCR 请求"))
+}
+
 #[async_trait]
 impl OcrBackend for YoudaoOcr {
     async fn recognize(
@@ -156,12 +172,7 @@ impl OcrBackend for YoudaoOcr {
         body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"multipartFile\"; filename=\"capture.png\"\r\nContent-Type: image/png\r\n\r\n").as_bytes());
         body.extend_from_slice(&png);
         body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(45))
-            .connect_timeout(Duration::from_secs(12))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|_| AppError::new(ErrorCode::Internal, "无法初始化 OCR 请求"))?;
+        let client = ocr_client()?;
         let request = client.post("https://ocrtran.youdao.com/ocr/imgtranocr").header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/127.0.0.0 Safari/537.36").header("Content-Type", format!("multipart/form-data; boundary={boundary}")).body(body);
         parse_youdao(&json_response(request, &stop).await.map_err(ocr_action)?)
     }
@@ -182,12 +193,7 @@ impl OcrBackend for AzureOcr {
             );
         }
         let png = encode_png(image, &stop).await?;
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(45))
-            .connect_timeout(Duration::from_secs(12))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|_| AppError::new(ErrorCode::Internal, "无法初始化 OCR 请求"))?;
+        let client = ocr_client()?;
         let request = client
             .post(format!(
                 "{}/computervision/imageanalysis:analyze",

@@ -10,8 +10,8 @@ fn is_latin(c: char) -> bool {
         )
 }
 
-const SIMPLIFIED_MARKERS: &str = "这为国们说时会经发进动现实机电语译小写读书网点开关题体简汉选图设键显应认对无与从来没过还让给样东车长见听问间门员处务业产变义边头买卖记话谢请欢乐爱梦飞鸟鱼龙岁钟钱铁银错难离虽须顺领考验惊齐";
-const TRADITIONAL_MARKERS: &str = "這為國們說時會經發進動現實機電語譯寫讀書網點開關題體簡漢選圖設鍵顯應認對無與從來沒過還讓給樣東車長見聽問間門員處務業產變義邊頭買賣記話謝請歡樂愛夢飛鳥魚龍歲鐘錢鐵銀錯難離雖須順領考驗驚齊";
+const SIMPLIFIED_MARKERS: &str = "这为国们说时会经发进动现实机电语译写读书网点开关题体简汉选图设键显应认对无与从来没过还让给样东车长见听问间门员处务业产变义边头买卖记话谢请欢乐爱梦飞鸟鱼龙岁钟钱铁银错难离虽须顺领验惊齐";
+const TRADITIONAL_MARKERS: &str = "這為國們說時會經發進動現實機電語譯寫讀書網點開關題體簡漢選圖設鍵顯應認對無與從來沒過還讓給樣東車長見聽問間門員處務業產變義邊頭買賣記話謝請歡樂愛夢飛鳥魚龍歲鐘錢鐵銀錯難離雖須順領驗驚齊";
 
 fn detect_chinese_variant(text: &str) -> &'static str {
     let mut simplified = 0usize;
@@ -349,5 +349,20 @@ mod tests {
             "zh-Hans"
         );
         assert_eq!(target_for("中文", "auto", "zh-Hans", "zh-Hant"), "zh-Hant");
+        assert_eq!(target_for("考驗", "auto", "zh-Hans", "zh-Hant"), "zh-Hans");
+    }
+
+    #[test]
+    fn chinese_variant_markers_are_disjoint_and_equal_length() {
+        assert_eq!(
+            SIMPLIFIED_MARKERS.chars().count(),
+            TRADITIONAL_MARKERS.chars().count()
+        );
+        for c in SIMPLIFIED_MARKERS.chars() {
+            assert!(
+                !TRADITIONAL_MARKERS.contains(c),
+                "marker '{c}' appears in both simplified and traditional sets"
+            );
+        }
     }
 }

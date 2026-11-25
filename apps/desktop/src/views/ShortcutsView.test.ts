@@ -69,7 +69,7 @@ it('says when a hotkey duplicates another action instead of blaming another app'
 });
 
 it('localizes taken hotkey conflict notices in English UI mode', async () => {
-  setLocale('en');
+  await setLocale('en');
   call.mockImplementation(async (command, args) => {
     if (command !== 'save_config') return;
     if (args.config.hotkeys.capture === 'Ctrl+Alt+K') throw { code: 'configuration', message: '快捷键已被其他程序占用，请重新设置', action: 'hotkeys' };

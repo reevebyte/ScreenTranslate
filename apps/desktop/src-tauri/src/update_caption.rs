@@ -1,4 +1,5 @@
 // A small owned native button anchored in the existing caption; no client-space toolbar.
+use crate::ui_locale::UiLocale;
 use std::cell::{Cell, RefCell};
 use windows::{
     Win32::{
@@ -21,20 +22,11 @@ enum CaptionMode {
     Downloading,
     Restart,
 }
-fn caption_label(mode: CaptionMode, progress: Option<u32>, english: bool) -> String {
+fn caption_label(mode: CaptionMode, progress: Option<u32>, locale: UiLocale) -> String {
     match mode {
-        CaptionMode::Download => if english { "Update" } else { "下载更新" }.into(),
-        CaptionMode::Restart => if english { "Restart" } else { "重启更新" }.into(),
-        CaptionMode::Downloading => progress
-            .map(|n| format!("{} {}%", if english { "Get" } else { "下载" }, n.min(99)))
-            .unwrap_or_else(|| {
-                if english {
-                    "Getting…"
-                } else {
-                    "下载中…"
-                }
-                .into()
-            }),
+        CaptionMode::Download => locale.caption_update().into(),
+        CaptionMode::Restart => locale.caption_restart().into(),
+        CaptionMode::Downloading => locale.caption_downloading(progress),
     }
 }
 const WM_MOUSELEAVE: u32 = 0x02a3;
@@ -43,7 +35,7 @@ struct CaptionAction {
     button: Cell<HWND>,
     visible: Cell<bool>,
     enabled: Cell<bool>,
-    english: Cell<bool>,
+    locale: Cell<UiLocale>,
     hover: Cell<bool>,
     pressed: Cell<bool>,
     close_pressed: Cell<bool>,
@@ -463,7 +455,7 @@ unsafe fn paint_dc(dc: HDC, width: i32, height: i32, dpi: u32, action: &CaptionA
         let label = caption_label(
             action.mode.get(),
             action.progress.get(),
-            action.english.get(),
+            action.locale.get(),
         );
         let mut label = label.encode_utf16().collect::<Vec<_>>();
         let mut rect = pill;
@@ -790,7 +782,7 @@ unsafe fn attach(
             button: Cell::new(HWND::default()),
             visible: Cell::new(false),
             enabled: Cell::new(false),
-            english: Cell::new(false),
+            locale: Cell::new(UiLocale::ZhCn),
             hover: Cell::new(false),
             pressed: Cell::new(false),
             close_pressed: Cell::new(false),
@@ -848,7 +840,7 @@ unsafe fn update(
     enabled: bool,
     mode: CaptionMode,
     progress: Option<u32>,
-    english: bool,
+    locale: UiLocale,
 ) {
     // SAFETY: Called on the owning UI thread; subclass state lives until WM_NCDESTROY.
     unsafe {
@@ -861,7 +853,7 @@ unsafe fn update(
             && action.enabled.get() == enabled
             && action.mode.get() == mode
             && action.progress.get() == progress
-            && action.english.get() == english
+            && action.locale.get() == locale
         {
             return;
         }
@@ -869,8 +861,8 @@ unsafe fn update(
         action.enabled.set(enabled);
         action.mode.set(mode);
         action.progress.set(progress);
-        action.english.set(english);
-        let label = caption_label(mode, progress, english);
+        action.locale.set(locale);
+        let label = caption_label(mode, progress, locale);
         let label: Vec<u16> = label.encode_utf16().chain(Some(0)).collect();
         let _ = SetWindowTextW(action.button.get(), windows::core::PCWSTR(label.as_ptr()));
         if !visible {
@@ -920,6 +912,7 @@ pub async fn set_update_caption(
     progress: Option<u32>,
     version: Option<String>,
     english: Option<bool>,
+    locale: Option<String>,
 ) -> Result<(), String> {
     if window.label() != "main" {
         return Err("请在主窗口管理软件更新".into());
@@ -979,7 +972,7 @@ pub async fn set_update_caption(
                 enabled,
                 mode,
                 progress,
-                english.unwrap_or(false),
+                UiLocale::resolve(locale.as_deref(), english),
             );
         }
         Ok(())

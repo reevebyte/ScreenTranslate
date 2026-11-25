@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { HTMLButtonAttributes } from 'svelte/elements';
   import type { Snippet } from 'svelte';
-  import { cn } from '$lib/utils';
+  import { cn } from '$lib/cn';
   import { Button as ShadcnButton } from './button/index';
   let { variant = 'default', size = 'default', class: className, children, ...rest }:
     HTMLButtonAttributes & { variant?: 'default' | 'secondary' | 'ghost' | 'outline' | 'danger'; size?: 'default' | 'sm' | 'icon'; children?: Snippet } = $props();

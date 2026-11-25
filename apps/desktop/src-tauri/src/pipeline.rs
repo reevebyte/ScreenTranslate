@@ -527,7 +527,11 @@ pub fn retranslate_block(app: AppHandle, id: String, text: String, target: Strin
                 .map(|b| b.translation.as_str())
                 .collect::<Vec<_>>()
                 .join("\n\n");
-            let final_error = error.or_else(|| render_result.err());
+            let final_error = error.or_else(|| {
+                render_result
+                    .err()
+                    .filter(|e| e.code != ErrorCode::Cancelled)
+            });
             let other_blocks_running = state.jobs.has_running_prefix("block:");
             if let Some(err) = final_error {
                 sessions.visual.job.stage = JobStage::Error;

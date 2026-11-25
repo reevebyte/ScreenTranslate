@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t, uiLocale, setLocale } from '$lib/i18n.svelte';
+  import { t, uiLocale, uiLocaleOptions, setLocale } from '$lib/i18n.svelte';
   import ActiveIndicator from '$lib/components/ui/active-indicator.svelte';
   import { Tabs, Dialog } from 'bits-ui';
   import { onDestroy, untrack } from 'svelte';
@@ -88,7 +88,7 @@
     <Tabs.List class="settings-tab-list" aria-label={t("设置分类")}><ActiveIndicator/>{#each tabs as [value,label]}<Tabs.Trigger {value} class="settings-tab">{label}</Tabs.Trigger>{/each}</Tabs.List>
     <Tabs.Content value="general" class="settings-panel">
       <div class="preference-card">
-        <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><Globe size={16}/></span><label for="ui-language">{t("界面语言")}</label></div><Choice id="ui-language" class="field compact-field" label={t("界面语言")} value={uiLocale.current} options={[["zh-CN",t("简体中文")],["en","English"]]} onchange={setLocale}/></div>
+        <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><Globe size={16}/></span><label for="ui-language">{t("界面语言")}</label></div><Choice id="ui-language" class="field compact-field" label={t("界面语言")} value={uiLocale.current} options={uiLocaleOptions} onchange={setLocale}/></div>
         <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><Languages size={16}/></span><label for="auto-translate">{t("输入后自动翻译")}</label></div><Switch id="auto-translate" bind:checked={draft.autoTranslate}/></div>
         <div class="setting-row setting-row-pair"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><ArrowRightLeft size={16}/></span><span id="smart-pair-label">{t("智能互译")}</span></div><div class="smart-lang-pair" role="group" aria-labelledby="smart-pair-label"><Choice id="primary-target" class="field smart-lang-choice" label={t("第一语言")} value={draft.primaryTarget} options={concreteLanguages} onchange={setPrimaryTarget}/><button type="button" class="smart-lang-swap" aria-label={t("互换语言")} title={t("互换语言")} onclick={swapSmartTargets}><ArrowRightLeft size={15}/></button><Choice id="secondary-target" class="field smart-lang-choice" label={t("第二语言")} value={draft.secondaryTarget} options={concreteLanguages} onchange={setSecondaryTarget}/></div></div>
         <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><PanelTop size={16}/></span><label for="close-tray">{t("关闭后收起到托盘")}</label></div><Switch id="close-tray" bind:checked={draft.appearance.closeToTray} disabled={!app.data?.capabilities.tray} title={app.data?.capabilities.tray ? undefined : t("系统托盘不可用")}/></div>
