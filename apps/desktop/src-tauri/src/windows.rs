@@ -34,6 +34,7 @@ pub struct WindowLifecycle {
     ready: HashSet<String>,
     pending: HashSet<String>,
     painted: HashSet<String>,
+    cloaked: HashSet<String>,
     // Selection windows waiting to paint a cleared frame before hiding.
     retiring: HashMap<String, u64>,
     next_retire: u64,
@@ -70,8 +71,30 @@ impl WindowLifecycle {
         self.ready.remove(label);
         self.pending.remove(label);
         self.painted.remove(label);
+        self.cloaked.remove(label);
         self.retiring.remove(label);
     }
+}
+
+/// Upper bound for a cloaked Windows selection window to paint its first frame.
+#[cfg(windows)]
+const SELECTION_CLOAK_TIMEOUT: Duration = Duration::from_millis(250);
+
+fn set_cloak(window: &tauri::WebviewWindow, cloaked: bool) {
+    #[cfg(windows)]
+    if let Ok(handle) = window.hwnd() {
+        use windows::Win32::Graphics::Dwm::{DWMWA_CLOAK, DwmSetWindowAttribute};
+        let value = i32::from(cloaked);
+        unsafe {
+            let _ = DwmSetWindowAttribute(
+                windows::Win32::Foundation::HWND(handle.0),
+                DWMWA_CLOAK,
+                &value as *const _ as _,
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
+    }
+    let _ = (window, cloaked);
 }
 
 fn reveal(window: &tauri::WebviewWindow) -> Result<()> {
@@ -97,12 +120,50 @@ fn reveal(window: &tauri::WebviewWindow) -> Result<()> {
             });
         }
     }
+    let cloak_selection = cfg!(windows) && window.label().starts_with("selection-");
+    if cloak_selection {
+        // Keep the Windows selection overlay visually cloaked while WebView2
+        // wakes from hidden/idle state and commits its first 1:1 DirectComposition
+        // frame; `selection_presented` (or the bounded fallback below) uncloaks it.
+        lock(&window.state::<AppState>().window_lifecycle)
+            .cloaked
+            .insert(window.label().into());
+        set_cloak(window, true);
+    }
     window.show().map_err(|_| window_error())?;
+    #[cfg(windows)]
+    if cloak_selection {
+        let app = window.app_handle().clone();
+        let label = window.label().to_owned();
+        let frame_id = lock(&app.state::<AppState>().selections)
+            .get(&label)
+            .cloned();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(SELECTION_CLOAK_TIMEOUT).await;
+            let should_uncloak = {
+                let state = app.state::<AppState>();
+                frame_id.is_some()
+                    && lock(&state.selections).get(&label) == frame_id.as_ref()
+                    && lock(&state.window_lifecycle).cloaked.remove(&label)
+            };
+            if should_uncloak
+                && let Some(overlay) = app.get_webview_window(&label)
+                && overlay.is_visible().unwrap_or(false)
+            {
+                flush_compositor();
+                set_cloak(&overlay, false);
+                if contains_cursor(&overlay) {
+                    let _ = overlay.set_focus();
+                }
+            }
+        });
+    }
     #[cfg(target_os = "linux")]
     if window.label() == "result-tools" {
         crate::result_tools::realign_after_show(window.app_handle());
     }
-    if window.label() != "result-tools"
+    if !cloak_selection
+        && window.label() != "result-tools"
         && (!window.label().starts_with("selection-") || contains_cursor(window))
     {
         let _ = window.set_focus();
@@ -195,6 +256,19 @@ pub fn selection_presented(window: &tauri::WebviewWindow) {
     };
     if all_painted {
         flush_compositor();
+        #[cfg(windows)]
+        {
+            let app = window.app_handle();
+            for label in &labels {
+                lock(&state.window_lifecycle).cloaked.remove(label);
+                if let Some(overlay) = app.get_webview_window(label) {
+                    set_cloak(&overlay, false);
+                    if contains_cursor(&overlay) {
+                        let _ = overlay.set_focus();
+                    }
+                }
+            }
+        }
     }
     #[cfg(target_os = "linux")]
     {
@@ -741,6 +815,42 @@ fn place_result(
     Ok(layout)
 }
 
+#[cfg(windows)]
+fn place_selection_windows(
+    window: &tauri::WebviewWindow,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+) -> Result<()> {
+    use windows::Win32::UI::WindowsAndMessaging::{SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos};
+    let same = window
+        .outer_position()
+        .ok()
+        .is_some_and(|p| p.x == x && p.y == y)
+        && window
+            .inner_size()
+            .ok()
+            .is_some_and(|s| s.width as i32 == w && s.height as i32 == h);
+    if same {
+        return Ok(());
+    }
+    let handle = window.hwnd().map_err(|_| window_error())?;
+    unsafe {
+        SetWindowPos(
+            windows::Win32::Foundation::HWND(handle.0),
+            None,
+            x,
+            y,
+            w,
+            h,
+            SWP_NOACTIVATE | SWP_NOZORDER,
+        )
+        .map_err(|_| window_error())?;
+    }
+    Ok(())
+}
+
 fn place_on_desktop(
     window: &tauri::WebviewWindow,
     bounds: Rect,
@@ -754,7 +864,19 @@ fn place_on_desktop(
         let _ = window.set_position(tauri::LogicalPosition::new(bounds.x, bounds.y));
         let _ = frame;
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        let w = frame.width.max(120) as i32;
+        let h = frame.height.max(80) as i32;
+        place_selection_windows(
+            window,
+            bounds.x.round() as i32,
+            bounds.y.round() as i32,
+            w,
+            h,
+        )?;
+    }
+    #[cfg(all(not(target_os = "macos"), not(windows)))]
     {
         let w = frame.width.max(120);
         let h = frame.height.max(80);
@@ -838,23 +960,45 @@ pub(crate) fn tune_linux_webview(window: &tauri::WebviewWindow) {
     });
 }
 
-fn selection_window(app: &AppHandle, label: &str) -> Result<tauri::WebviewWindow> {
+fn selection_window(
+    app: &AppHandle,
+    label: &str,
+    initial_bounds: Option<(Rect, f64)>,
+) -> Result<tauri::WebviewWindow> {
     let theme = lock(&app.state::<AppState>().config).appearance.theme;
     let theme_name = match theme {
         screentrans_core::config::Theme::Dark => "dark",
         screentrans_core::config::Theme::Light => "light",
         screentrans_core::config::Theme::System => "system",
     };
-    let window = builder(app, label, &format!("selection&theme={theme_name}"))
+    let mut win_builder = builder(app, label, &format!("selection&theme={theme_name}"))
         .decorations(false)
         .transparent(true)
         .shadow(false)
         .resizable(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        .accept_first_mouse(true)
-        .build()
-        .map_err(|_| window_error())?;
+        .accept_first_mouse(true);
+    if let Some((bounds, scale)) = initial_bounds {
+        let scale = scale.max(1.0);
+        let logical_w = (bounds.width / scale).max(120.0);
+        let logical_h = (bounds.height / scale).max(80.0);
+        win_builder = win_builder
+            .position(bounds.x / scale, bounds.y / scale)
+            .inner_size(logical_w, logical_h);
+    }
+    let window = win_builder.build().map_err(|_| window_error())?;
+    disable_transitions(&window);
+    #[cfg(windows)]
+    if let Some((bounds, _)) = initial_bounds {
+        let _ = place_selection_windows(
+            &window,
+            bounds.x.round() as i32,
+            bounds.y.round() as i32,
+            bounds.width.round().max(120.0) as i32,
+            bounds.height.round().max(80.0) as i32,
+        );
+    }
     #[cfg(target_os = "linux")]
     tune_linux_webview(&window);
     #[cfg(target_os = "macos")]
@@ -876,7 +1020,14 @@ pub fn prewarm_selection(app: &AppHandle) {
     let _ = app;
     #[cfg(windows)]
     if app.get_webview_window("selection-0").is_none() {
-        let _ = selection_window(app, "selection-0");
+        let initial = SystemCapture.monitors().ok().and_then(|monitors| {
+            monitors
+                .iter()
+                .find(|monitor| monitor.primary)
+                .or_else(|| monitors.first())
+                .map(|monitor| (monitor.bounds, monitor.scale_factor.max(1.0)))
+        });
+        let _ = selection_window(app, "selection-0", initial);
     }
 }
 
@@ -1094,9 +1245,13 @@ fn retire_selections(app: &AppHandle, clear_first: bool) {
                     continue;
                 }
             }
-            lock(&app.state::<AppState>().window_lifecycle)
-                .retiring
-                .remove(&label);
+            {
+                let state = app.state::<AppState>();
+                let mut lifecycle = lock(&state.window_lifecycle);
+                lifecycle.retiring.remove(&label);
+                lifecycle.cloaked.remove(&label);
+            }
+            set_cloak(&window, false);
             let _ = window.hide();
         }
         #[cfg(not(windows))]
@@ -1112,8 +1267,17 @@ fn retire_selections(app: &AppHandle, clear_first: bool) {
 /// Hides a retiring selection window once it painted the cleared frame, or
 /// when the fallback timeout fires. Stale tokens are ignored.
 pub fn finish_selection_retire(app: &AppHandle, label: &str, token: u64) {
-    let finished = lock(&app.state::<AppState>().window_lifecycle).finish_retire(label, token);
+    let finished = {
+        let state = app.state::<AppState>();
+        let mut lifecycle = lock(&state.window_lifecycle);
+        let done = lifecycle.finish_retire(label, token);
+        if done {
+            lifecycle.cloaked.remove(label);
+        }
+        done
+    };
     if finished && let Some(window) = app.get_webview_window(label) {
+        set_cloak(&window, false);
         let _ = window.hide();
     }
 }
@@ -1702,15 +1866,24 @@ pub fn begin_capture_with_options(
                 let window = if let Some(window) = app.get_webview_window(&label) {
                     created_fresh = false;
                     lock(&state.window_lifecycle).forget(&label);
+                    // Place/resize the reused window BEFORE emitting the new
+                    // frame so WebView2 already has the monitor's geometry when
+                    // the image loads (prevents first-capture/post-sleep stretch).
+                    place_on_desktop(&window, bounds, &metadata)?;
                     // `emit` would broadcast to every monitor's overlay.
                     let _ = window.emit_to(label.as_str(), "selection-theme", theme_str);
                     let _ = window.emit_to(label.as_str(), "selection-frame", metadata.clone());
                     window
                 } else {
                     created_fresh = true;
-                    selection_window(&app, &label)?
+                    let window = selection_window(
+                        &app,
+                        &label,
+                        Some((bounds, metadata.scale_factor.max(1.0))),
+                    )?;
+                    place_on_desktop(&window, bounds, &metadata)?;
+                    window
                 };
-                place_on_desktop(&window, bounds, &metadata)?;
                 // GNOME keeps its top bar above ordinary always-on-top
                 // windows; a fullscreen overlay covers the whole monitor.
                 #[cfg(target_os = "linux")]
