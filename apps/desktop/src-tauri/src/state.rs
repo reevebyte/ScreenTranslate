@@ -167,7 +167,7 @@ impl AppState {
         }
     }
 
-    pub fn bootstrap(&self) -> Bootstrap {
+    pub fn bootstrap(&self, consume_warnings: bool) -> Bootstrap {
         let mut persistent_available = true;
         let mut has_secret = |name: &str| {
             if let Some(value) = self.vault.get_session(name) {
@@ -199,6 +199,11 @@ impl AppState {
             let sessions = lock(&self.sessions);
             (sessions.text.clone(), sessions.visual.clone())
         };
+        let warnings = if consume_warnings {
+            std::mem::take(&mut *lock(&self.warnings))
+        } else {
+            Vec::new()
+        };
         let monitors = SystemCapture.monitors().unwrap_or_default();
         Bootstrap {
             version: env!("CARGO_PKG_VERSION").into(),
@@ -208,7 +213,7 @@ impl AppState {
             text,
             visual,
             credentials,
-            warnings: lock(&self.warnings).clone(),
+            warnings,
             monitors,
             legacy_available: self.legacy_path.is_some(),
             updater_ready: !crate::updater::public_key().is_empty(),

@@ -24,15 +24,31 @@
   let compactReading = $derived(windowHeight < 300 || ((app.data?.config.appearance.fontScale ?? 1) > 1.2 && windowHeight < 380));
   $effect(() => { void compactReading; composing = false; });
   async function submit() {
-    if (!app.input.trim() || composing || app.data?.text.job.stage === 'translating') return;
+    if (!app.input.trim() || composing) return;
+    const stage = app.data?.text.job.stage;
+    if (stage === 'translating') {
+      if (compactReading) activePane = 'target';
+      return;
+    }
+    if (stage === 'complete' && app.data?.text.output) {
+      if (compactReading) activePane = 'target';
+      return;
+    }
     await translateNow();
     if (compactReading) activePane = 'target';
   }
 
   onMount(() => {
     textarea?.focus();
-    textarea?.setSelectionRange(0, 0);
-    void tick().then(() => { if (textarea && document.activeElement === textarea) { textarea.setSelectionRange(0, 0); textarea.scrollTop = 0; } });
+    if (textarea?.value) textarea.select();
+    else textarea?.setSelectionRange(0, 0);
+    void tick().then(() => {
+      if (textarea && document.activeElement === textarea) {
+        if (textarea.value) textarea.select();
+        else textarea.setSelectionRange(0, 0);
+        textarea.scrollTop = 0;
+      }
+    });
     let stop: (() => void) | undefined;
     let disposed = false;
     if (desktop) {
@@ -109,7 +125,8 @@
   </div>
 {/snippet}
 {#snippet targetEditor()}
-  <div class="spotlight-output-wrap" aria-live="polite">
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <div class="spotlight-output-wrap" role="region" aria-label={t("译文")} aria-live="polite" tabindex={app.data?.text.output ? 0 : undefined}>
     {#if app.data?.text.output}<div class="quick-output-tools"><button class="spotlight-icon-btn" class:copied={copiedToast} aria-label={t("复制译文")} title={t("复制译文")} onclick={() => handleCopy(app.data!.text.output)}>{#if copiedToast}<Check size={15}/>{:else}<Copy size={15}/>{/if}</button></div>
       <div class="spotlight-result"><p class="spotlight-result-text">{app.data.text.output}</p></div>
     {:else if app.data?.text.job.error}<div class="spotlight-error"><span>{app.data.text.job.error.message}</span>{#if app.input.trim()}<button class="text-action" onclick={submit}>{t("重试")}</button>{/if}</div>

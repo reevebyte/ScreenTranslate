@@ -75,6 +75,20 @@ impl UiLocale {
         self as u8
     }
 
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::ZhCn => "zh-CN",
+            Self::ZhTw => "zh-TW",
+            Self::En => "en",
+            Self::Ja => "ja",
+            Self::Ko => "ko",
+            Self::Fr => "fr",
+            Self::De => "de",
+            Self::Es => "es",
+            Self::Ru => "ru",
+        }
+    }
+
     pub const fn tray_open_main(self) -> &'static str {
         match self {
             Self::ZhCn => "打开主窗口",
@@ -287,6 +301,7 @@ mod tests {
         for (code, expected) in cases {
             let parsed = UiLocale::from_code(code);
             assert_eq!(parsed, expected);
+            assert_eq!(UiLocale::from_code(parsed.code()), expected);
             assert_eq!(UiLocale::from_u8(parsed.as_u8()), expected);
             assert!(!parsed.tray_open_main().is_empty());
             assert!(!parsed.selection_drag().is_empty());

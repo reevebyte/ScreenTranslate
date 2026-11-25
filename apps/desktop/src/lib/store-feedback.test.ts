@@ -4,7 +4,7 @@ import { previewBootstrap } from './preview';
 const { call, loadBootstrap, toast } = vi.hoisted(() => ({
   call: vi.fn(),
   loadBootstrap: vi.fn(),
-  toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), dismiss: vi.fn() },
 }));
 vi.mock('./api', () => ({ desktop: true, call, loadBootstrap }));
 vi.mock('svelte-sonner', () => ({ toast }));

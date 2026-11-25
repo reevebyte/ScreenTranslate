@@ -125,6 +125,9 @@ import { onMount, onDestroy, tick } from 'svelte';
     void revealReady();
   }
   function cleanLoaded(event: Event) { cleanReady = (event.currentTarget as HTMLImageElement).dataset.frameId || ''; }
+  function syncCleanLoaded(node: HTMLImageElement) {
+    if (node.complete && node.naturalWidth > 0) cleanReady = node.dataset.frameId || '';
+  }
   onMount(() => {
     if (!floating || !desktop) return;
     const stops: (() => void)[] = [];
@@ -726,7 +729,7 @@ import { onMount, onDestroy, tick } from 'svelte';
         onerror={() => { imageError = true; void revealReady(); }}
       />
       <div class="floating-translation-layer" style:visibility={showOriginal || cleanReady !== frame.cleanId ? 'hidden' : 'visible'} style:clip-path={comparing && !showOriginal ? `inset(0 0 0 ${comparePosition}%)` : undefined}>
-        {#if frame.cleanId}<img class="floating-base-img" data-frame-id={frame.cleanId} src={frameUrl(frame.cleanId)} alt={t("清理后的截图")} draggable="false" onload={cleanLoaded}/>{/if}
+        {#if frame.cleanId}<img class="floating-base-img" data-frame-id={frame.cleanId} src={frameUrl(frame.cleanId)} alt={t("清理后的截图")} draggable="false" use:syncCleanLoaded onload={cleanLoaded} onerror={cleanLoaded}/>{/if}
         <div class="floating-blocks-layer" style:width={`${frame.width}px`} style:height={`${frame.height}px`} style:transform={`scale(${scaleX}, ${scaleY})`}>
           {#each session?.blocks.filter(block => block.translation) ?? [] as block (block.id)}
             {@const fitted = fitOverlayText(block.translation, block.bounds.width, block.bounds.height, sourceFontSize(block))}

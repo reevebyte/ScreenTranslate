@@ -127,6 +127,7 @@ pub fn window_destroyed(window: &tauri::Window) {
     if window.label() == "result" {
         *lock(&state.result_resize) = None;
     }
+    lock(&state.dirty_windows).remove(window.label());
     // Windows also destroys the owned toolbar when its image owner is reaped.
     lock(&state.window_lifecycle).forget(window.label());
 }
@@ -163,6 +164,9 @@ pub fn window_ready(window: &tauri::WebviewWindow, frame_id: Option<&str>) -> Re
     }
     if pending {
         reveal(window)?;
+        if window.label() == "quick" {
+            let _ = window.emit("focus-input", ());
+        }
     }
     Ok(())
 }
@@ -1640,7 +1644,8 @@ pub fn begin_capture_with_options(
                     // so cancelling this capture leaves that result intact.
                     protected.extend(previous.clean_id.clone());
                 }
-                let metadata = match lock(&state.frames).insert_prepared(prepared, &protected) {
+                let insert_result = lock(&state.frames).insert_prepared(prepared, &protected);
+                let metadata = match insert_result {
                     Ok(metadata) => metadata,
                     Err(err) => {
                         for (_, meta) in &captures {
@@ -1816,7 +1821,8 @@ pub fn accept_selection(app: &AppHandle, label: &str, rect: Rect) -> Result<()> 
     if !state.jobs.is_current("capture", &ticket) {
         return Ok(());
     }
-    let metadata = match lock(&state.frames).insert_prepared(prepared, &[]) {
+    let insert_result = lock(&state.frames).insert_prepared(prepared, &[]);
+    let metadata = match insert_result {
         Ok(metadata) => metadata,
         Err(err) => {
             cancel_capture(app, true);

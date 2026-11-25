@@ -301,6 +301,14 @@ pub fn spawn_background_checks(app: AppHandle) {
 }
 
 #[tauri::command]
+pub async fn pending_update(app: AppHandle, window: WebviewWindow) -> Result<serde_json::Value> {
+    authorize(window.label())?;
+    let state = app.state::<PendingUpdate>();
+    let pending = state.0.lock().await;
+    Ok(info(&pending))
+}
+
+#[tauri::command]
 pub async fn check_update(app: AppHandle, window: WebviewWindow) -> Result<serde_json::Value> {
     authorize(window.label())?;
     perform_check(&app).await
@@ -374,8 +382,12 @@ pub async fn download_update(app: AppHandle, window: WebviewWindow, version: Str
             .is_some_and(|current| current.version == version)
         {
             pending.bytes = Some(bytes);
+            return Ok(());
         }
-        return Ok(());
+        return Err(AppError::new(
+            ErrorCode::InvalidInput,
+            "更新版本已变化，请重新检查",
+        ));
     }
     Err(last_error.as_ref().map(download_error).unwrap_or_else(|| {
         AppError::new(ErrorCode::Network, "更新下载失败，请检查网络或代理后重试")

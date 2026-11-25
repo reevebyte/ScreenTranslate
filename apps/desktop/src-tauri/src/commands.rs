@@ -115,8 +115,8 @@ pub async fn selection_cleared(window: WebviewWindow, token: u64) -> Result<()> 
 }
 
 #[tauri::command]
-pub async fn bootstrap(app: AppHandle) -> Result<Bootstrap> {
-    Ok(app.state::<AppState>().bootstrap())
+pub async fn bootstrap(app: AppHandle, window: WebviewWindow) -> Result<Bootstrap> {
+    Ok(app.state::<AppState>().bootstrap(window.label() == "main"))
 }
 
 #[tauri::command]
@@ -725,6 +725,23 @@ pub async fn nudge_result(window: WebviewWindow, dx: i32, dy: i32) -> Result<()>
         .map_err(|_| AppError::new(ErrorCode::Internal, "无法移动结果窗口"))
 }
 
+fn text_translation_changed(old: &Config, new: &Config) -> bool {
+    new.provider != old.provider
+        || new.providers.get(&new.provider) != old.providers.get(&old.provider)
+        || new.source != old.source
+        || new.target != old.target
+        || new.primary_target != old.primary_target
+        || new.secondary_target != old.secondary_target
+}
+
+fn visual_ocr_changed(old: &Config, new: &Config) -> bool {
+    new.ocr.engine != old.ocr.engine
+        || new.ocr.languages != old.ocr.languages
+        || new.ocr.azure_endpoint != old.ocr.azure_endpoint
+        || new.ocr.upscale != old.ocr.upscale
+        || new.ocr.custom != old.ocr.custom
+}
+
 fn save_configuration(app: &AppHandle, config: Config) -> Result<()> {
     config.validate()?;
     let state = app.state::<AppState>();
@@ -760,25 +777,28 @@ fn save_configuration(app: &AppHandle, config: Config) -> Result<()> {
         }
         return Err(error);
     }
-    let translation_changed = config.provider != old.provider
-        || config.providers != old.providers
-        || config.source != old.source
-        || config.target != old.target
-        || config.primary_target != old.primary_target
-        || config.secondary_target != old.secondary_target
-        || config.ocr != old.ocr;
+    let text_changed = text_translation_changed(&old, &config);
+    let ocr_changed = visual_ocr_changed(&old, &config);
+    let mut cancelled_text = false;
+    let mut cancelled_visual = false;
     {
         let mut sessions = lock(&state.sessions);
-        if translation_changed {
+        if text_changed && state.jobs.is_running("text") {
             state.jobs.cancel("text");
-            state.jobs.cancel("visual");
-            state.jobs.cancel_prefix("block:");
             sessions.text.revision += 1;
-            sessions.visual.revision += 1;
             sessions.text.job.stage = JobStage::Cancelled;
             sessions.text.job.error = None;
+            cancelled_text = true;
+        }
+        if (text_changed || ocr_changed)
+            && (state.jobs.is_running("visual") || state.jobs.has_running_prefix("block:"))
+        {
+            state.jobs.cancel("visual");
+            state.jobs.cancel_prefix("block:");
+            sessions.visual.revision += 1;
             sessions.visual.job.stage = JobStage::Cancelled;
             sessions.visual.job.error = None;
+            cancelled_visual = true;
         }
         *lock(&state.config) = config.clone();
     }
@@ -793,8 +813,10 @@ fn save_configuration(app: &AppHandle, config: Config) -> Result<()> {
             let _ = handle.emit_to("main", "local-ocr-status", rapid.status());
         });
     }
-    if translation_changed {
+    if cancelled_text {
         state.publish_text(app);
+    }
+    if cancelled_visual {
         state.publish_visual(app);
     }
     lock(&state.dirty_windows).remove("main");
@@ -824,6 +846,7 @@ pub async fn quit_app(app: AppHandle, window: WebviewWindow) -> Result<()> {
 
 #[tauri::command]
 pub async fn set_dirty(app: AppHandle, window: WebviewWindow, dirty: bool) -> Result<()> {
+    main_only(&window)?;
     let state = app.state::<AppState>();
     if dirty {
         lock(&state.dirty_windows).insert(window.label().into());
@@ -984,7 +1007,18 @@ pub async fn import_legacy_config(
 }
 
 #[tauri::command]
-pub async fn open_image(app: AppHandle, fixture_path: Option<String>) -> Result<()> {
+pub async fn open_image(
+    app: AppHandle,
+    window: WebviewWindow,
+    fixture_path: Option<String>,
+) -> Result<()> {
+    main_only(&window)?;
+    if app.state::<AppState>().jobs.is_running("capture") {
+        return Err(AppError::new(
+            ErrorCode::InvalidInput,
+            "请先完成或取消当前截图",
+        ));
+    }
     // File-picker bypass exists only in the isolated test build.
     let fixture = if cfg!(feature = "e2e") {
         fixture_path.map(std::path::PathBuf::from)
@@ -1146,4 +1180,50 @@ pub async fn unload_local_ocr_worker(
     let status = rapid.status();
     let _ = app.emit_to("main", "local-ocr-status", status.clone());
     Ok(status)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{text_translation_changed, visual_ocr_changed};
+    use screentrans_core::config::{Config, OcrEngine, ProviderId};
+
+    #[test]
+    fn inactive_provider_and_idle_unload_changes_do_not_invalidate_active_work() {
+        let base = Config::default();
+        assert_eq!(base.provider, ProviderId::GoogleFree);
+
+        // Editing an inactive provider's model/URL must not cancel active translations.
+        let mut edit_inactive = base.clone();
+        edit_inactive
+            .providers
+            .get_mut(&ProviderId::Openai)
+            .unwrap()
+            .model = "gpt-4o-mini".into();
+        assert!(!text_translation_changed(&base, &edit_inactive));
+        assert!(!visual_ocr_changed(&base, &edit_inactive));
+
+        // Changing RapidOCR idle unload timer must not cancel active OCR or text translation.
+        let mut edit_unload = base.clone();
+        edit_unload.ocr.rapid.idle_unload_secs = 60;
+        assert!(!text_translation_changed(&base, &edit_unload));
+        assert!(!visual_ocr_changed(&base, &edit_unload));
+
+        // Changing OCR engine affects only visual OCR, never text translation.
+        let mut edit_ocr = base.clone();
+        edit_ocr.ocr.engine = OcrEngine::Rapid;
+        assert!(!text_translation_changed(&base, &edit_ocr));
+        assert!(visual_ocr_changed(&base, &edit_ocr));
+
+        // Changing the active provider or its settings invalidates text translation.
+        let mut edit_active = base.clone();
+        edit_active.provider = ProviderId::Openai;
+        assert!(text_translation_changed(&base, &edit_active));
+        let mut edit_active_model = edit_active.clone();
+        edit_active_model
+            .providers
+            .get_mut(&ProviderId::Openai)
+            .unwrap()
+            .model = "gpt-4.1".into();
+        assert!(text_translation_changed(&edit_active, &edit_active_model));
+    }
 }

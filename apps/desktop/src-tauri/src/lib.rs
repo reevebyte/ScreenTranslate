@@ -200,10 +200,12 @@ pub fn run() {
             commands::cancel_local_ocr_download,
             commands::remove_local_ocr,
             commands::unload_local_ocr_worker,
+            updater::pending_update,
             updater::check_update,
             updater::download_update,
             updater::install_update,
             update_ui::set_tray_update,
+            update_ui::set_ui_locale,
             update_ui::take_update_request,
             set_update_caption,
         ])

@@ -141,3 +141,23 @@ it('keeps existing automatic check timer on repeated enabled calls and unlocks i
  await vi.advanceTimersByTimeAsync(3_000);
  expect(updates.stage).toBe('ready');
 });
+it('hydrates pending/downloaded update state on main recreation and surfaces tray re-check errors',async()=>{
+ call.mockImplementation(async (command: string) => {
+  if (command === 'pending_update') return { available: true, version: '2.0.51', notes: 'notes', downloaded: true };
+  return undefined;
+ });
+ const stop = initializeUpdates();
+ await vi.waitFor(() => expect(updates.connected).toBe(true));
+ expect(updates.version).toBe('2.0.51');
+ expect(updates.stage).toBe('ready');
+ expect(updates.progress).toBe(100);
+ stop();
+
+ Object.assign(updates, { stage: 'idle', version: '', notes: '', progress: null, error: '' });
+ call.mockReset()
+  .mockResolvedValueOnce('tray')
+  .mockRejectedValueOnce({ code: 'network', message: '无法检查更新，请稍后重试' });
+ await consumeUpdateRequest();
+ expect(updates.stage).toBe('error');
+ expect(updates.error).toBeTruthy();
+});

@@ -1,5 +1,5 @@
-import { isTauri } from '@tauri-apps/api/core';
-import { emit, listen } from '@tauri-apps/api/event';
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 export type UiLocale = 'zh-CN' | 'zh-TW' | 'en' | 'ja' | 'ko' | 'fr' | 'de' | 'es' | 'ru';
 
@@ -101,7 +101,7 @@ export function setLocale(value: string): Promise<void> {
   const language = normalizeLocale(value);
   const loaded = apply(language);
   try { localStorage.setItem(STORAGE_KEY, language); } catch { /* Storage may be unavailable. */ }
-  if (isTauri()) void emit('ui-locale-changed', { language }).catch(() => {});
+  if (isTauri()) void invoke('set_ui_locale', { locale: language }).catch(() => {});
   return loaded;
 }
 

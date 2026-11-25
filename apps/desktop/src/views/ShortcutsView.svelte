@@ -3,7 +3,7 @@
   import { onDestroy, untrack } from 'svelte';
   import { toast } from 'svelte-sonner';
   import { ScanLine, PanelTop, Languages, ArrowRight } from '$lib/icons';
-  import { app, previewConfig, restoreSavedConfig, saveConfig, act, registerFlush } from '$lib/store.svelte';
+  import { app, restoreSavedConfig, saveConfig, act, registerFlush } from '$lib/store.svelte';
   import { call } from '$lib/api';
   import { createAutosave } from '$lib/autosave';
   import { formatHotkeyParts } from '$lib/utils';
@@ -26,7 +26,7 @@
     conflictTimers[key] = setTimeout(() => { conflict[key] = false; }, 4500);
   }
   const writer = createAutosave<Config>(async value => {
-    const ok = await saveConfig(value, { quiet: true });
+    const ok = await saveConfig(value, { quiet: true, suppressHotkeyNotice: true });
     if (ok) { saved = structuredClone(value.hotkeys); return true; }
     if (app.configErrorAction === 'hotkeys') {
       const changed = (Object.keys(saved) as HotkeyName[]).filter(name => value.hotkeys[name] !== saved[name]);
@@ -53,7 +53,7 @@
     return false;
   });
   const actions = $derived([ ['capture',t("框选翻译"),ScanLine,'begin_capture'], ['toggle',t("收起 / 显示"),PanelTop,'toggle_result'], ['quick',t("快速文字翻译"),Languages,'toggle_quick'] ] as const);
-  function queue() { const json = JSON.stringify(draft); if (json === last) return; last = json; const value = structuredClone($state.snapshot(draft)); previewConfig(value); writer.schedule(value); }
+  function queue() { const json = JSON.stringify(draft); if (json === last) return; last = json; const value = structuredClone($state.snapshot(draft)); writer.schedule(value); }
   $effect(() => { JSON.stringify(draft); untrack(queue); });
   const stopFlush = registerFlush(() => { queue(); return writer.flush(); });
   onDestroy(() => { destroyed = true; stopFlush(); Object.values(conflictTimers).forEach(clearTimeout); queue(); void writer.flush(); });

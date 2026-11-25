@@ -136,7 +136,7 @@ export async function consumeUpdateRequest() {
     const source = await call<string|null>('take_update_request');
     if (!source) return;
     // Wait for a check that is already running; otherwise this click would be lost.
-    if (!updates.version) await (inflightCheck ?? checkUpdate());
+    if (!updates.version) await (inflightCheck ?? checkUpdate(true));
     if (updateBlockReason()) { updates.error=updateBlockReason(); app.route='settings';app.settingsTab='about';return; }
     if (source === 'tray') {
       app.route = 'settings';
@@ -176,6 +176,13 @@ export function initializeUpdates() {
     }),
     subscribe('app-update-requested',()=>{void consumeUpdateRequest();}),
     subscribe<string>('app-update-caption-dismissed',({payload})=>{if(payload===updates.version)updates.dismissed=payload;}),
+    call<Info>('pending_update').then(result => {
+      if (disposed || !result?.available || !result.version || updates.version) return;
+      updates.version = result.version;
+      updates.notes = result.notes ?? '';
+      updates.stage = result.downloaded ? 'ready' : 'available';
+      updates.progress = result.downloaded ? 100 : null;
+    }).catch(() => {}),
   ]).then(()=>{if(!disposed)updates.connected=true;}).catch(()=>{});
   return ()=>{ disposed = true; updates.connected=false; autoEnabled=false; autoRetried=false; clearTimeout(timer); clearTimeout(noticeTimer); clearTimeout(installFallbackTimer); installFallbackTimer=undefined; cleanup.splice(0).forEach(fn=>fn()); };
 }

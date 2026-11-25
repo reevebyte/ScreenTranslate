@@ -174,7 +174,7 @@ function showWarning(message: string) {
   toast.warning(t(message));
 }
 
-export async function saveConfig(config: Config, options: { quiet?: boolean } = {}): Promise<boolean> {
+export async function saveConfig(config: Config, options: { quiet?: boolean; suppressHotkeyNotice?: boolean } = {}): Promise<boolean> {
   const snapshot = structuredClone($state.snapshot(config));
   const intent = ++configIntent;
   configWrites++;
@@ -191,7 +191,7 @@ export async function saveConfig(config: Config, options: { quiet?: boolean } = 
         app.configErrorRaw = '';
         app.configErrorAction = '';
         failedConfig = undefined;
-        if (saveNoticeShown) { saveNoticeShown = false; toast.dismiss(SAVE_NOTICE); }
+        if (saveNoticeShown) { saveNoticeShown = false; toast.dismiss?.(SAVE_NOTICE); }
         app.configPending = false;
         applyAppearance(saved);
       }
@@ -202,8 +202,8 @@ export async function saveConfig(config: Config, options: { quiet?: boolean } = 
         app.configErrorRaw = error && typeof error === 'object' && 'message' in error ? String(error.message) : typeof error === 'string' ? error : '';
         app.configErrorAction = (error && typeof error === 'object' && 'action' in error && typeof error.action === 'string') ? error.action : '';
         failedConfig = snapshot;
-        // Hotkey conflicts are announced by the shortcuts page with the key that failed.
-        if (app.configErrorAction !== 'hotkeys') showSaveFailure(app.configError);
+        // ShortcutsView announces hotkey conflicts with the specific failing key.
+        if (!(options.suppressHotkeyNotice && app.configErrorAction === 'hotkeys')) showSaveFailure(app.configError);
       } else if (!options.quiet) toast.error(errorMessage(error));
       return false;
     } finally {

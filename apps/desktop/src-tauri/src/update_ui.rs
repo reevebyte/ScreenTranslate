@@ -193,6 +193,24 @@ pub async fn set_tray_update(
     apply_tray(&app, text, enabled, resolved).await
 }
 
+#[tauri::command]
+pub async fn set_ui_locale(
+    app: AppHandle,
+    window: WebviewWindow,
+    locale: String,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("请在主窗口切换界面语言".into());
+    }
+    let resolved = UiLocale::from_code(&locale);
+    app.state::<UpdateUi>().set_locale(resolved);
+    let _ = app.emit(
+        "ui-locale-changed",
+        serde_json::json!({ "language": resolved.code() }),
+    );
+    Ok(())
+}
+
 #[cfg(not(windows))]
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]

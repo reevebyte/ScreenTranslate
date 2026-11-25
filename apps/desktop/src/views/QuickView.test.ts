@@ -105,3 +105,17 @@ it('returns to the source and focuses it when the native focus-input event reope
     expect(input.selectionEnd).toBe(input.value.length);
   });
 });
+
+it('switches to target tab on Enter in compact mode without re-translating when translating or complete', async () => {
+  vi.stubGlobal('innerHeight', 260);
+  app.data!.config.appearance.fontScale = 1.5;
+  app.data!.text.job.stage = 'translating';
+  app.data!.text.output = '';
+  const view = render(QuickView);
+  const input = view.getByLabelText('快速翻译输入') as HTMLTextAreaElement;
+  expect(input.selectionStart).toBe(0);
+  expect(input.selectionEnd).toBe(input.value.length);
+  await fireEvent.keyDown(input, { key: 'Enter' });
+  await waitFor(() => expect(view.getByRole('tabpanel', { name: '译文' })).toBeTruthy());
+  expect(call).not.toHaveBeenCalledWith('translate_text', expect.anything());
+});
