@@ -79,7 +79,7 @@ search: string, };
 
 export type Appearance = { theme: Theme, accent: string, fontScale: number, autoCopy: boolean, closeToTray: boolean, };
 
-export type Config = { schemaVersion: number, onboardingComplete: boolean, autoUpdate: boolean, provider: ProviderId, providers: { [key in ProviderId]?: ProviderConfig }, source: string, target: string, chineseTarget: string, autoTranslate: boolean, autostart: boolean, waylandShortcuts: boolean, ocr: OcrConfig, hotkeys: Hotkeys, appearance: Appearance, };
+export type Config = { schemaVersion: number, onboardingComplete: boolean, autoUpdate: boolean, provider: ProviderId, providers: { [key in ProviderId]?: ProviderConfig }, source: string, target: string, primaryTarget: string, secondaryTarget: string, autoTranslate: boolean, autostart: boolean, waylandShortcuts: boolean, ocr: OcrConfig, hotkeys: Hotkeys, appearance: Appearance, };
 
 export type Bootstrap = { version: string, initialRoute: string, config: Config, capabilities: PlatformCapabilities, text: TranslationSession, visual: TranslationSession, credentials: { [key in string]: boolean }, warnings: Array<string>, monitors: Array<MonitorInfo>, legacyAvailable: boolean, updaterReady: boolean, };
 

@@ -761,7 +761,8 @@ fn save_configuration(app: &AppHandle, config: Config) -> Result<()> {
         || config.providers != old.providers
         || config.source != old.source
         || config.target != old.target
-        || config.chinese_target != old.chinese_target
+        || config.primary_target != old.primary_target
+        || config.secondary_target != old.secondary_target
         || config.ocr != old.ocr;
     {
         let mut sessions = lock(&state.sessions);

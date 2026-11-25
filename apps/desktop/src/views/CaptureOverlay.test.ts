@@ -87,35 +87,6 @@ describe('screenshot selection', () => {
     expect(view.container.querySelector('.capture-surface')!.children).toHaveLength(0);
   });
 
-  it('waits for viewport resize before signaling window_ready when overlay starts undersized', async () => {
-    let currentWidth = 800;
-    let currentHeight = 600;
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => currentWidth);
-    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(() => currentHeight);
-
-    const view = render(CaptureOverlay);
-    const img = await view.findByAltText('待框选的屏幕图像');
-    await fireEvent.load(img);
-    await new Promise(resolve => setTimeout(resolve, 20));
-    expect(call).not.toHaveBeenCalledWith('window_ready', { frameId: 'screen' });
-
-    currentWidth = 1000;
-    currentHeight = 600;
-    window.dispatchEvent(new Event('resize'));
-    await waitFor(() => expect(call).toHaveBeenCalledWith('window_ready', { frameId: 'screen' }));
-    await waitFor(() => expect(call).toHaveBeenCalledWith('selection_presented'));
-  });
-
-  it('falls back to signaling window_ready after timeout if viewport resize never arrives', async () => {
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
-    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
-
-    const view = render(CaptureOverlay);
-    const img = await view.findByAltText('待框选的屏幕图像');
-    await fireEvent.load(img);
-    await waitFor(() => expect(call).toHaveBeenCalledWith('window_ready', { frameId: 'screen' }), { timeout: 500 });
-  });
-
   it('lets the error banner return button cancel capture without pointer capture swallowing the click', async () => {
     const view = render(CaptureOverlay);
     const img = await view.findByAltText('待框选的屏幕图像');

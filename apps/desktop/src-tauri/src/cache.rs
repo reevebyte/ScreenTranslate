@@ -62,6 +62,35 @@ pub struct PreparedFrame {
 }
 
 impl FrameCache {
+    /// Prepares a fullscreen capture for selection. On Windows, the native Win32
+    /// selection overlay reads the raw `RgbaImage` directly, skipping the
+    /// multi-megabyte BMP preview encoding used only by WebView overlays.
+    pub fn prepare_selection(frame: CaptureFrame) -> Result<PreparedFrame> {
+        #[cfg(windows)]
+        {
+            if frame.image.width() == 0
+                || frame.image.height() == 0
+                || frame.image.as_raw().len() > CACHE_LIMIT
+            {
+                return Err(AppError::new(
+                    ErrorCode::InvalidInput,
+                    "图像过大或为空，请缩小截图范围",
+                ));
+            }
+            let cost = frame.image.as_raw().len();
+            Ok(PreparedFrame {
+                frame,
+                preview: Vec::new(),
+                preview_format: PreviewFormat::Bmp,
+                cost,
+            })
+        }
+        #[cfg(not(windows))]
+        {
+            Self::prepare(frame)
+        }
+    }
+
     pub fn prepare(frame: CaptureFrame) -> Result<PreparedFrame> {
         if frame.image.width() == 0
             || frame.image.height() == 0

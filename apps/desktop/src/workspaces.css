@@ -482,6 +482,50 @@
   max-width: 48%;
 }
 
+.setting-row-pair {
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+
+.setting-row-pair .setting-row-lead {
+  flex: 1 0 auto;
+}
+
+.smart-lang-pair {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.smart-lang-choice {
+  flex: 0 1 8.25rem;
+  width: 8.25rem;
+  min-width: 0;
+}
+
+.smart-lang-swap {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: max(28px, 2rem);
+  height: max(28px, 2rem);
+  border-radius: 50%;
+  color: var(--secondary);
+  transition: background-color var(--motion-fast), color var(--motion-fast), transform var(--motion-fast);
+}
+
+.smart-lang-swap:hover {
+  background: var(--surface-muted);
+  color: var(--foreground);
+}
+
+.smart-lang-swap:active {
+  transform: scale(0.96);
+}
+
 
 .appearance-themes {
   display: grid;

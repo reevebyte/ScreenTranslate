@@ -248,7 +248,8 @@ pub struct Config {
     pub providers: BTreeMap<ProviderId, ProviderConfig>,
     pub source: String,
     pub target: String,
-    pub chinese_target: String,
+    pub primary_target: String,
+    pub secondary_target: String,
     pub auto_translate: bool,
     pub autostart: bool,
     pub wayland_shortcuts: bool,
@@ -270,7 +271,8 @@ impl Default for Config {
                 .collect(),
             source: "auto".into(),
             target: "auto".into(),
-            chinese_target: "en".into(),
+            primary_target: "zh-Hans".into(),
+            secondary_target: "en".into(),
             auto_translate: true,
             autostart: false,
             wayland_shortcuts: false,
@@ -294,7 +296,9 @@ impl Config {
         }
         if !LANGUAGES.contains(&self.source.as_str())
             || !LANGUAGES.contains(&self.target.as_str())
-            || !LANGUAGES[2..].contains(&self.chinese_target.as_str())
+            || !LANGUAGES[1..].contains(&self.primary_target.as_str())
+            || !LANGUAGES[1..].contains(&self.secondary_target.as_str())
+            || self.primary_target == self.secondary_target
         {
             return Err(invalid("语言配置无效"));
         }
@@ -367,7 +371,17 @@ impl Config {
         if bytes.len() > 1_048_576 {
             return Err(AppError::new(ErrorCode::Configuration, "配置文件过大"));
         }
-        let mut config: Self = serde_json::from_slice(&bytes).map_err(|_| {
+        let mut raw: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| {
+            AppError::new(ErrorCode::Configuration, "配置文件格式损坏；原文件已保留")
+                .action("settings")
+        })?;
+        if let Some(object) = raw.as_object_mut()
+            && !object.contains_key("secondaryTarget")
+            && let Some(legacy_target) = object.get("chineseTarget").cloned()
+        {
+            object.insert("secondaryTarget".into(), legacy_target);
+        }
+        let mut config: Self = serde_json::from_value(raw).map_err(|_| {
             AppError::new(ErrorCode::Configuration, "配置文件格式损坏；原文件已保留")
                 .action("settings")
         })?;
@@ -539,7 +553,7 @@ pub fn import_legacy(bytes: &[u8]) -> Result<LegacyImport> {
         config.hotkeys.quick = v;
     }
     if let Some(v) = string("/lang/zh_target") {
-        config.chinese_target = v;
+        config.secondary_target = v;
     }
     if let Some(v) = root.get("autostart").and_then(|v| v.as_bool()) {
         config.autostart = v;
@@ -694,13 +708,40 @@ mod tests {
     fn legacy_migration_keeps_protected_secrets_separate() {
         let migration = import_legacy(br#"{"translator":{"provider":"openai","openai":{"base_url":"http://localhost:11434/v1","model":"local","key":"dpapi:v1:fixture"}},"lang":{"zh_target":"ja"}}"#).unwrap();
         assert_eq!(migration.config.provider, ProviderId::Openai);
-        assert_eq!(migration.config.chinese_target, "ja");
+        assert_eq!(migration.config.primary_target, "zh-Hans");
+        assert_eq!(migration.config.secondary_target, "ja");
         assert_eq!(migration.secrets["openai"], "dpapi:v1:fixture");
         assert!(
             !serde_json::to_string(&migration.config)
                 .unwrap()
                 .contains("fixture")
         );
+    }
+
+    #[test]
+    fn existing_chinese_target_config_migrates_to_bidirectional_pair() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.json");
+        let mut old = serde_json::to_value(Config::default()).unwrap();
+        let object = old.as_object_mut().unwrap();
+        object.remove("primaryTarget");
+        object.remove("secondaryTarget");
+        object.insert("chineseTarget".into(), serde_json::json!("ja"));
+        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+
+        let parsed = Config::load(&path).unwrap();
+        assert_eq!(parsed.primary_target, "zh-Hans");
+        assert_eq!(parsed.secondary_target, "ja");
+        assert!(parsed.validate().is_ok());
+
+        let mut same_pair = parsed.clone();
+        same_pair.secondary_target = same_pair.primary_target.clone();
+        assert!(same_pair.validate().is_err());
+
+        let mut non_chinese = parsed;
+        non_chinese.primary_target = "en".into();
+        non_chinese.secondary_target = "ja".into();
+        assert!(non_chinese.validate().is_ok());
     }
 
     #[test]

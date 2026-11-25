@@ -34,6 +34,20 @@
     return base;
   });
   let darkAppearance = $derived(draft.appearance.theme === 'dark' || (draft.appearance.theme === 'system' && typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches));
+  const concreteLanguages = $derived(languageOptions().filter(([code]) => code !== 'auto'));
+  function setPrimaryTarget(value: string) {
+    if (value === draft.secondaryTarget) draft.secondaryTarget = draft.primaryTarget;
+    draft.primaryTarget = value;
+  }
+  function setSecondaryTarget(value: string) {
+    if (value === draft.primaryTarget) draft.primaryTarget = draft.secondaryTarget;
+    draft.secondaryTarget = value;
+  }
+  function swapSmartTargets() {
+    const previous = draft.primaryTarget;
+    draft.primaryTarget = draft.secondaryTarget;
+    draft.secondaryTarget = previous;
+  }
   function fontStep(step: number) { draft.appearance.fontScale = Math.max(.8,Math.min(1.5,Math.round((draft.appearance.fontScale * 100 + step) / 5) * 5 / 100)); }
   function queueDraft() {
     const json = JSON.stringify(draft);
@@ -76,7 +90,7 @@
       <div class="preference-card">
         <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><Globe size={16}/></span><label for="ui-language">{t("界面语言")}</label></div><Choice id="ui-language" class="field compact-field" label={t("界面语言")} value={uiLocale.current} options={[["zh-CN",t("简体中文")],["en","English"]]} onchange={setLocale}/></div>
         <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><Languages size={16}/></span><label for="auto-translate">{t("输入后自动翻译")}</label></div><Switch id="auto-translate" bind:checked={draft.autoTranslate}/></div>
-        <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><ArrowRightLeft size={16}/></span><label for="chinese-target">{t("中文默认译为")}</label></div><Choice id="chinese-target" class="field compact-field" label={t("中文默认译为")} value={draft.chineseTarget} options={languageOptions().filter(([code]) => code !== 'auto' && code !== 'zh-Hans')} onchange={value => draft.chineseTarget = value}/></div>
+        <div class="setting-row setting-row-pair"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><ArrowRightLeft size={16}/></span><span id="smart-pair-label">{t("智能互译")}</span></div><div class="smart-lang-pair" role="group" aria-labelledby="smart-pair-label"><Choice id="primary-target" class="field smart-lang-choice" label={t("第一语言")} value={draft.primaryTarget} options={concreteLanguages} onchange={setPrimaryTarget}/><button type="button" class="smart-lang-swap" aria-label={t("互换语言")} title={t("互换语言")} onclick={swapSmartTargets}><ArrowRightLeft size={15}/></button><Choice id="secondary-target" class="field smart-lang-choice" label={t("第二语言")} value={draft.secondaryTarget} options={concreteLanguages} onchange={setSecondaryTarget}/></div></div>
         <div class="setting-row"><div class="setting-row-lead"><span class="setting-row-icon" aria-hidden="true"><PanelTop size={16}/></span><label for="close-tray">{t("关闭后收起到托盘")}</label></div><Switch id="close-tray" bind:checked={draft.appearance.closeToTray} disabled={!app.data?.capabilities.tray} title={app.data?.capabilities.tray ? undefined : t("系统托盘不可用")}/></div>
       </div>
       <section class="preference-group"><h3>{t("更多设置")}</h3>

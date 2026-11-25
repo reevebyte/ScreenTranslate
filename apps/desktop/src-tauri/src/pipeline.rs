@@ -76,7 +76,12 @@ pub fn schedule_text(app: AppHandle, delay: bool) {
         let session = lock(&state.sessions).text.clone();
         let result = async {
             let backend = translator(&state, &config)?;
-            let target = language::target_for(&input, &session.target, &config.chinese_target);
+            let target = language::target_for(
+                &input,
+                &session.target,
+                &config.primary_target,
+                &config.secondary_target,
+            );
             let response = backend
                 .translate(
                     TranslationRequest {
@@ -331,7 +336,8 @@ async fn run_visual(
             } else {
                 &block.target_language
             },
-            &config.chinese_target,
+            &config.primary_target,
+            &config.secondary_target,
         );
         groups.entry(target).or_default().push(TranslationItem {
             id: block.id,
@@ -439,7 +445,12 @@ pub fn retranslate_block(app: AppHandle, id: String, text: String, target: Strin
                 .translate(
                     TranslationRequest {
                         source: config.source.clone(),
-                        target: language::target_for(&text, &target, &config.chinese_target),
+                        target: language::target_for(
+                            &text,
+                            &target,
+                            &config.primary_target,
+                            &config.secondary_target,
+                        ),
                         items: vec![TranslationItem {
                             id: id.clone(),
                             text,

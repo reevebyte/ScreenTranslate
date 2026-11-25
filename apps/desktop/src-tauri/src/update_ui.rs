@@ -11,6 +11,7 @@ pub struct TrayItems {
 #[derive(Default)]
 pub struct UpdateUi {
     pub busy: std::sync::atomic::AtomicBool,
+    pub english: std::sync::atomic::AtomicBool,
     pub request: Mutex<Option<String>>,
     pub tray: Mutex<Option<TrayItems>>,
     #[cfg(target_os = "linux")]
@@ -105,6 +106,9 @@ pub async fn set_tray_update(
         matches!(stage.as_str(), "checking" | "downloading" | "installing"),
         std::sync::atomic::Ordering::Relaxed,
     );
+    app.state::<UpdateUi>()
+        .english
+        .store(english, std::sync::atomic::Ordering::Relaxed);
     let (text, enabled) = presentation(
         env!("CARGO_PKG_VERSION"),
         &stage,

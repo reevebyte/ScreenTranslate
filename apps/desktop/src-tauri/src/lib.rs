@@ -8,6 +8,8 @@ mod resize_outline;
 mod result_resize;
 mod result_toolbar;
 mod result_tools;
+#[cfg(any(windows, test))]
+mod selection_overlay;
 mod shortcuts;
 mod state;
 mod theme_preview;

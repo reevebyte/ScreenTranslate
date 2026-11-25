@@ -14,7 +14,6 @@
   let error = $state('');
   let submitting = $state(false);
   let surface: HTMLDivElement;
-  let bgImage = $state<HTMLImageElement | null>(null);
   let width = $state(0); let height = $state(0);
   let disposed = false;
   let frameVersion = 0;
@@ -101,59 +100,24 @@
   }
   function cancel() { void call('cancel_capture'); }
   function reset() { anchor = null; activePointerId = null; if (!submitting) selection = null; }
-  function viewportMatches(target: FrameMetadata) {
-    const scale = target.scaleFactor > 0 ? target.scaleFactor : (window.devicePixelRatio || 1);
-    const expectedW = target.width / scale;
-    const expectedH = target.height / scale;
-    const actualW = surface?.clientWidth || width || window.innerWidth;
-    const actualH = surface?.clientHeight || height || window.innerHeight;
-    return Math.abs(actualW - expectedW) <= 4 && Math.abs(actualH - expectedH) <= 4;
-  }
-  function waitForViewport(target: FrameMetadata, version: number, timeoutMs = 150) {
-    if (viewportMatches(target)) return Promise.resolve();
-    return new Promise<void>(resolve => {
-      let done = false;
-      const finish = () => {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        window.removeEventListener('resize', check);
-        resolve();
-      };
-      const check = () => {
-        if (disposed || frameVersion !== version || viewportMatches(target)) finish();
-      };
-      const timer = setTimeout(finish, timeoutMs);
-      window.addEventListener('resize', check);
-    });
-  }
   async function imageReady(frameId = frame?.id ?? null) {
     const version = frameVersion;
     await tick();
     if (disposed || frameVersion !== version || (frame?.id ?? null) !== frameId) return;
-    if (frameId && bgImage && typeof bgImage.decode === 'function') {
-      await bgImage.decode().catch(() => {});
-      if (disposed || frameVersion !== version || (frame?.id ?? null) !== frameId) return;
-    }
-    if (frame && frame.id === frameId) {
-      await waitForViewport(frame, version);
-      if (disposed || frameVersion !== version || (frame?.id ?? null) !== frameId) return;
-    }
     await call('window_ready', { frameId }).catch(() => {});
     if (disposed || frameVersion !== version || (frame?.id ?? null) !== frameId) return;
     await nextPaint();
     if (disposed || frameVersion !== version || (frame?.id ?? null) !== frameId) return;
-    await call('selection_presented').catch(() => {});
-    if (disposed || frameVersion !== version || (frame?.id ?? null) !== frameId) return;
     window.focus();
     surface?.focus();
+    void call('selection_presented').catch(() => {});
   }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="capture-surface" tabindex="-1" bind:this={surface} bind:clientWidth={width} bind:clientHeight={height} onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={reset} onlostpointercapture={() => { if (anchor) reset(); }} oncontextmenu={event => { event.preventDefault(); cancel(); }}>
   <!-- Without a frame the window is idle or retiring and must paint nothing. -->
-  {#if frame}{@const frameId = frame.id}<img class="capture-background" bind:this={bgImage} src={frameUrl(frameId)} alt={t("待框选的屏幕图像")} draggable="false" onload={() => imageReady(frameId)} onerror={() => { error = t("截图读取失败，请重新截图"); imageReady(frameId); }}/>
+  {#if frame}{@const frameId = frame.id}<img class="capture-background" src={frameUrl(frameId)} alt={t("待框选的屏幕图像")} draggable="false" onload={() => imageReady(frameId)} onerror={() => { error = t("截图读取失败，请重新截图"); imageReady(frameId); }}/>
   {#if selection && selection.width > 0}
     <div class="selection-rect" style:left={`${selection.x}px`} style:top={`${selection.y}px`} style:width={`${selection.width}px`} style:height={`${selection.height}px`}><span class="selection-dimensions">{Math.round(selection.width * (frame?.width ?? width) / width)} × {Math.round(selection.height * (frame?.height ?? height) / height)}</span><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i><i class="corner tm"></i><i class="corner rm"></i><i class="corner bm"></i><i class="corner lm"></i></div>
   {:else}<div class="capture-shade"></div>{/if}

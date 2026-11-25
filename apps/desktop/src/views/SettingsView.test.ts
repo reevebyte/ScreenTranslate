@@ -132,3 +132,16 @@ it('omits the ready status subtext below the restart-to-update button in About',
   }
 });
 
+it('swaps and saves the bidirectional smart translation language pair', async () => {
+  const view = render(SettingsView);
+  expect(view.getByRole('combobox', { name: '第一语言' }).textContent).toContain('简体中文');
+  expect(view.getByRole('combobox', { name: '第二语言' }).textContent).toContain('英语');
+  await fireEvent.click(view.getByRole('button', { name: '互换语言' }));
+  expect(view.getByRole('combobox', { name: '第一语言' }).textContent).toContain('英语');
+  expect(view.getByRole('combobox', { name: '第二语言' }).textContent).toContain('简体中文');
+  view.unmount();
+  await waitFor(() => expect(call).toHaveBeenCalledWith('save_config', {
+    config: expect.objectContaining({ primaryTarget: 'en', secondaryTarget: 'zh-Hans' }),
+  }));
+});
+
