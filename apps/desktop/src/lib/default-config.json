@@ -105,8 +105,7 @@
   "hotkeys": {
     "capture": "Ctrl+Alt+Q",
     "toggle": "Ctrl+Alt+W",
-    "quick": "Ctrl+Alt+Space",
-    "search": "Ctrl+Alt+K"
+    "quick": "Ctrl+Alt+Space"
   },
   "appearance": {
     "theme": "system",

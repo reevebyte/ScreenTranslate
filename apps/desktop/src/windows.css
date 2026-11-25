@@ -712,18 +712,6 @@
   background: var(--surface);
 }
 
-.spotlight-divider {
-  width: 1px;
-  height: 1.142857rem;
-  margin-inline: 2px;
-  background: var(--border);
-}
-
-.spotlight-actions .quick-translate {
-  gap: 6px;
-  padding-inline: 14px;
-}
-
 .spotlight-input-wrap {
   display: flex;
   flex: .75;
@@ -801,13 +789,16 @@
 }
 
 .spotlight-loading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--secondary);
+  color: var(--muted);
+  font-size: var(--text-reading);
+  line-height: 1.65;
 }
 
 .spotlight-error {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
   color: var(--danger);
   line-height: 1.6;
 }
@@ -855,7 +846,7 @@
   animation: overlay-arrive 120ms var(--ease);
 }
 
-.reading-dialog, .editor-dialog, .command-dialog, .welcome-dialog {
+.reading-dialog, .editor-dialog, .welcome-dialog {
   position: fixed;
   z-index: 51;
   top: 50%;
@@ -884,7 +875,7 @@
   align-self: flex-start;
 }
 
-.reading-dialog:focus-visible, .editor-dialog:focus-visible, .command-dialog:focus-visible, .welcome-dialog:focus-visible {
+.reading-dialog:focus-visible, .editor-dialog:focus-visible, .welcome-dialog:focus-visible {
   outline: none;
 }
 
@@ -916,79 +907,6 @@
   color: var(--secondary);
   margin-top: 10px;
   line-height: 1.6;
-}
-
-.command-dialog {
-  width: min(520px,calc(100vw - 32px));
-  overflow: hidden;
-}
-
-.command-search {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 16px;
-  border-bottom: 1px solid var(--border);
-}
-
-.command-input {
-  width: 100%;
-  min-width: 0;
-  min-height: var(--control-height);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  padding: 4px 6px;
-  font-size: var(--text-ui);
-}
-
-.command-list {
-  max-height: min(320px,calc(100vh - 150px));
-  overflow-y: auto;
-  padding: 8px;
-}
-
-.command-heading {
-  padding: 8px;
-  color: var(--muted);
-  font-size: var(--text-small);
-}
-
-.command-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  min-height: var(--control-height);
-  border-radius: var(--radius-pill);
-  font-size: var(--text-ui);
-  cursor: pointer;
-}
-
-.command-item[data-selected="true"], .command-item:hover {
-  background: var(--surface-muted);
-}
-
-.command-item small {
-  margin-left: auto;
-  color: var(--muted);
-  font-size: var(--text-small);
-}
-
-.command-empty {
-  padding: 20px;
-  color: var(--muted);
-  text-align: center;
-}
-
-.command-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border);
-  color: var(--muted);
-  font-size: var(--text-small);
 }
 
 .welcome-dialog {

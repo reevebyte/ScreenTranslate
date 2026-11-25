@@ -70,8 +70,6 @@ pub fn run() {
                 let _ = windows::toggle_quick(app);
             } else if arguments.iter().any(|arg| arg == "--toggle-result") {
                 let _ = windows::toggle_result(app);
-            } else if arguments.iter().any(|arg| arg == "--search") {
-                windows::open_search(app);
             } else {
                 let _ = windows::show_main(app);
             }
@@ -288,8 +286,6 @@ pub fn run() {
                 let _ = windows::toggle_quick(&handle);
             } else if arguments.iter().any(|arg| arg == "--toggle-result") {
                 let _ = windows::toggle_result(&handle);
-            } else if arguments.iter().any(|arg| arg == "--search") {
-                windows::open_search(&handle);
             } else if !background {
                 windows::show_main(&handle)?;
             } else {

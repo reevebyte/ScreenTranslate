@@ -12,7 +12,6 @@ export { default as PanelTop } from './components/icons/PanelTop.svelte';
 export { default as ImagePlus } from './components/icons/ImagePlus.svelte';
 export { default as ArrowRightLeft } from './components/icons/ArrowRightLeft.svelte';
 export { default as Copy } from './components/icons/Copy.svelte';
-export { default as CornerDownLeft } from './components/icons/CornerDownLeft.svelte';
 export { default as X } from './components/icons/X.svelte';
 export { default as ArrowUpRight } from './components/icons/ArrowUpRight.svelte';
 export { default as ArrowRight } from './components/icons/ArrowRight.svelte';

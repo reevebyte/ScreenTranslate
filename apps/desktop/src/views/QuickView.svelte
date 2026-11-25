@@ -3,8 +3,6 @@
   import {
     Copy,
     X,
-    CornerDownLeft,
-    LoaderCircle,
     Check
   } from '$lib/icons';
   import { onMount, onDestroy, tick } from 'svelte';
@@ -17,7 +15,6 @@
   import { providerBrand } from '$lib/provider-brand';
   import { providerInfo } from '$lib/providers';
   import Choice from '$lib/components/ui/choice.svelte';
-  import Button from '$lib/components/ui/button.svelte';
 
   let textarea: HTMLTextAreaElement;
   let composing = $state(false);
@@ -83,13 +80,10 @@
 <div class="spotlight-shell" class:compact-quick={compactReading}>
   <header class="spotlight-header" data-tauri-drag-region>
     <div class="spotlight-drag-left" data-tauri-drag-region>
-      <Choice class="spotlight-lang-select" label={t("快速翻译目标语言")} value={app.target} options={languageOptions().map(([code,name]) => [code,code === 'auto' ? t("智能互译") : name])} onchange={value => editText(app.input,app.source,value)}/>
+      <Choice class="spotlight-lang-select" label={t("快速翻译目标语言")} value={app.target} options={languageOptions().map(([code,name]) => [code,code === 'auto' ? t("智能互译") : name])} onchange={value => editText(app.input,app.source,value,false,true)}/>
       <button class="quick-provider" onclick={() => act(call('navigate_main', { route: 'providers' }))}><ProviderIcon brand={providerBrand(app.data!.config.provider,app.data!.config.providers[app.data!.config.provider]?.baseUrl)}/><span>{t(providerInfo(app.data!.config.provider).name)}</span></button>
     </div>
-    <!-- One primary action at the top, followed by the window controls as circular wells. -->
     <div class="spotlight-actions">
-      <Button size="sm" class="quick-translate" disabled={!app.input.trim() || composing || app.data?.text.job.stage === 'translating'} onclick={submit}>{#if app.data?.text.job.stage === 'translating'}<LoaderCircle size={15} class="spin"/>{/if}{t("翻译")}<CornerDownLeft size={14}/></Button>
-      <span class="spotlight-divider" aria-hidden="true"></span>
       <button class="spotlight-icon-btn" aria-label={t("收起")} title={t("收起")} onclick={() => act(call('hide_window'))}><X size={16}/></button>
     </div>
   </header>
@@ -108,18 +102,18 @@
 {#snippet sourceEditor()}
   <div class="spotlight-input-wrap">
     <textarea bind:this={textarea} class="spotlight-textarea" aria-label={t("快速翻译输入")} value={app.input} placeholder={t("输入或粘贴文字…")} spellcheck="false" rows="2"
-      oninput={event => editText(event.currentTarget.value,app.source,app.target,composing)}
-      oncompositionstart={() => { composing = true; editText(app.input,app.source,app.target,true); }}
-      oncompositionend={event => { composing = false; editText(event.currentTarget.value,app.source,app.target,false); }}
-      onblur={() => { if (composing) { composing = false; editText(app.input,app.source,app.target,false); } }}></textarea>
+      oninput={event => editText(event.currentTarget.value,app.source,app.target,composing,true)}
+      oncompositionstart={() => { composing = true; editText(app.input,app.source,app.target,true,true); }}
+      oncompositionend={event => { composing = false; editText(event.currentTarget.value,app.source,app.target,false,true); }}
+      onblur={() => { if (composing) { composing = false; editText(app.input,app.source,app.target,false,true); } }}></textarea>
   </div>
 {/snippet}
 {#snippet targetEditor()}
   <div class="spotlight-output-wrap" aria-live="polite">
     {#if app.data?.text.output}<div class="quick-output-tools"><button class="spotlight-icon-btn" class:copied={copiedToast} aria-label={t("复制译文")} title={t("复制译文")} onclick={() => handleCopy(app.data!.text.output)}>{#if copiedToast}<Check size={15}/>{:else}<Copy size={15}/>{/if}</button></div>
       <div class="spotlight-result"><p class="spotlight-result-text">{app.data.text.output}</p></div>
-    {:else if app.data?.text.job.error}<div class="spotlight-error">{app.data.text.job.error.message}</div>
-    {:else if app.data?.text.job.stage === 'translating'}<div class="spotlight-loading"><LoaderCircle size={18} class="spin"/><span>{t("正在翻译")}</span></div>
+    {:else if app.data?.text.job.error}<div class="spotlight-error"><span>{app.data.text.job.error.message}</span>{#if app.input.trim()}<button class="text-action" onclick={submit}>{t("重试")}</button>{/if}</div>
+    {:else if app.data?.text.job.stage === 'translating'}<div class="spotlight-loading" role="status">{t("正在翻译…")}</div>
     {:else}<span class="quick-output-placeholder">{t("译文")}</span>{/if}
   </div>
 {/snippet}

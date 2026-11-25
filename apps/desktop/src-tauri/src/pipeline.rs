@@ -57,7 +57,7 @@ pub fn schedule_text(app: AppHandle, delay: bool) {
     }
     tauri::async_runtime::spawn(async move {
         if delay {
-            tokio::select! { _ = ticket.stop.cancelled() => return, _ = tokio::time::sleep(Duration::from_millis(500)) => {} }
+            tokio::select! { _ = ticket.stop.cancelled() => return, _ = tokio::time::sleep(Duration::from_millis(350)) => {} }
         }
         let state = app.state::<AppState>();
         if !state.jobs.is_current("text", &ticket) {

@@ -13,7 +13,6 @@ export const paths = {
   "ImagePlus": "M4 4h12a2 2 0 0 1 2 2v14H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM3 16l4-4 4 4 3-3 4 4M20 2v6m-3-3h6M6 8h.01",
   "ArrowRightLeft": "M3 7h17l-4-4M21 17H4l4 4",
   "Copy": "M9 8h9a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3h-7a3 3 0 0 1-3-3v-7a3 3 0 0 1 3-3zM7 16H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3h7a3 3 0 0 1 3 3v1",
-  "CornerDownLeft": "M20 5v8a3 3 0 0 1-3 3H4m5-5-5 5 5 5",
   "X": "M6 6l12 12M18 6 6 18",
   "ArrowUpRight": "M6 18 18 6M7 6h11v11",
   "ArrowRight": "M4 12h16m-6-6 6 6-6 6",

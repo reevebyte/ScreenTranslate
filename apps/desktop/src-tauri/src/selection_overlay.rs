@@ -188,19 +188,24 @@ impl<'a> Canvas<'a> {
             let fy = f64::from(y) + 0.5;
             for x in min_x..max_x {
                 let fx = f64::from(x) + 0.5;
-                if let Some((shadow_alpha, blur, dy)) = style.shadow {
-                    let qx = (fx - cx).abs() - (half_w - r);
-                    let qy = (fy - (cy + dy)).abs() - (half_h - r);
-                    let d_shadow = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r;
-                    if d_shadow > 0.0 && d_shadow < blur {
-                        let t = 1.0 - d_shadow / blur;
-                        self.blend_pixel(x, y, (0, 0, 0), shadow_alpha * t * t);
-                    }
-                }
                 let qx = (fx - cx).abs() - (half_w - r);
                 let qy = (fy - cy).abs() - (half_h - r);
                 let d = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r;
                 let fill_cov = (0.5 - d).clamp(0.0, 1.0);
+                if let Some((shadow_alpha, blur, dy)) = style.shadow {
+                    let outside = 1.0 - fill_cov;
+                    if outside > 0.0 && blur > 0.0 {
+                        let sqy = (fy - (cy + dy)).abs() - (half_h - r);
+                        let d_shadow = qx.max(0.0).hypot(sqy.max(0.0)) + qx.max(sqy).min(0.0) - r;
+                        if d_shadow < blur {
+                            let inset = (blur * 0.4).max(1.0);
+                            let u = ((d_shadow + inset) / (blur + inset)).clamp(0.0, 1.0);
+                            let s = 1.0 - u;
+                            let weight = s * s * (3.0 - 2.0 * s);
+                            self.blend_pixel(x, y, (0, 0, 0), shadow_alpha * weight * outside);
+                        }
+                    }
+                }
                 if fill_cov > 0.0 {
                     self.blend_pixel(
                         x,
@@ -462,7 +467,7 @@ mod platform {
                 Self {
                     pill_fill: (32, 28, 29, 0.92),
                     pill_border: (255, 255, 255, 0.14, scale.max(1.0)),
-                    pill_shadow: (0.32, 16.0 * scale, 5.0 * scale),
+                    pill_shadow: (0.34, 14.0 * scale, 4.0 * scale),
                     icon_rgb: (0xa6, 0x9e, 0xaf),
                     main_bgr: 0x00f0edf3,
                     kbd_fill: (255, 255, 255, 0.12),
@@ -475,7 +480,7 @@ mod platform {
                 Self {
                     pill_fill: (255, 255, 255, 0.92),
                     pill_border: (0, 0, 0, 0.10, scale.max(1.0)),
-                    pill_shadow: (0.14, 16.0 * scale, 5.0 * scale),
+                    pill_shadow: (0.14, 14.0 * scale, 4.0 * scale),
                     icon_rgb: (0x52, 0x52, 0x5b),
                     main_bgr: 0x001b1818,
                     kbd_fill: (0, 0, 0, 0.06),
@@ -1522,5 +1527,38 @@ mod tests {
             },
         );
         canvas.draw_scan_icon(28.0, 28.0, 1.0, (0x52, 0x52, 0x5b));
+    }
+
+    #[test]
+    fn rounded_box_shadow_falls_off_monotonically_below_pill() {
+        let width = 200;
+        let height = 100;
+        let mut buf = vec![255u8; width * height * 4];
+        let mut canvas = Canvas::new(&mut buf, width as i32, height as i32);
+        canvas.draw_rounded_box(
+            (20.0, 16.0, 180.0, 50.0),
+            RoundedBoxStyle {
+                radius: 17.0,
+                fill: (255, 255, 255, 0.92),
+                border: Some((0, 0, 0, 0.10, 1.0)),
+                shadow: Some((0.14, 14.0, 4.0)),
+            },
+        );
+        // Vertically below the pill center (x = 100, y = 51..72): brightness must
+        // stay darker than white near the pill edge and monotonically increase
+        // back to 255 with no hollow bright gap or sudden dark ring at y = 54.
+        let mut prev = buf[(51 * width + 100) * 4];
+        assert!(prev < 245, "shadow should start right below pill: {prev}");
+        for y in 52..72 {
+            let cur = buf[(y * width + 100) * 4];
+            assert!(
+                cur >= prev,
+                "shadow brightness dropped at y={y} ({prev} -> {cur}), indicating a ring artifact"
+            );
+            prev = cur;
+        }
+        assert_eq!(buf[(71 * width + 100) * 4], 255);
+        // Pill interior must remain untouched by the shadow.
+        assert_eq!(buf[(33 * width + 100) * 4], 255);
     }
 }

@@ -49,9 +49,6 @@
     let navigateCleanup: (() => void) | undefined;
     let disposed = false;
     let quitCleanup: (() => void) | undefined;
-    let searchCleanup: (() => void) | undefined;
-    // The global quick-search hotkey shows this window and asks it to open the palette.
-    if (desktop && mode === 'main') void listen('open-command-palette', () => { app.commandOpen = true; }).then(fn => { if (disposed) fn(); else searchCleanup = fn; });
     if (desktop && mode === 'main') void listen('app-quit-requested', async () => {
       try { await flushPendingEdits(); }
       finally { void call('quit_app').catch(() => {}); }
@@ -83,18 +80,11 @@
     const media = matchMedia('(prefers-color-scheme: dark)');
     const themeChange = () => { if (app.data) applyAppearance(app.data.config); };
     media.addEventListener('change', themeChange);
-    return () => { disposed = true; cleanup?.(); navigateCleanup?.(); quitCleanup?.(); searchCleanup?.(); media.removeEventListener('change', themeChange); };
+    return () => { disposed = true; cleanup?.(); navigateCleanup?.(); quitCleanup?.(); media.removeEventListener('change', themeChange); };
   });
-  function keydown(event: KeyboardEvent) {
-    if (mode !== 'main' || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return;
-    if (event.target instanceof Element && event.target.closest('.shortcut-key')) return;
-    if (!app.commandOpen && document.querySelector('[role="dialog"]')) return;
-    event.preventDefault();
-    app.commandOpen = !app.commandOpen;
-  }
 </script>
 
-<svelte:window onkeydown={keydown} oncontextmenu={event => event.preventDefault()}/>
+<svelte:window oncontextmenu={event => event.preventDefault()}/>
 {#if app.fatal}
   <div class="startup-state"><Brand/><h2>{t("无法打开应用")}</h2><p>{app.fatal}</p><Button onclick={() => location.reload()}>{t("重试")}</Button></div>
 {:else if !app.data}
@@ -137,7 +127,6 @@
     </main>
   </div>
   {#if updates.confirm}{#await import('$lib/components/UpdateDialog.svelte') then module}<module.default/>{/await}{/if}
-  {#if app.commandOpen}{#await import('$lib/components/CommandPalette.svelte') then module}<module.default/>{/await}{/if}
   {#if welcome}{#await import('$lib/components/Onboarding.svelte') then module}<module.default bind:open={welcome}/>{/await}{/if}
 {/if}
 <!-- Main window: notices at the top-right, long enough to read the reason. Small windows keep the bottom-centre pill. -->

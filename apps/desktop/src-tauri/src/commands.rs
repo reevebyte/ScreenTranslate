@@ -154,6 +154,7 @@ pub async fn preview_theme(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn set_text(
     app: AppHandle,
     input: String,
@@ -162,6 +163,7 @@ pub async fn set_text(
     composing: bool,
     client_id: String,
     client_revision: u32,
+    auto_translate: Option<bool>,
 ) -> Result<TranslationSession> {
     if input.len() > 100_000
         || client_id.len() > 80
@@ -198,7 +200,8 @@ pub async fn set_text(
         sessions.text.job.stage = JobStage::Idle;
         sessions.text.job.error = None;
     }
-    if !composing && lock(&state.config).auto_translate {
+    let should_auto = auto_translate.unwrap_or_else(|| lock(&state.config).auto_translate);
+    if !composing && should_auto {
         pipeline::schedule_text(app.clone(), true);
     }
     state.publish_text(&app);

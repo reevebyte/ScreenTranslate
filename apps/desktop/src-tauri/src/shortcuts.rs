@@ -18,7 +18,6 @@ pub fn dispatch(app: &AppHandle, action: &str) {
         "toggle" => {
             let _ = windows::toggle_result(app);
         }
-        "search" => windows::open_search(app),
         _ => {}
     }
 }
@@ -67,8 +66,7 @@ fn register(app: &AppHandle, keys: &Hotkeys, best_effort: bool) -> Result<()> {
                     current.wayland_shortcuts
                         && (current.hotkeys.capture != keys.capture
                             || current.hotkeys.toggle != keys.toggle
-                            || current.hotkeys.quick != keys.quick
-                            || current.hotkeys.search != keys.search)
+                            || current.hotkeys.quick != keys.quick)
                 };
                 if should_resync {
                     configure_portal(app.clone(), keys.clone());
@@ -81,7 +79,6 @@ fn register(app: &AppHandle, keys: &Hotkeys, best_effort: bool) -> Result<()> {
         ("capture", &keys.capture),
         ("toggle", &keys.toggle),
         ("quick", &keys.quick),
-        ("search", &keys.search),
     ];
     let mut invalid = Vec::new();
     let mut parsed = Vec::new();
@@ -152,7 +149,6 @@ fn gnome_bindings(keys: &Hotkeys, best_effort: bool) -> Result<(Vec<GnomeBinding
         ("capture", "ScreenTranslate 框选翻译", &keys.capture),
         ("toggle", "ScreenTranslate 收起显示", &keys.toggle),
         ("quick", "ScreenTranslate 快速文字翻译", &keys.quick),
-        ("search", "ScreenTranslate 快速查找", &keys.search),
     ];
     let mut parsed = Vec::new();
     let mut invalid = Vec::new();
@@ -280,7 +276,6 @@ fn sync_gnome_shortcuts(bindings: &[GnomeBinding]) -> bool {
         let argument = match binding.action {
             "capture" => "--capture",
             "toggle" => "--toggle-result",
-            "search" => "--search",
             _ => "--quick",
         };
         let command = gnome_command(&executable, argument);
@@ -486,7 +481,6 @@ fn hyprland_bindings(
         ("capture", &keys.capture),
         ("toggle", &keys.toggle),
         ("quick", &keys.quick),
-        ("search", &keys.search),
     ];
     let mut parsed = Vec::new();
     let mut invalid = Vec::new();
@@ -598,7 +592,6 @@ fn sync_hyprland_shortcuts(app: &AppHandle, bindings: &[HyprlandBinding]) -> boo
         let argument = match binding.action {
             "capture" => "--capture",
             "toggle" => "--toggle-result",
-            "search" => "--search",
             _ => "--quick",
         };
         let command = format!("{executable} {argument}");
@@ -864,13 +857,12 @@ mod tests {
         let keys = Hotkeys {
             capture: "Ctrl+Alt+Q".into(),
             toggle: "Ctrl+UnknownKey".into(),
-            quick: String::new(),
-            search: "Ctrl+Alt+K".into(),
+            quick: "Ctrl+Alt+Space".into(),
         };
         let (bindings, invalid) = gnome_bindings(&keys, true).unwrap();
         assert_eq!(bindings.len(), 2);
         assert_eq!(bindings[0].action, "capture");
-        assert_eq!(bindings[1].action, "search");
+        assert_eq!(bindings[1].action, "quick");
         assert_eq!(invalid, vec!["Ctrl+UnknownKey"]);
         assert!(gnome_bindings(&keys, false).is_err());
     }

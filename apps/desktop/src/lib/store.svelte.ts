@@ -15,7 +15,6 @@ export const app = $state({
   settingsTab: 'general',
   fatal: '',
   input: '', source: 'auto', target: 'auto',
-  commandOpen: false,
   configSaving: false,
   configPending: false,
   configError: '',
@@ -107,13 +106,15 @@ export async function initialize(): Promise<() => void> {
   return () => cleanup.forEach(fn => fn());
 }
 
-export function editText(input: string, source = app.source, target = app.target, composing = false) {
+export function editText(input: string, source = app.source, target = app.target, composing = false, autoTranslate?: boolean) {
   app.input = input; app.source = source; app.target = target;
   if (app.data) { app.data.text.output = ''; app.data.text.job = { ...app.data.text.job, stage: 'idle', error: null }; }
   if (!desktop) return;
   const revision = ++localRevision;
   pendingRevision = revision;
-  latestSync = call<TranslationSession>('set_text', { input, source, target, composing, clientId, clientRevision: revision })
+  const args: Record<string, unknown> = { input, source, target, composing, clientId, clientRevision: revision };
+  if (autoTranslate !== undefined) args.autoTranslate = autoTranslate;
+  latestSync = call<TranslationSession>('set_text', args)
     .then(session => { if (revision === localRevision) pendingRevision = 0; applySession(session); })
     .catch(error => { if (revision === localRevision) pendingRevision = 0; toast.error(errorMessage(error)); });
 }

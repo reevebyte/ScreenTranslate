@@ -2,7 +2,7 @@
   import { t } from '$lib/i18n.svelte';
   import { onDestroy, untrack } from 'svelte';
   import { toast } from 'svelte-sonner';
-  import { ScanLine, PanelTop, Languages, ArrowRight, Search } from '$lib/icons';
+  import { ScanLine, PanelTop, Languages, ArrowRight } from '$lib/icons';
   import { app, previewConfig, restoreSavedConfig, saveConfig, act, registerFlush } from '$lib/store.svelte';
   import { call } from '$lib/api';
   import { createAutosave } from '$lib/autosave';
@@ -52,7 +52,7 @@
     }
     return false;
   });
-  const actions = $derived([ ['capture',t("框选翻译"),ScanLine,'begin_capture'], ['toggle',t("收起 / 显示"),PanelTop,'toggle_result'], ['quick',t("快速文字翻译"),Languages,'toggle_quick'], ['search',t("快速查找"),Search,''] ] as const);
+  const actions = $derived([ ['capture',t("框选翻译"),ScanLine,'begin_capture'], ['toggle',t("收起 / 显示"),PanelTop,'toggle_result'], ['quick',t("快速文字翻译"),Languages,'toggle_quick'] ] as const);
   function queue() { const json = JSON.stringify(draft); if (json === last) return; last = json; const value = structuredClone($state.snapshot(draft)); previewConfig(value); writer.schedule(value); }
   $effect(() => { JSON.stringify(draft); untrack(queue); });
   const stopFlush = registerFlush(() => { queue(); return writer.flush(); });
@@ -73,7 +73,7 @@
 <div class="shortcut-workspace">
   <div class="shortcut-cluster"><div class="shortcut-actions shortcut-grid">{#each actions as [key,label,Icon,command]}
     <div class="shortcut-action" class:primary={key === 'capture'} class:conflict={!!conflict[key]}>
-      <button class="shortcut-launch" aria-label={label} onclick={() => { if (key === 'search') app.commandOpen = true; else void act(call(command, command === 'begin_capture' ? { monitor: null } : {})); }}><span class="shortcut-symbol"><Icon size={25}/></span><span>{label}</span></button>
+      <button class="shortcut-launch" aria-label={label} onclick={() => { void act(call(command, command === 'begin_capture' ? { monitor: null } : {})); }}><span class="shortcut-symbol"><Icon size={25}/></span><span>{label}</span></button>
       <div class="shortcut-binding"><div class="shortcut-chord" aria-hidden="true">{#if draft.hotkeys[key]}{#each formatHotkeyParts(draft.hotkeys[key], isMac) as part}<kbd>{part}</kbd>{/each}{:else}<span>{t("设置快捷键")}</span>{/if}</div><input class="shortcut-key" aria-label={t("{0}快捷键",label)} title={t("点击后按组合键，Backspace 清除")} readonly value={draft.hotkeys[key]} onkeydown={event => record(event,key)}/></div>
     </div>
   {/each}</div>

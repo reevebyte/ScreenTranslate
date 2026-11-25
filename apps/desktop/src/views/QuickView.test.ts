@@ -11,6 +11,7 @@ import QuickView from './QuickView.svelte';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  call.mockResolvedValue(undefined);
   listen.mockImplementation(async (_name: string, callback: () => void) => { focusInput.current = callback; return vi.fn(); });
   app.data = previewBootstrap();
   app.input = 'Selected source';
@@ -44,6 +45,34 @@ it('copies the translation with Ctrl+C outside the text editor', async () => {
   await waitFor(() => expect(call).toHaveBeenCalledWith('copy_text', { text: '译文' }));
 });
 
+it('omits the translate button and live-translates on input with quiet status text', async () => {
+  app.data!.text.output = '';
+  app.data!.text.job.stage = 'translating';
+  const view = render(QuickView);
+  expect(view.queryByRole('button', { name: /^翻译$/ })).toBeNull();
+  expect(view.container.querySelector('.quick-translate')).toBeNull();
+  const status = view.getByRole('status');
+  expect(status.textContent).toBe('正在翻译…');
+  expect(status.querySelector('svg')).toBeNull();
+
+  const input = view.getByLabelText('快速翻译输入') as HTMLTextAreaElement;
+  await fireEvent.input(input, { target: { value: 'hello world' } });
+  expect(call).toHaveBeenCalledWith('set_text', expect.objectContaining({
+    input: 'hello world',
+    composing: false,
+    autoTranslate: true,
+  }));
+});
+
+it('offers an inline retry button when translation fails', async () => {
+  app.data!.text.output = '';
+  app.data!.text.job.stage = 'error';
+  app.data!.text.job.error = { code: 'network', message: '网络请求失败', action: null };
+  const view = render(QuickView);
+  await fireEvent.click(view.getByRole('button', { name: '重试' }));
+  await waitFor(() => expect(call).toHaveBeenCalledWith('translate_text', { revision: app.data!.text.revision }));
+});
+
 it('keeps only the copy action on the translation without a separate reading dialog', () => {
   const view = render(QuickView);
   expect(view.queryByRole('button', { name: '阅读' })).toBeNull();
@@ -63,7 +92,6 @@ it('uses readable tabs in a small large-font window and keeps tab Enter out of t
   await fireEvent.click(target);
   expect(view.getByRole('tabpanel', { name: '译文' }).textContent).toContain('译文');
 });
-
 
 it('returns to the source and focuses it when the native focus-input event reopens a compact tool', async () => {
   vi.stubGlobal('innerHeight', 260);

@@ -44,28 +44,25 @@ it('names a taken hotkey in the shared notice, outlines its row and keeps the wo
   expect(field.closest('.shortcut-action')?.classList.contains('conflict')).toBe(false);
 });
 
-it('lists quick search with its default hotkey and opens the palette from the row', async () => {
-  app.data!.config.hotkeys.search = 'Ctrl+Alt+K';
-  app.commandOpen = false;
+it('shows only the three core shortcut actions without quick search', () => {
   const view = render(ShortcutsView);
-  const row = view.getByRole('button', { name: '快速查找' }).closest('.shortcut-action')!;
-  expect([...row.querySelectorAll('kbd')].map(node => node.textContent)).toEqual(['Ctrl', 'Alt', 'K']);
-  await fireEvent.click(view.getByRole('button', { name: '快速查找' }));
-  expect(app.commandOpen).toBe(true);
-  expect(call).not.toHaveBeenCalledWith('begin_capture', expect.anything());
+  expect(view.getByRole('button', { name: '框选翻译' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '收起 / 显示' })).toBeTruthy();
+  expect(view.getByRole('button', { name: '快速文字翻译' })).toBeTruthy();
+  expect(view.queryByRole('button', { name: '快速查找' })).toBeNull();
 });
 
 it('says when a hotkey duplicates another action instead of blaming another app', async () => {
   call.mockImplementation(async (command, args) => {
     if (command !== 'save_config') return;
-    if (args.config.hotkeys.search === 'Ctrl+Alt+Q') throw { code: 'configuration', message: '快捷键 Ctrl+Alt+Q 已用于其他操作', action: 'hotkeys' };
+    if (args.config.hotkeys.quick === 'Ctrl+Alt+Q') throw { code: 'configuration', message: '快捷键 Ctrl+Alt+Q 已用于其他操作', action: 'hotkeys' };
     return args.config;
   });
-  app.data!.config.hotkeys.search = 'Ctrl+Alt+K';
+  app.data!.config.hotkeys.quick = 'Ctrl+Alt+Space';
   const view = render(ShortcutsView);
-  await fireEvent.keyDown(view.getByLabelText('快速查找快捷键'), { key: 'q', code: 'KeyQ', ctrlKey: true, altKey: true });
-  await waitFor(() => expect(toast.warning).toHaveBeenCalledWith('Ctrl + Alt + Q 已用于其他操作，已恢复原快捷键', { id: 'hotkey-search' }));
-  await waitFor(() => expect(app.data!.config.hotkeys.search).toBe('Ctrl+Alt+K'));
+  await fireEvent.keyDown(view.getByLabelText('快速文字翻译快捷键'), { key: 'q', code: 'KeyQ', ctrlKey: true, altKey: true });
+  await waitFor(() => expect(toast.warning).toHaveBeenCalledWith('Ctrl + Alt + Q 已用于其他操作，已恢复原快捷键', { id: 'hotkey-quick' }));
+  await waitFor(() => expect(app.data!.config.hotkeys.quick).toBe('Ctrl+Alt+Space'));
 });
 
 it('localizes taken hotkey conflict notices in English UI mode', async () => {

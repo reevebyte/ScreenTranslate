@@ -71,11 +71,7 @@ export type LocalOcrInstallState = "not_installed" | "downloading" | "ready" | "
 
 export type LocalOcrStatus = { supported: boolean, state: LocalOcrInstallState, modelVersion: string, installedBytes: number, downloadedBytes: number, totalBytes: number | null, workerRunning: boolean, error: string | null, };
 
-export type Hotkeys = { capture: string, toggle: string, quick: string, 
-/**
- * Opens the main window's quick search (command palette).
- */
-search: string, };
+export type Hotkeys = { capture: string, toggle: string, quick: string, };
 
 export type Appearance = { theme: Theme, accent: string, fontScale: number, autoCopy: boolean, closeToTray: boolean, };
 
